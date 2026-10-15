@@ -199,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "bad sync token"}, 401)
         if path == "/agent/ping":
             return self.send_json({"ok": True, "time": time.time()})
+        if path == "/agent/stats" and method == "GET":
+            return self.send_json(store.agent_stats())
         if path == "/agent/state" and method == "GET":
             return self.send_json(store.get_alt(q.get("company", "")))
         if path == "/agent/heartbeat" and method == "POST":

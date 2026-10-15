@@ -797,3 +797,14 @@ def sync_check(cid):
         months = _rows(c, """SELECT substr(date,1,7) m, COUNT(*) n, SUM(CASE WHEN base='Sales' THEN 1 ELSE 0 END) sales
             FROM voucher WHERE company_id=? GROUP BY m ORDER BY m DESC""", (cid,))
     return {"unbalanced": len(rows), "groups": out, "types": counts, "months": months}
+
+
+def agent_stats():
+    """Counts only (no names of parties or amounts) for the diagnostic tool on the Tally PC."""
+    with conn() as c:
+        out = []
+        for co in _rows(c, "SELECT id, name, from_date, to_date, keep_from, last_sync FROM company"):
+            co["months"] = _rows(c, """SELECT substr(date,1,7) m, COUNT(*) n FROM voucher WHERE company_id=?
+                GROUP BY m ORDER BY m""", (co["id"],))
+            out.append(co)
+        return {"companies": out}

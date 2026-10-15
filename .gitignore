@@ -2,3 +2,4 @@ __pycache__/
 dist/
 agent/TallySync.config.json
 agent/TallySync.log*
+agent/Bahi-Diagnosis.txt
