@@ -229,6 +229,8 @@ def xml_voucher(v):
     flags = ("<ISCANCELLED>Yes</ISCANCELLED>" if v.get("cancelled") else "<ISCANCELLED>No</ISCANCELLED>") + \
             ("<ISOPTIONAL>Yes</ISOPTIONAL>" if v.get("optional") else "")
     nar = escape(v.get("narration", "")).replace("\r\n", "&#13;&#10;")
+    if v["kind"] == "sales" and v["date"] >= date(2026, 4, 1) and int(v["no"].split("/")[-1]) % 7 == 0:
+        nar += " Thank you &#55357;&#56842; &#xD83D;&#xDE4F; &#65535;"   # emoji as Tally writes them (surrogate pairs)
     head = (f'<TALLYMESSAGE xmlns:UDF="TallyUDF"><VOUCHER REMOTEID="{v["guid"]}" VCHTYPE="{escape(v["type"])}" '
             f'ACTION="Create" OBJVIEW="{"Invoice Voucher View" if v["kind"] != "acct" else "Accounting Voucher View"}">'
             f'<DATE>{dt}</DATE><GUID>{v["guid"]}</GUID><NARRATION>{nar}</NARRATION>'

@@ -7,14 +7,26 @@ import re
 import xml.etree.ElementTree as ET
 
 _BAD_REF = re.compile(r"&#(x[0-9a-fA-F]+|\d+);")
-_BAD_RAW = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+_PAIR = re.compile(r"&#(x[0-9a-fA-F]+|\d+);&#(x[0-9a-fA-F]+|\d+);")
+_BAD_RAW = re.compile("[\x00-\x08\x0B\x0C\x0E-\x1F\ud800-\udfff\ufffe\uffff]")
 _NUM = re.compile(r"-?\d[\d,]*\.?\d*|-?\.\d+")
 
 
+def _ref_num(s):
+    return int(s[1:], 16) if s[0] in "xX" else int(s)
+
+
+def _join_pair(m):
+    """Tally writes emoji as two UTF-16 halves (&#55357;&#56842;); XML needs the single real character."""
+    hi, lo = _ref_num(m.group(1)), _ref_num(m.group(2))
+    if 0xD800 <= hi <= 0xDBFF and 0xDC00 <= lo <= 0xDFFF:
+        return "&#%d;" % (0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00))
+    return m.group(0)
+
+
 def _fix_ref(m):
-    s = m.group(1)
-    n = int(s[1:], 16) if s[0] in "xX" else int(s)
-    if n < 32 and n not in (9, 10, 13):
+    n = _ref_num(m.group(1))
+    if (n < 32 and n not in (9, 10, 13)) or 0xD800 <= n <= 0xDFFF or n in (0xFFFE, 0xFFFF) or n > 0x10FFFF:
         return ""
     return m.group(0)
 
@@ -23,9 +35,10 @@ def decode(raw: bytes) -> str:
     if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
         text = raw.decode("utf-16")
     elif len(raw) > 4 and raw[1:2] == b"\x00" and raw[3:4] == b"\x00":
-        text = raw.decode("utf-16-le")
+        text = raw.decode("utf-16-le", errors="replace")
     else:
         text = raw.decode("utf-8-sig", errors="replace")
+    text = _PAIR.sub(_join_pair, text)
     text = _BAD_REF.sub(_fix_ref, text)
     return _BAD_RAW.sub("", text)
 
@@ -34,7 +47,13 @@ def parse_xml(raw: bytes) -> ET.Element:
     text = decode(raw)
     # ElementTree refuses an encoding declaration on an already-decoded str
     text = re.sub(r"^\s*<\?xml[^>]*\?>", "", text)
-    return ET.fromstring(text)
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError:
+        # last resort: drop every character reference and stray ampersand, keep the rest of the data
+        text = re.sub(r"&#(x[0-9a-fA-F]+|\d+);", "", text)
+        text = re.sub(r"&(?!(amp|lt|gt|quot|apos);)", "&amp;", text)
+        return ET.fromstring(text)
 
 
 def num(text) -> float:

@@ -107,11 +107,28 @@ function VchCollection-Xml([string]$company, [datetime]$from, [datetime]$to, [st
 function Parse-Xml([byte[]]$raw) {
     try {
         $text = [System.Text.Encoding]::UTF8.GetString($raw)
-        $eval = [System.Text.RegularExpressions.MatchEvaluator]{ param($m) if ([int]$m.Groups[1].Value -lt 32) { "" } else { $m.Value } }
-        $text = [regex]::Replace($text, '&#([0-9]+);', $eval)
-        $text = [regex]::Replace($text, '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')
+        # drop character references Windows' XML reader rejects (control codes, emoji halves)
+        $eval = [System.Text.RegularExpressions.MatchEvaluator]{ param($m)
+            $s = $m.Groups[1].Value
+            $n = if ($s.StartsWith("x") -or $s.StartsWith("X")) { [Convert]::ToInt64($s.Substring(1), 16) } else { [int64]$s }
+            if (($n -lt 32 -and $n -ne 9 -and $n -ne 10 -and $n -ne 13) -or ($n -ge 0xD800 -and $n -le 0xDFFF) -or $n -eq 0xFFFE -or $n -eq 0xFFFF -or $n -gt 0x10FFFF) { "" } else { $m.Value }
+        }
+        $text = [regex]::Replace($text, '&#(x[0-9a-fA-F]+|[0-9]+);', $eval)
+        $text = [regex]::Replace($text, '[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]', '')
         return [xml]$text
     } catch { return $null }
+}
+
+# Counting without an XML reader - used if a reply can't be parsed, so data is never dropped for that reason
+function Count-Vouchers-Text([byte[]]$raw, [datetime]$from, [datetime]$to) {
+    $t = [System.Text.Encoding]::UTF8.GetString($raw)
+    $r = [pscustomobject]@{ Ok = $true; In = 0; Out = 0; Entries = ($t -match 'LEDGERENTRIES\.LIST') }
+    $f = $from.ToString("yyyy-MM-dd"); $e = $to.ToString("yyyy-MM-dd")
+    foreach ($m in [regex]::Matches($t, '<VOUCHER[ >][\s\S]*?<DATE[^>]*>([^<]+)</DATE>')) {
+        $d = Iso-Date $m.Groups[1].Value
+        if ($d -and $d -ge $f -and $d -le $e) { $r.In++ } else { $r.Out++ }
+    }
+    return $r
 }
 
 function Iso-Date([string]$s) {
@@ -127,7 +144,7 @@ function Iso-Date([string]$s) {
 function Check-Vouchers([byte[]]$raw, [datetime]$from, [datetime]$to) {
     $x = Parse-Xml $raw
     $r = [pscustomobject]@{ Ok = $false; In = 0; Out = 0; Entries = $false }
-    if (-not $x) { return $r }
+    if (-not $x) { return (Count-Vouchers-Text $raw $from $to) }
     $f = $from.ToString("yyyy-MM-dd"); $t = $to.ToString("yyyy-MM-dd")
     foreach ($v in $x.SelectNodes("//VOUCHER")) {
         $dn = $v.SelectSingleNode("DATE")

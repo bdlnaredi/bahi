@@ -233,6 +233,7 @@ class Handler(BaseHTTPRequestHandler):
     def commit(self, d, meta):
         parts = {"groups": [], "vtypes": [], "ledgers": [], "stock": [], "daybook": [],
                  "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}}
+        skipped = []
         extra_fns = {"company": tp.parse_company_info, "ledger_x": tp.parse_ledger_extra, "stock_x": tp.parse_stock_extra}
         fns = {"groups": tp.parse_groups, "vtypes": tp.parse_vtypes, "ledgers": tp.parse_ledgers,
                "stock": tp.parse_stock, "daybook": tp.parse_vouchers}
@@ -252,7 +253,13 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # report not available in this Tally - fall back to vouchers
                     print("bill report not usable:", e, file=sys.stderr)
                 continue
-            parts[kind] += fns[kind](tp.parse_xml(raw))
+            try:
+                parts[kind] += fns[kind](tp.parse_xml(raw))
+            except Exception as e:
+                if kind != "daybook":
+                    raise
+                skipped.append(str(e)[:200])
+                print("voucher part skipped:", e, file=sys.stderr)
         if not parts["ledgers"]:
             raise ValueError("No ledgers received - is the right company open in Tally?")
         seen, vouchers = set(), []
@@ -262,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             seen.add(key)
             vouchers.append(v)
+        if skipped:
+            raise ValueError("Some voucher data from Tally could not be read: " + skipped[0])
         return store.ingest(meta["company"], meta["from"], meta["to"], meta.get("alt_vch", ""),
                             meta.get("alt_mst", ""), parts["groups"], parts["vtypes"],
                             parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"],
