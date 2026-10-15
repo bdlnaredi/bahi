@@ -19,7 +19,8 @@ GROUPS = [  # name, parent
     ("Mumbai Debtors", "Sundry Debtors"),
 ]
 VTYPES = [("Sales", ""), ("Purchase", ""), ("Receipt", ""), ("Payment", ""), ("Journal", ""), ("Contra", ""),
-          ("Credit Note", ""), ("Debit Note", ""), ("GST Sales", "Sales")]
+          ("Credit Note", ""), ("Debit Note", ""), ("GST Sales", "Sales"),
+          ("Stock Journal", ""), ("Sales Order", ""), ("Memorandum", "")]
 
 DEBTORS = [("Sharma & Sons", "Sundry Debtors", 45000), ("Gupta Hardware", "Sundry Debtors", 0),
            ("Patel Enterprises", "Mumbai Debtors", 120000), ("Shree Ganesh Traders", "Sundry Debtors", 0),
@@ -116,6 +117,15 @@ def make_vouchers():
                "ledgers": [("Rent", 99999.0), ("Cash", -99999.0)], "cancelled": True})
     vs.append({"kind": "acct", "date": date(2026, 6, 11), "type": "Journal", "no": "X2", "party": "Rent",
                "ledgers": [("Rent", 77777.0), ("Cash", -77777.0)], "optional": True})
+    # vouchers outside the books: stock journal, sales order, memorandum; and one broken journal
+    vs.append({"kind": "sj", "date": date(2026, 7, 3), "type": "Stock Journal", "no": "SJ1", "party": "",
+               "out": [("PVC Pipe 2 inch", 5, "Nos", 210.0, 1050.0)], "in": [("PVC Pipe 1 inch", 8, "Nos", 131.25, 1050.0)], "ledgers": []})
+    vs.append({"kind": "order", "date": date(2026, 8, 9), "type": "Sales Order", "no": "SO1", "party": "Gupta Hardware",
+               "items": [("Primer 4L", 30, "Nos", 800.0, 24000.0)], "ledgers": [], "nonposting": True})
+    vs.append({"kind": "acct", "date": date(2026, 8, 10), "type": "Memorandum", "no": "M1", "party": "Rent",
+               "ledgers": [("Rent", 5555.0), ("Cash", -5555.0)], "nonposting": True})
+    vs.append({"kind": "acct", "date": date(2026, 9, 2), "type": "Journal", "no": "BAD1", "party": "Rent",
+               "ledgers": [("Rent", 1000.0), ("Cash", -900.0)], "narration": "deliberately broken"})
     for i, v in enumerate(vs):
         v["guid"] = f"guid-{i:05d}"
     assign_bills(vs)
@@ -180,7 +190,7 @@ def ledger_lines(v):
 
 
 def live(v):
-    return not v.get("cancelled") and not v.get("optional")
+    return not v.get("cancelled") and not v.get("optional") and not v.get("nonposting")
 
 
 def closing_balances(to):
@@ -238,7 +248,16 @@ def xml_voucher(v):
         return "".join(f"<BILLALLOCATIONS.LIST><NAME>{escape(r)}</NAME><BILLTYPE>{t}</BILLTYPE>"
                        f"{f'<BILLCREDITPERIOD JD=\"0\" P=\"{dd} Days\">{dd} Days</BILLCREDITPERIOD>' if dd else ''}"
                        f"<AMOUNT>{amt(a)}</AMOUNT></BILLALLOCATIONS.LIST>" for r, t, a, dd in v.get("billalloc", []))
-    if v["kind"] == "acct":
+    if v["kind"] == "sj":
+        for tag, rows, sign in (("INVENTORYENTRIESOUT.LIST", v["out"], -1), ("INVENTORYENTRIESIN.LIST", v["in"], 1)):
+            for name, q, unit, rate, a in rows:
+                body += (f"<{tag}><STOCKITEMNAME>{escape(name)}</STOCKITEMNAME><RATE>{rate:.2f}/{unit}</RATE>"
+                         f"<AMOUNT>{amt(sign * a)}</AMOUNT><ACTUALQTY> {q} {unit}</ACTUALQTY></{tag}>")
+    elif v["kind"] == "order":
+        for name, q, unit, rate, a in v["items"]:
+            body += (f"<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>{escape(name)}</STOCKITEMNAME><ISDEEMEDPOSITIVE>No</ISDEEMEDPOSITIVE>"
+                     f"<RATE>{rate:.2f}/{unit}</RATE><AMOUNT>{a:.2f}</AMOUNT><ACTUALQTY> {q} {unit}</ACTUALQTY></ALLINVENTORYENTRIES.LIST>")
+    elif v["kind"] == "acct":
         for ln, a in v["ledgers"]:
             body += (f"<ALLLEDGERENTRIES.LIST><LEDGERNAME>{escape(ln)}</LEDGERNAME>"
                      f"<ISDEEMEDPOSITIVE>{'Yes' if a > 0 else 'No'}</ISDEEMEDPOSITIVE>"

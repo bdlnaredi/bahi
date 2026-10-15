@@ -9,7 +9,7 @@ from datetime import date, timedelta
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", "/data"), "tally.db")
 _lock = threading.Lock()
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS stock(
 CREATE TABLE IF NOT EXISTS voucher(
   id INTEGER PRIMARY KEY, company_id INT, guid TEXT, date TEXT, vtype TEXT, base TEXT,
   number TEXT, party TEXT, narration TEXT, amount REAL, balanced INT, reference TEXT, party_gstin TEXT,
-  extra TEXT DEFAULT '{}');
+  extra TEXT DEFAULT '{}', posting INT DEFAULT 1, imbalance REAL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS ix_v_date ON voucher(company_id, date);
 CREATE TABLE IF NOT EXISTS vline(voucher_id INT, ledger TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_vl_l ON vline(ledger, voucher_id);
@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS vitem(voucher_id INT, item TEXT, qty REAL, unit TEXT,
   hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS ix_vi_i ON vitem(item, voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vi_v ON vitem(voucher_id);
+CREATE TABLE IF NOT EXISTS vline_np(voucher_id INT, ledger TEXT, amount REAL);
+CREATE INDEX IF NOT EXISTS ix_vlnp_v ON vline_np(voucher_id);
+CREATE TABLE IF NOT EXISTS vitem_np(voucher_id INT, item TEXT, qty REAL, unit TEXT, rate REAL, amount REAL,
+  hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '');
+CREATE INDEX IF NOT EXISTS ix_vinp_v ON vitem_np(voucher_id);
 CREATE TABLE IF NOT EXISTS vbill(voucher_id INT, ledger TEXT, name TEXT, btype TEXT, amount REAL, days INT);
 CREATE INDEX IF NOT EXISTS ix_vb_v ON vbill(voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vb_l ON vbill(ledger);
@@ -52,6 +57,12 @@ BASE_TYPES = {"Sales", "Purchase", "Receipt", "Payment", "Journal", "Contra",
               "Receipt Note", "Rejections In", "Rejections Out", "Physical Stock",
               "Material In", "Material Out", "Sales Order", "Purchase Order", "Memorandum",
               "Reversing Journal", "Payroll", "Attendance", "Job Work In Order", "Job Work Out Order"}
+
+
+# Vouchers Tally keeps out of the books (they never change ledger balances) and out of stock
+NO_ACCOUNTS = {"Sales Order", "Purchase Order", "Memorandum", "Reversing Journal", "Job Work In Order",
+               "Job Work Out Order", "Attendance"}
+NO_STOCK = NO_ACCOUNTS | {"Physical Stock"}
 
 
 def conn():
@@ -153,25 +164,30 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             for s in stock])
 
         old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
-        for t in ("vline", "vitem", "vbill"):
+        for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
             c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, d_from, d_to))
         c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, d_from, d_to))
         unbalanced = 0
         for v in vouchers:
             if not (d_from <= v["date"] <= d_to):
                 continue
-            unbalanced += 0 if v["balanced"] else 1
+            base = bases.get(v["vtype"], v["vtype"])
+            posting = base not in NO_ACCOUNTS
+            if posting and not v["balanced"]:
+                unbalanced += 1
             vid = c.execute(
                 "INSERT INTO voucher(company_id,guid,date,vtype,base,number,party,narration,amount,balanced,"
-                "reference,party_gstin,extra) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (cid, v["guid"], v["date"], v["vtype"], bases.get(v["vtype"], v["vtype"]), v["number"],
-                 v["party"], v["narration"], v["amount"], 1 if v["balanced"] else 0,
-                 v.get("reference", ""), v.get("party_gstin", ""), json.dumps(v.get("extra", {})))).lastrowid
+                "reference,party_gstin,extra,posting,imbalance) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (cid, v["guid"], v["date"], v["vtype"], base, v["number"],
+                 v["party"], v["narration"], v["amount"], 1 if (v["balanced"] or not posting) else 0,
+                 v.get("reference", ""), v.get("party_gstin", ""), json.dumps(v.get("extra", {})),
+                 1 if posting else 0, v.get("imbalance", 0))).lastrowid
             agg = {}
             for ln, a in v["lines"]:
                 agg[ln] = agg.get(ln, 0) + a
-            c.executemany("INSERT INTO vline VALUES(?,?,?)", [(vid, ln, round(a, 2)) for ln, a in agg.items()])
-            c.executemany("INSERT INTO vitem VALUES(?,?,?,?,?,?,?,?,?)",
+            c.executemany(f"INSERT INTO {'vline' if posting else 'vline_np'} VALUES(?,?,?)",
+                          [(vid, ln, round(a, 2)) for ln, a in agg.items()])
+            c.executemany(f"INSERT INTO {'vitem_np' if base in NO_STOCK else 'vitem'} VALUES(?,?,?,?,?,?,?,?,?)",
                           [(vid, i["item"], i["qty"], i["unit"], i["rate"], i["amount"],
                             i.get("hsn") or stock_x.get(i["item"], {}).get("hsn", ""), i.get("disc", 0), i.get("descr", ""))
                            for i in v["items"]])
@@ -532,8 +548,9 @@ def voucher(cid, vid):
             return None
         v = dict(v)
         lines = _rows(c, """SELECT vl.ledger, vl.amount, l.chain, l.taxtype, l.gst_head, l.name
-            FROM vline vl LEFT JOIN ledger l ON l.company_id=? AND l.name=vl.ledger
-            WHERE vl.voucher_id=? ORDER BY ABS(vl.amount) DESC""", (cid, vid))
+            FROM (SELECT * FROM vline WHERE voucher_id=? UNION ALL SELECT * FROM vline_np WHERE voucher_id=?) vl
+            LEFT JOIN ledger l ON l.company_id=? AND l.name=vl.ledger
+            ORDER BY ABS(vl.amount) DESC""", (vid, vid, cid))
         for ln in lines:
             chain = ln.pop("chain") or ""
             ln["cashbank"] = any(g in chain for g in ("|Bank Accounts|", "|Cash-in-Hand|", "|Bank OD A/c|"))
@@ -560,7 +577,8 @@ def voucher(cid, vid):
             pinfo["gstin"] = party["gstin"] or pinfo.get("gstin", "")
         return {"company": crow["name"], "company_info": json.loads(crow["info"] or "{}"), "bank": bank,
                 "voucher": v, "lines": lines,
-                "items": _rows(c, "SELECT item, qty, unit, rate, amount, hsn, disc, descr FROM vitem WHERE voucher_id=?", (vid,)),
+                "items": _rows(c, """SELECT item, qty, unit, rate, amount, hsn, disc, descr FROM vitem WHERE voucher_id=?
+                    UNION ALL SELECT item, qty, unit, rate, amount, hsn, disc, descr FROM vitem_np WHERE voucher_id=?""", (vid, vid)),
                 "bills": [dict(b, vid=(c.execute("""SELECT v.id FROM vbill x JOIN voucher v ON v.id=x.voucher_id
                     WHERE v.company_id=? AND x.ledger=? AND x.name=? AND x.btype='New Ref' AND v.id<>? LIMIT 1""",
                     (cid, b["ledger"], b["name"], vid)).fetchone() or {"id": None})["id"])
@@ -666,3 +684,22 @@ def profit_loss(cid, d_from=None, d_to=None):
         net = gross + sec["Indirect Incomes"]["total"] - sec["Indirect Expenses"]["total"]
         return {"from": f, "to": t, "sections": sec, "opening_stock": st["o"], "closing_stock": st["cl"],
                 "gross_profit": round(gross, 2), "net_profit": round(net, 2)}
+
+
+def sync_check(cid):
+    """Vouchers whose debits and credits did not add up, grouped by voucher type."""
+    with conn() as c:
+        rows = _rows(c, """SELECT id, date, vtype, number, party, imbalance FROM voucher
+            WHERE company_id=? AND balanced=0 ORDER BY vtype, date DESC""", (cid,))
+        counts = _rows(c, """SELECT vtype, COUNT(*) n FROM voucher WHERE company_id=? GROUP BY vtype ORDER BY n DESC""", (cid,))
+    groups = {}
+    for r in rows:
+        g = groups.setdefault(r["vtype"], {"vtype": r["vtype"], "count": 0, "examples": []})
+        g["count"] += 1
+        if len(g["examples"]) < 8:
+            g["examples"].append(r)
+    total = {x["vtype"]: x["n"] for x in counts}
+    out = sorted(groups.values(), key=lambda g: -g["count"])
+    for g in out:
+        g["of"] = total.get(g["vtype"], 0)
+    return {"unbalanced": len(rows), "groups": out, "types": counts}

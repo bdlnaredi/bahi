@@ -302,7 +302,7 @@ foreach ($co in $companies) {
         $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
         Log ("Done: " + $res.ledgers + " ledgers, " + $res.stock + " stock items, " + $res.vouchers +
              " vouchers in $secs s") "Green"
-        if ($res.unbalanced -gt 0) { Log ("Warning: " + $res.unbalanced + " vouchers did not balance - tell Claude") "Yellow" }
+        if ($res.unbalanced -gt 0) { Log ("Warning: " + $res.unbalanced + " vouchers did not balance - see Reports, Sync check in the app") "Yellow" }
     } catch {
         $exitCode = 1
         $detail = $_.Exception.Message

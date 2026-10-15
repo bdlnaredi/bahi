@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "1.5";
+const APP_VERSION = "1.6";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -125,7 +125,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "stock", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "stock", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
 }
@@ -431,7 +431,8 @@ function vReports() {
   ${c ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
     <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
-    <div>App version ${APP_VERSION}</div></div></section>` : ""}
+    <div>App version ${APP_VERSION}</div></div>
+    <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
   <section class="page"><div class="actions" style="padding-top:14px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
@@ -562,6 +563,20 @@ async function vVoucher(id) {
   $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`);
 }
 
+async function vCheck() {
+  setTitle(true);
+  const d = await api(cpath("check"));
+  view.innerHTML = `<h1 class="title">Sync check</h1>
+    <p class="subtitle">${d.unbalanced ? `${d.unbalanced} vouchers had debits and credits that didn't match when they were synced. Open one to compare it with Tally, and report the voucher types below if they look wrong.` : "Every synced voucher's debits and credits match."}</p>
+    ${d.groups.map((g) => `<section class="page"><div class="block-title"><span>${h(g.vtype)}</span><span>${g.count} of ${g.of}</span></div>
+      ${g.examples.map((v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
+        <div class="meta">${fdate(v.date)}, No. ${h(v.number)}</div></div><div class="end"><span class="meta">off by</span> ${money(Math.abs(v.imbalance))}</div><span class="chev"></span></a>`).join("")}
+      </section>`).join("")}
+    <section class="page"><div class="block-title"><span>Vouchers synced by type</span><span>Count</span></div>
+      ${d.types.map((t) => `<div class="row" style="cursor:default"><div class="main name">${h(t.vtype)}</div><div class="end">${nf0.format(t.n)}</div></div>`).join("")}
+    </section>`;
+}
+
 async function vPL() {
   setTitle(true);
   const d = await api(cpath("pl", periodParams()));
@@ -640,6 +655,7 @@ async function route() {
       case "voucher": await vVoucher(parts[1]); break;
       case "pl": await vPL(); break;
       case "gst": await vGST(); break;
+      case "check": await vCheck(); break;
       case "vouchers": await vVouchers(); break;
       default: await vHome();
     }

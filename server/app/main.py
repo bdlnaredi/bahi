@@ -291,6 +291,8 @@ class Handler(BaseHTTPRequestHandler):
             out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0))
         elif what == "voucher" and arg:
             out = store.voucher(cid, int(arg))
+        elif what == "check":
+            out = store.sync_check(cid)
         elif what == "pl":
             out = store.profit_loss(cid, f, t)
         else:

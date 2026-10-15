@@ -263,6 +263,8 @@ def parse_vouchers(root):
                 break
         if lines is None:
             lines = r_all + r_le + r_alloc
+            if not lines:
+                balanced = True   # stock journals, delivery notes, orders: no account entries at all
 
         items = []
         for ie in inv_lists:
@@ -308,6 +310,7 @@ def parse_vouchers(root):
             "narration": txt(v, "NARRATION"),
             "amount": round(sum(a for _, a in lines if a > 0), 2),
             "balanced": balanced,
+            "imbalance": round(sum(a for _, a in lines), 2),
             "lines": lines,
             "items": items,
         })
