@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>Bahi puts your TallyPrime books on your phone, from your own Unraid server. A small sync agent on the Windows PC that runs TallyPrime copies ledgers, vouchers, stock, bill-wise outstanding and GST data to the bahi container, and you open it as a phone app to see ledgers, search vouchers, track dues with ageing, and share Tally-style invoice and ledger PDFs on WhatsApp. It is a free, self-hosted alternative to Credflow and Livekeeping. For setup help and bug reports, open an issue on GitHub.</Profile>
+  <Icon>https://raw.githubusercontent.com/bdlnaredi/bahi/main/server/app/static/icon-512.png</Icon>
+  <WebPage>https://github.com/bdlnaredi/bahi</WebPage>
+</CommunityApplications>
