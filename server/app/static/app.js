@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.2";
+const APP_VERSION = "2.3";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -38,6 +38,12 @@ function drcr(n, opts = {}) {
   const side = v > 0 ? "Dr" : "Cr";
   return `<span class="amt ${side.toLowerCase()}">${opts.short ? short(Math.abs(v)) : nf2.format(Math.abs(v))}<span class="side">${side}</span></span>`;
 }
+const XL = '<svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z M14 3v5h5 M8 12l5 6 M13 12l-5 6"/></svg>';
+function excelBtn(what, params = {}) {
+  const u = cpath("export", { what, ...params });
+  return `<a class="btn" href="${u}" download>${XL}Excel</a>`;
+}
+function badge(st) { return st ? `<span class="badge">${st === "cancelled" ? "Cancelled" : "Optional"}</span>` : ""; }
 function money(n, cls = "") { return `<span class="amt ${cls}">${nf2.format(n || 0)}</span>`; }
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function fdate(iso) { if (!iso) return ""; const [y, m, d] = iso.split("-"); return `${+d} ${MON[+m - 1]} ${y}`; }
@@ -136,7 +142,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", day: "sales", stock: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
 }
@@ -188,7 +194,7 @@ async function vHome() {
 }
 
 function vrow(v) {
-  return `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
+  return `<a class="row${v.status ? " void" : ""}" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}${badge(v.status)}</div>
     <div class="meta">${fdate(v.date)}, ${h(v.vtype)} ${h(v.number)}</div></div><div class="end">${money(v.amount)}</div><span class="chev"></span></a>`;
 }
 
@@ -305,6 +311,7 @@ async function vLedger(name) {
       <div class="actions" style="${L.gstin || L.mobile || L.phone || L.email ? "" : "padding-top:12px"}">
         <button class="btn primary" id="sharepdf">${ICON.share}Share PDF</button>
         <a class="btn" href="${pdfUrl}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
+        ${excelBtn("ledger", { name, ...periodParams() })}
         ${phone ? `<a class="btn wa" href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}">${ICON.call}Call</a>` : ""}
       </div>
       <div class="totals">
@@ -399,6 +406,7 @@ async function vDues(kind) {
         </div>`;
       }).join("") || `<div class="empty">${rec ? "Nobody owes you money right now." : "You don't owe anyone right now."}</div>`}
     </section>
+    <div class="actions" style="padding:0 0 4px">${excelBtn("outstanding", { kind: S.dueKind })}</div>
     <p class="note" style="border:0">${d.source === "tally" ? "Bills as calculated by Tally's outstanding report." : "Bills worked out from the bill references in your vouchers."} Ages count from the bill date.</p>`;
   view.querySelectorAll("[data-p]").forEach((b) => b.onclick = () => {
     const el = document.getElementById("pb" + b.dataset.p); el.hidden = !el.hidden;
@@ -448,6 +456,7 @@ function vReports() {
   view.innerHTML = `<section class="page">
     <a class="row" href="#/vouchers"><div class="main"><div class="name">Vouchers</div><div class="meta">Search and open any voucher</div></div><span class="chev"></span></a>
     <a class="row" href="#/daybook"><div class="main"><div class="name">Day Book</div><div class="meta">Every voucher by date</div></div><span class="chev"></span></a>
+    <a class="row" href="#/analysis"><div class="main"><div class="name">Sales analysis</div><div class="meta">Top customers and items, margins, this year against last, slow stock</div></div><span class="chev"></span></a>
     <a class="row" href="#/pl"><div class="main"><div class="name">Profit &amp; Loss</div><div class="meta">Sales, purchases, expenses and profit</div></div><span class="chev"></span></a>
     <a class="row" href="#/gst"><div class="main"><div class="name">GST summary</div><div class="meta">Output tax, input credit and net payable by month</div></div><span class="chev"></span></a>
     <a class="row" href="#/groups"><div class="main"><div class="name">Group summary</div><div class="meta">Balances by Tally group, like the Balance Sheet</div></div><span class="chev"></span></a>
@@ -460,7 +469,7 @@ function vReports() {
     <div>App version ${APP_VERSION}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
   <section class="page">
-    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Change password, delete old data${S.companies.length > 1 ? ", companies" : ""}</div></div><span class="chev"></span></a>
+    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Telegram summaries, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}</div></div><span class="chev"></span></a>
     <div class="actions" style="padding-top:12px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
@@ -498,7 +507,7 @@ function voucherRows(rows, narr) {
   return rows.map((v) => {
     const head = v.date !== last ? `<div class="block-title" style="border-top:1px solid var(--rule)">${fdate(v.date)}</div>` : "";
     last = v.date;
-    return head + `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
+    return head + `<a class="row${v.status ? " void" : ""}" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}${badge(v.status)}</div>
       <div class="meta">${h(v.vtype)} ${h(v.number)}${narr && v.narration ? `, ${h(v.narration.replace(/\s+/g, " ").slice(0, 60))}` : ""}</div></div>
       <div class="end">${money(v.amount)}</div><span class="chev"></span></a>`;
   }).join("");
@@ -544,11 +553,12 @@ async function vVouchers() {
   const d = await api(cpath("vouchers", params));
   if (!$("#vsearch")) {
     view.innerHTML = `<input class="search" id="vsearch" type="search" inputmode="search" placeholder="Party, voucher no., amount or narration" aria-label="Search vouchers" value="${h(S.vq)}">
-      <div id="vperiod"></div><div class="toolbar" id="vtypes"></div><section class="page" id="vlist"></section>`;
+      <div id="vperiod"></div><div class="toolbar" id="vtypes"></div><section class="page" id="vlist"></section><div class="actions" id="vxl" style="padding:0 0 12px"></div>`;
     $("#vsearch").oninput = (e) => { clearTimeout(vSearchT); vSearchT = setTimeout(() => { S.vq = e.target.value; vVouchers().catch(fail); }, 250); };
   }
   $("#vperiod").innerHTML = periodBar(d.from, d.to);
   $("#vtypes").innerHTML = `<button class="chip ${!S.vtype ? "on" : ""}" data-t="">All</button>` + d.types.map((t) => `<button class="chip ${t === S.vtype ? "on" : ""}" data-t="${h(t)}">${h(t)}</button>`).join("");
+  $("#vxl").innerHTML = excelBtn("vouchers", params);
   pagedVouchers($("#vlist"), "vouchers", params, d,
     S.vq ? "No voucher matches that search in this period. Try All dates." : "No vouchers in this period.");
   wirePeriod(d.from, d.to);
@@ -565,8 +575,9 @@ async function vVoucher(id) {
   const tax = d.lines.filter((l) => l.kind === "tax").reduce((a, l) => a + Math.abs(l.amount), 0);
   const gstin = V.party_gstin || P?.gstin;
   view.innerHTML = `
+    ${V.status ? `<p class="note warn" style="border:0;padding:0 4px 10px">This voucher is ${V.status === "cancelled" ? "cancelled" : "optional"} in Tally, so it doesn't count in balances, stock or reports.</p>` : ""}
     <section class="page vhead">
-      <div class="vtype">${h(V.vtype)}</div>
+      <div class="vtype">${h(V.vtype)}${badge(V.status)}</div>
       <div class="vno">No. ${h(V.number)}</div>
       <div class="meta">${fdate(V.date)}${V.reference ? `, ref. ${h(V.reference)}` : ""}</div>
       ${V.party ? `<a class="vparty" href="#/ledger/${enc(V.party)}"><div class="name">${h(V.party)}</div>${gstin ? `<div class="meta">GSTIN ${h(gstin)}</div>` : ""}</a>` : ""}
@@ -628,7 +639,8 @@ async function vSales(kind) {
       </div>
       ${d.best && d.best.total ? `<div class="note">Best day: <a href="#/day/${S.skind}/${d.best.date}">${fdate(d.best.date)}</a>, ${rupees(d.best.total, false)}</div>` : ""}
     </section>
-    <section class="page">${body || `<div class="empty">No ${sales ? "sales" : "purchases"} in this period.</div>`}</section>`;
+    <section class="page">${body || `<div class="empty">No ${sales ? "sales" : "purchases"} in this period.</div>`}</section>
+    <div class="actions" style="padding:0 0 12px">${excelBtn("daily", { kind: S.skind, ...periodParams() })}<a class="btn" href="#/analysis">Sales analysis</a></div>`;
   wirePeriod(d.from, d.to);
 }
 
@@ -649,6 +661,91 @@ async function vDay(kind, day) {
   if (r.total) pagedVouchers($("#rlist"), "vouchers", { ...p, type: ret }, r, "");
 }
 
+const ATABS = [["parties", "Customers"], ["items", "Items"], ["years", "This year vs last"], ["slow", "Slow stock"]];
+async function vAnalysis(tab) {
+  setTitle(true);
+  S.atab = tab || S.atab || "parties";
+  S.akind = S.akind || "sales";
+  const t = S.atab;
+  const tabs = `<div class="toolbar" role="tablist">${ATABS.map(([k, l]) => `<a class="chip ${k === t ? "on" : ""}" href="#/analysis/${k}" role="tab" aria-selected="${k === t}">${l}</a>`).join("")}</div>`;
+  let html = "";
+  if (t === "parties") {
+    const d = await api(cpath("a_parties", { kind: S.akind, ...periodParams() }));
+    const sales = S.akind === "sales";
+    const chg = (r) => r.change === null ? (r.prev ? "" : (d.has_prev ? '<span class="up">new</span>' : "")) :
+      `<span class="${r.change >= 0 ? "up" : "down"}">${r.change >= 0 ? "▲" : "▼"} ${Math.abs(r.change)}%</span>`;
+    html = `<div class="toolbar"><button class="chip ${sales ? "on" : ""}" data-k="sales">Customers</button><button class="chip ${!sales ? "on" : ""}" data-k="purchase">Suppliers</button></div>
+      ${periodBar(d.from, d.to)}
+      <section class="page"><div class="hero"><div><div class="label">${sales ? "Sales" : "Purchases"} with tax</div><div class="big">${short(d.total)}</div></div>
+        <div><div class="label">Same period last year</div><div class="big" style="font-size:22px">${d.has_prev ? short(d.prev_total) : "no data"}</div></div></div></section>
+      <section class="page"><div class="block-title"><span>${sales ? "Customer" : "Supplier"}</span><span>Value, share, vs last year</span></div>
+      ${d.parties.slice(0, 200).map((r) => `<a class="row" href="#/ledger/${enc(r.party)}"><div class="main"><div class="name">${h(r.party)}</div>
+        <div class="meta">${r.bills} bills, ${r.share}%${r.last ? `, last ${fdate(r.last)}` : ""}${!r.total && r.prev ? `, <span class="down">nothing this period (${short(r.prev)} last year)</span>` : ""}</div>
+        <div class="daybar"><span style="width:${Math.max(1, r.share)}%"></span></div></div>
+        <div class="end">${money(r.total)}<div class="meta">${chg(r)}</div></div><span class="chev"></span></a>`).join("") || '<div class="empty">Nothing in this period.</div>'}
+      </section><div class="actions" style="padding:0 0 12px">${excelBtn("a_parties", { kind: S.akind, ...periodParams() })}</div>`;
+    view.innerHTML = tabs + html;
+    view.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => { S.akind = b.dataset.k; vAnalysis().catch(fail); });
+    wirePeriod(d.from, d.to);
+  } else if (t === "items") {
+    const d = await api(cpath("a_items", periodParams()));
+    html = `${periodBar(d.from, d.to)}
+      <section class="page"><div class="hero" style="grid-template-columns:1fr"><div class="label">Item sales before tax</div><div class="big">${short(d.total)}</div></div></section>
+      <section class="page"><div class="block-title"><span>Item</span><span>Value, margin</span></div>
+      ${d.items.map((r) => `<a class="row" href="#/item/${enc(r.item)}"><div class="main"><div class="name">${h(r.item)}</div>
+        <div class="meta">${qty(r.qty, r.unit)} at ₹${nf2.format(r.rate)}${r.in_hand !== null ? `, ${qty(r.in_hand, r.unit)} in hand` : ""}</div>
+        <div class="daybar"><span style="width:${Math.max(1, r.share)}%"></span></div></div>
+        <div class="end">${money(r.value)}<div class="meta">${r.margin === null ? "margin n/a" : `<span class="${r.margin >= 0 ? "up" : "down"}">${r.margin}% margin</span>`}</div></div><span class="chev"></span></a>`).join("") || '<div class="empty">No item sales in this period.</div>'}
+      </section>
+      <p class="note" style="border:0">Margin compares the average selling rate with the average purchase rate of the item (or its stock rate when there were no purchases). It's an estimate, not Tally's exact gross profit.</p>
+      <div class="actions" style="padding:0 0 12px">${excelBtn("a_items", periodParams())}</div>`;
+    view.innerHTML = tabs + html; wirePeriod(d.from, d.to);
+  } else if (t === "years") {
+    const d = await api(cpath("a_years"));
+    const mon = (m) => MON[+m - 1];
+    const ch = d.last_total ? Math.round((d.this_total - d.last_total) / d.last_total * 1000) / 10 : null;
+    html = `<section class="page"><div class="hero"><div><div class="label">Sales ${d.this_label}</div><div class="big">${short(d.this_total)}</div></div>
+        <div><div class="label">${d.last_label}</div><div class="big" style="font-size:22px">${d.has_prev ? short(d.last_total) : "not synced"}</div></div></div>
+        ${ch !== null ? `<div class="note">${ch >= 0 ? "Up" : "Down"} ${Math.abs(ch)}% on last year so far (last year's figure is the full year).</div>` : ""}
+        <div class="chart" id="ychart"></div>
+        <div class="legend"><span><i style="background:var(--bar)"></i>${d.this_label}</span><span><i style="background:var(--age1)"></i>${d.last_label}</span></div></section>
+      <section class="page"><div class="block-title"><span>Month</span><span>${d.this_label} / ${d.last_label}</span></div>
+      ${d.months.map((m) => { const c = m.last ? Math.round((m.this - m.last) / m.last * 100) : null;
+        return `<div class="row" style="cursor:default"><div class="main name">${mon(m.month)}</div><div class="end">${money(m.this)}<div class="meta">${d.has_prev ? money(m.last) : ""}${c !== null && m.this ? ` <span class="${c >= 0 ? "up" : "down"}">${c >= 0 ? "▲" : "▼"}${Math.abs(c)}%</span>` : ""}</div></div></div>`; }).join("")}
+      </section>
+      ${d.has_prev ? "" : '<p class="note" style="border:0">Last year isn\'t synced. To compare, run Setup on the Tally PC with an earlier from-date.</p>'}`;
+    view.innerHTML = tabs + html;
+    drawYears($("#ychart"), d.months);
+  } else {
+    S.slowDays = S.slowDays || 60;
+    const d = await api(cpath("a_slow", { days: S.slowDays }));
+    html = `<div class="toolbar">${[30, 60, 90, 180].map((n) => `<button class="chip ${n === S.slowDays ? "on" : ""}" data-days="${n}">${n}+ days</button>`).join("")}</div>
+      <section class="page"><div class="hero" style="grid-template-columns:1fr"><div class="label">Stock not sold for ${d.days}+ days</div><div class="big owe">${short(d.value)}</div>
+        <div class="label">${d.items.length} items</div></div></section>
+      <section class="page">${d.items.map((i) => `<a class="row" href="#/item/${enc(i.name)}"><div class="main"><div class="name">${h(i.name)}</div>
+        <div class="meta">${qty(i.closing_qty, i.unit)} in hand, ${i.last_out ? `last sold ${fdate(i.last_out)} (${i.idle} days)` : "no sale in synced data"}</div></div>
+        <div class="end">${money(i.closing_value)}</div><span class="chev"></span></a>`).join("") || '<div class="empty">Every item in stock has sold recently.</div>'}</section>
+      <div class="actions" style="padding:0 0 12px">${excelBtn("a_slow", { days: S.slowDays })}</div>`;
+    view.innerHTML = tabs + html;
+    view.querySelectorAll("[data-days]").forEach((b) => b.onclick = () => { S.slowDays = +b.dataset.days; vAnalysis().catch(fail); });
+  }
+}
+
+/* two series, grouped bars: this year (brand red) beside last year (light) */
+function drawYears(el, rows) {
+  const W = Math.max(280, el.clientWidth - 16), H = 160, padB = 22, padT = 10;
+  const max = Math.max(1, ...rows.map((r) => Math.max(r.this, r.last)));
+  const slot = W / rows.length, bw = Math.max(3, (slot - 6) / 2);
+  const bars = rows.map((r, i) => {
+    const x0 = i * slot + (slot - bw * 2 - 2) / 2;
+    const one = (v, x, fill, label) => { const hh = Math.max(v > 0 ? 2 : 0, (v / max) * (H - padB - padT)); const y = H - padB - hh, rad = Math.min(3, bw / 2, hh);
+      return hh ? `<path d="M${x},${H - padB} V${y + rad} Q${x},${y} ${x + rad},${y} H${x + bw - rad} Q${x + bw},${y} ${x + bw},${y + rad} V${H - padB} Z" fill="${fill}"><title>${label}: ${rupees(v, false)}</title></path>` : ""; };
+    return one(r.last, x0, "var(--age1)", MON[+r.month - 1] + " last year") + one(r.this, x0 + bw + 2, "var(--bar)", MON[+r.month - 1] + " this year") +
+      `<text x="${i * slot + slot / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--ink-3)">${MON[+r.month - 1][0]}</text>`;
+  }).join("");
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-label="Monthly sales, this year against last year"><line x1="0" x2="${W}" y1="${H - padB}" y2="${H - padB}" stroke="var(--rule)"/>${bars}</svg>`;
+}
+
 async function vCheck() {
   setTitle(true);
   const d = await api(cpath("check"));
@@ -659,7 +756,7 @@ async function vCheck() {
         <div class="meta">${fdate(v.date)}, No. ${h(v.number)}</div></div><div class="end"><span class="meta">off by</span> ${money(Math.abs(v.imbalance))}</div><span class="chev"></span></a>`).join("")}
       </section>`).join("")}
     <section class="page"><div class="block-title"><span>Vouchers synced by month</span><span>All / Sales</span></div>
-      ${d.months.map((m) => { const [yy, mm] = m.m.split("-"); return `<a class="row" href="#/vouchers" data-month="${m.m}"><div class="main name">${MON[+mm - 1]} ${yy}</div><div class="end">${nf0.format(m.n)} / ${nf0.format(m.sales)}</div></a>`; }).join("") || '<div class="empty">No vouchers synced yet.</div>'}
+      ${d.months.map((m) => { const [yy, mm] = m.m.split("-"); return `<a class="row" href="#/vouchers" data-month="${m.m}"><div class="main name">${MON[+mm - 1]} ${yy}</div><div class="end">${nf0.format(m.n)} / ${nf0.format(m.sales)}${m.cancelled ? `<div class="meta">${m.cancelled} cancelled</div>` : ""}</div></a>`; }).join("") || '<div class="empty">No vouchers synced yet.</div>'}
     </section>
     <section class="page"><div class="block-title"><span>Vouchers synced by type</span><span>Count</span></div>
       ${d.types.map((t) => `<div class="row" style="cursor:default"><div class="main name">${h(t.vtype)}</div><div class="end">${nf0.format(t.n)}</div></div>`).join("")}
@@ -670,7 +767,24 @@ async function vSettings() {
   setTitle(true);
   await loadCompanies();
   const range = (c) => c.first_vch ? `${fdate(c.first_vch)} to ${fdate(c.last_vch)}` : "no vouchers yet";
+  let tg = {};
+  try { tg = await api("/api/telegram"); } catch (e) {}
   view.innerHTML = `<h1 class="title">Settings</h1>
+    <section class="page" id="tgsec"><div class="block-title">Telegram summary and alerts <span>${tg.configured ? "on" : "off"}</span></div>
+      ${tg.configured ? `<form class="form" id="tgf">
+        <label><span><input type="checkbox" id="tgdaily" ${tg.daily ? "checked" : ""}> Daily summary at</span><input type="time" id="tgtime" value="${h(tg.time || "09:00")}"></label>
+        <label><span><input type="checkbox" id="tgalerts" ${tg.alerts ? "checked" : ""}> Alert me when a payment of at least</span><input type="number" id="tgmin" min="0" step="1000" value="${tg.alert_min}"></label>
+        <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="tgtest">Send summary now</button><button class="btn danger" type="button" id="tgoff">Turn off</button></div>
+        <div class="msg" id="tgmsg" role="status"></div></form>` : `<div class="info" style="padding-top:2px">
+        <div>Get yesterday's sales, collections, cash and bank and overdue dues every morning, and a message when a big payment comes in.</div></div>
+        <ol class="steps">
+          <li>In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, pick any name. It replies with a <b>token</b>.</li>
+          <li>Paste the token below.</li>
+          <li>Open your new bot (BotFather gives a link), tap <b>Start</b>, then tap <b>Connect</b> here.</li>
+        </ol>
+        <form class="form" id="tgc"><label>Bot token<input type="text" id="tgtoken" autocomplete="off" placeholder="123456789:AA..." required></label>
+        <button class="btn primary" type="submit">Connect</button><div class="msg" id="tgmsg" role="status"></div></form>`}
+    </section>
     <section class="page"><div class="block-title">Change app password</div>
       <form id="pwf" class="form">
         <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
@@ -692,6 +806,26 @@ async function vSettings() {
       <div class="actions"><button class="btn danger" data-del="${c.id}">Delete all of this company's data</button></div>
       <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
     </section>`).join("")}`;
+  const post = async (url, body) => {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Failed"); return j;
+  };
+  if ($("#tgc")) $("#tgc").onsubmit = async (e) => {
+    e.preventDefault(); $("#tgmsg").textContent = "Connecting";
+    try { const j = await post("/api/telegram/find", { token: $("#tgtoken").value.trim() });
+      await post("/api/telegram/test", {}); toast(`Connected to ${j.chat_name || "your chat"}.`); vSettings().catch(fail);
+    } catch (err) { $("#tgmsg").textContent = err.message; }
+  };
+  if ($("#tgf")) {
+    $("#tgf").onsubmit = async (e) => {
+      e.preventDefault();
+      try { await post("/api/telegram", { daily: $("#tgdaily").checked, time: $("#tgtime").value, alerts: $("#tgalerts").checked, alert_min: $("#tgmin").value });
+        $("#tgmsg").textContent = "Saved."; } catch (err) { $("#tgmsg").textContent = err.message; }
+    };
+    $("#tgtest").onclick = async () => { $("#tgmsg").textContent = "Sending";
+      try { await post("/api/telegram/test", { cid: S.cid }); $("#tgmsg").textContent = "Sent. Check Telegram."; } catch (err) { $("#tgmsg").textContent = err.message; } };
+    $("#tgoff").onclick = async () => { if (!confirm("Stop Telegram messages?")) return; await post("/api/telegram", { off: true }); vSettings().catch(fail); };
+  }
   $("#pwf").onsubmit = async (e) => {
     e.preventDefault();
     const msg = $("#pwmsg");
@@ -808,6 +942,7 @@ async function route() {
       case "pl": await vPL(); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;
+      case "analysis": await vAnalysis(parts[1]); break;
       case "settings": await vSettings(); break;
       case "sales": await vSales(parts[1] === "purchase" ? "purchase" : "sales"); break;
       case "day": await vDay(parts[1], parts[2]); break;

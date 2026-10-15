@@ -63,6 +63,8 @@ The closing balance always matches Tally, because running balances are worked ba
 - **Search** by party name, voucher number (e.g. `S/279`), exact amount (e.g. `66080`) or a word from the narration.
 - Filter by **voucher type** (Sales, Receipt, Payment and so on) and **period**. Use **All dates** to search everything synced.
 - The count at the top shows how many vouchers matched. **Load more** at the bottom shows the next 200.
+- **Cancelled** and **optional** vouchers are listed too, with a grey label and the amount struck through. They are never added into balances, totals or reports, just as in Tally.
+- **Excel** at the bottom downloads the vouchers that matched, as a file Excel or Google Sheets opens.
 
 <br clear="right">
 
@@ -122,6 +124,7 @@ The list shows every item's quantity, rate and value, with the total closing sto
 |---|---|
 | **Vouchers** | Search and open any voucher |
 | **Day Book** | All vouchers by date, filter by type |
+| **Sales analysis** | Best customers and suppliers against last year, item-wise sales with margin, a month-by-month comparison with last year, and stock that hasn't sold |
 | **Profit & Loss** | Sales, purchases, stock, expenses, gross and net profit. Tap a line to see its ledgers. |
 | **GST summary** | Output tax, input credit and net GST payable, month by month |
 | **Group summary** | Balances by Tally group, like the Balance Sheet. Tap to drill down. |
@@ -141,6 +144,48 @@ The **Sync** box shows the synced date range, the number of ledgers and vouchers
 
 > **GST summary** is a quick check worked out from your vouchers. GST payments to the government and set-off entries are left out. File your returns from Tally or the GST portal.
 
+## Sales analysis
+
+<table><tr>
+<td><img src="images/analysis.png" width="230" alt="Customers against last year"></td>
+<td><img src="images/analysis-years.png" width="230" alt="This year against last year"></td>
+</tr></table>
+
+Open it from **Reports → Sales analysis**, or from the bottom of the **Sales** tab.
+
+| Tab | What it shows |
+|---|---|
+| **Customers** | Each customer's sales in the period, their share of the total, and the change against the same period last year. Customers who bought last year but not this period are flagged. Switch to **Suppliers** for purchases. |
+| **Items** | Quantity, average rate and value of each item sold, and an estimated **margin**: the average selling rate against the average purchase rate. |
+| **This year vs last** | Sales before tax for each month of this financial year beside the same month last year. |
+| **Slow stock** | Items in stock that haven't been sold for 30, 60, 90 or 180 days, with their value. |
+
+Last-year comparisons need last year's vouchers on the server. If they show *not synced*, run `Setup.bat` on the Tally PC and enter an earlier **from-date**.
+
+## Excel downloads
+
+Ledger, Vouchers, Dues, Sales by day and every Sales analysis tab have an **Excel** button. It downloads a `.csv` file of what's on screen, which opens in Excel, Google Sheets or WPS on the phone.
+
+## Telegram summary and alerts
+
+<img src="images/telegram.png" width="260" align="right" alt="Telegram settings">
+
+Bahi can message you on Telegram:
+
+- **Every morning** (09:00 by default): yesterday's sales, collections and payments, sales so far this month, cash and bank, and your biggest overdue parties.
+- **When a big payment comes in**: a message for every receipt above the amount you choose, soon after Tally syncs.
+
+To set it up, in **Reports → Settings**:
+
+1. In Telegram, open **@BotFather**, send `/newbot` and pick any name. BotFather replies with a **token**.
+2. Paste the token into Bahi.
+3. Open your new bot from the link BotFather gives you and tap **Start**.
+4. Tap **Connect** in Bahi. You get a test message in Telegram.
+
+After that you can change the time, the minimum amount, send a summary now, or turn it off. Only you can see your bot's messages, but don't share the token.
+
+<br clear="right">
+
 ## Ledger statement PDF
 
 <img src="images/pdf-ledger.png" width="420" alt="Ledger Account PDF">
@@ -153,6 +198,7 @@ The PDF follows Tally's *Ledger Account* layout:
 
 ## Good to know
 
+- The Tally PC sends only the months that changed, so a normal sync takes a few seconds. After a server update that changes how data is stored, the next sync sends everything again.
 - Figures are as of the **last sync**. If the Tally PC is off, the app shows the last copy and says so at the top.
 - Without internet, the phone shows the screens you opened before, with a note saying it's a saved copy.
 - PDFs use a standard font, so names written in Hindi or other Indian scripts print as "?". The ₹ sign prints correctly.

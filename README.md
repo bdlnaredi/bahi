@@ -21,6 +21,9 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 - **Vouchers:** search by party, voucher number, amount or narration. Open any voucher as an invoice with items, GST, bill references and narration.
 - **Dues:** bill-wise receivables and payables with ageing (0-30, 31-60, 61-90 and 90+ days), overdue amounts, and WhatsApp payment reminders that list the overdue bills.
 - **Stock:** quantity, rate and value of every item, plus item movements.
+- **Sales analysis:** customers and items against last year, item margins, month by month this year against last, and slow-moving stock.
+- **Excel downloads** of ledgers, vouchers, dues and analysis.
+- **Telegram:** a morning summary of yesterday's business and an alert when a large payment comes in.
 - **Reports:** Day Book, Profit & Loss, GST summary (output tax, input credit and net payable by month), and a group summary.
 - **PDFs like TallyPrime prints:** Tax Invoice, Receipt/Payment/Journal voucher, and Ledger Account.
 - **Works offline:** your phone keeps the last data you opened.
@@ -31,7 +34,7 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 <img src="docs/images/how-it-works.svg" alt="Tally PC sync agent sends data to the Bahi container on Unraid; the phone opens it through Cloudflare Tunnel" width="100%">
 
 1. TallyPrime's built-in data server (port 9000) lets programs on the same PC read your books.
-2. The **sync agent** (PowerShell, no install needed) runs every 10 minutes. When something has changed in Tally, it reads masters, vouchers and outstanding bills and sends them to your server.
+2. The **sync agent** (PowerShell, no install needed) runs every 10 minutes. When something has changed in Tally, it sends only the months that changed, plus masters and outstanding bills.
 3. The **Bahi server** (one Docker container) stores the data and serves the phone app.
 4. Your **phone** opens the app in Chrome and installs it to the home screen like a normal app.
 

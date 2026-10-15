@@ -135,6 +135,7 @@ To update: **Compose Pull**, then **Compose Up**.
 | `Sync-Now.bat` | Send everything right now, e.g. after a big data entry |
 | `TallySync.log` | What each sync did, and any warnings |
 | `Setup.bat` | Change the server address, token or from-date |
+| `Diagnose.bat` | Writes a short report of voucher counts, for checking a sync problem |
 
 ## 5. Reach the app from your phone
 

@@ -128,6 +128,7 @@ def make_vouchers():
                "ledgers": [("Rent", 1000.0), ("Cash", -900.0)], "narration": "deliberately broken"})
     for i, v in enumerate(vs):
         v["guid"] = f"guid-{i:05d}"
+        v["alterid"] = i + 1
     assign_bills(vs)
     return vs
 
@@ -233,7 +234,7 @@ def xml_voucher(v):
         nar += " Thank you &#55357;&#56842; &#xD83D;&#xDE4F; &#65535;"   # emoji as Tally writes them (surrogate pairs)
     head = (f'<TALLYMESSAGE xmlns:UDF="TallyUDF"><VOUCHER REMOTEID="{v["guid"]}" VCHTYPE="{escape(v["type"])}" '
             f'ACTION="Create" OBJVIEW="{"Invoice Voucher View" if v["kind"] != "acct" else "Accounting Voucher View"}">'
-            f'<DATE>{dt}</DATE><GUID>{v["guid"]}</GUID><NARRATION>{nar}</NARRATION>'
+            f'<DATE>{dt}</DATE><GUID>{v["guid"]}</GUID><ALTERID> {v["alterid"]}</ALTERID><NARRATION>{nar}</NARRATION>'
             f'<VOUCHERTYPENAME>{escape(v["type"])}</VOUCHERTYPENAME><VOUCHERNUMBER>{v["no"]}</VOUCHERNUMBER>'
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
             f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ""}</REFERENCE>'
@@ -296,9 +297,39 @@ def tdate(s):
     return datetime.strptime(s, "%d-%b-%Y").date()
 
 
+EDITS = [0]
+
+
+def apply_edit():
+    """Simulate a day's work in Tally: change one voucher, add one, delete one."""
+    EDITS[0] += 1
+    top = max(v["alterid"] for v in VOUCHERS)
+    target = next(v for v in VOUCHERS if v["kind"] == "acct" and v["type"] == "Receipt" and v["date"] < date(2026, 6, 1))
+    target["narration"] = "edited in Tally"
+    target["alterid"] = top + 1
+    newv = dict(next(v for v in VOUCHERS if v["kind"] == "acct" and v["type"] == "Payment"))
+    newv.update({"guid": "guid-new-%d" % EDITS[0], "no": "N%d" % EDITS[0], "alterid": top + 2,
+                 "date": date(2026, 9, 9), "narration": "new entry"})
+    VOUCHERS.append(newv)
+    victim = next(v for v in VOUCHERS if v["kind"] == "acct" and v["type"] == "Payment" and v["date"].month == 7)
+    VOUCHERS.remove(victim)
+    return target["date"], newv["date"], victim["date"]
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def do_GET(self):
+        if self.path == "/edit":
+            r = apply_edit()
+            data = ("edited months: %s" % ", ".join(sorted({d.strftime("%Y-%m") for d in r}))).encode()
+        else:
+            data = b"<RESPONSE>TallyPrime Server is Running</RESPONSE>"
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self):
         req = self.rfile.read(int(self.headers["Content-Length"])).decode("utf-8")
@@ -357,7 +388,7 @@ class H(BaseHTTPRequestHandler):
                 for v in VOUCHERS:
                     if f <= v["date"] <= t:
                         if light:
-                            out += (f'<VOUCHER><DATE TYPE="Date">{v["date"].strftime("%Y%m%d")}</DATE>'
+                            out += (f'<VOUCHER><DATE TYPE="Date">{v["date"].strftime("%Y%m%d")}</DATE><GUID>{v["guid"]}</GUID><ALTERID> {v["alterid"]}</ALTERID>'
                                     f'<ISCANCELLED>{"Yes" if v.get("cancelled") else "No"}</ISCANCELLED>'
                                     f'<ISOPTIONAL>{"Yes" if v.get("optional") else "No"}</ISOPTIONAL></VOUCHER>')
                         else:
@@ -371,7 +402,7 @@ class H(BaseHTTPRequestHandler):
                         f'<ADDRESS.LIST><ADDRESS>Plot 21, Wardhaman Nagar</ADDRESS><ADDRESS>Central Avenue, Nagpur 440008</ADDRESS></ADDRESS.LIST>'
                         f'<STATENAME>Maharashtra</STATENAME><EMAIL>accounts@demotraders.in</EMAIL><INCOMETAXNUMBER>AABCD1234E</INCOMETAXNUMBER>'
                         f'<GSTREGISTRATIONNUMBER>27AABCD1234E1Z9</GSTREGISTRATIONNUMBER>'
-                        f'<ALTVCHID TYPE="Number"> {len(VOUCHERS)}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID></COMPANY>')
+                        f'<ALTVCHID TYPE="Number"> {max(v["alterid"] for v in VOUCHERS) + EDITS[0]}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID></COMPANY>')
             elif ctype == "Group":
                 for n, p in GROUPS:
                     par = escape(p) if p else "&#4; Primary"

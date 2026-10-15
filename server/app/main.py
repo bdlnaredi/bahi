@@ -25,6 +25,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 import store  # noqa: E402
 import tally_parse as tp  # noqa: E402
 import pdf  # noqa: E402
+import export  # noqa: E402
+import notify  # noqa: E402
+import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 STAGING = os.path.join(DATA_DIR, "staging")
@@ -33,7 +36,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -129,6 +132,44 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def telegram(self, method, path):
+        s = notify.load()
+        data = json.loads(self.body(8192) or b"{}") if method == "POST" else {}
+        try:
+            if path == "/api/telegram" and method == "GET":
+                return self.send_json(notify.public(s))
+            if path == "/api/telegram" and method == "POST":
+                if data.get("token"):
+                    s["token"] = data["token"].strip()
+                for k in ("chat_id", "time"):
+                    if k in data:
+                        s[k] = str(data[k]).strip()
+                for k in ("daily", "alerts"):
+                    if k in data:
+                        s[k] = bool(data[k])
+                if "alert_min" in data:
+                    s["alert_min"] = max(0, float(data["alert_min"] or 0))
+                if data.get("off"):
+                    s["token"], s["chat_id"] = "", ""
+                notify.save(s)
+                return self.send_json(notify.public(s))
+            if path == "/api/telegram/find" and method == "POST":
+                token = (data.get("token") or s["token"]).strip()
+                chat = notify.find_chat(token)
+                if not chat:
+                    return self.send_json({"error": "No message found yet. Open your bot in Telegram, tap Start or send it any message, then try again."}, 400)
+                s["token"], s["chat_id"] = token, chat["chat_id"]
+                s["last_daily"] = time.strftime("%Y-%m-%d")  # the connect message already went out today
+                notify.save(s)
+                return self.send_json({**notify.public(s), "chat_name": chat["name"]})
+            if path == "/api/telegram/test" and method == "POST":
+                cid = int(data.get("cid") or 0)
+                notify.send(notify.summary_text(cid) if cid else "Bahi is connected to this chat.", s)
+                return self.send_json({"ok": True})
+        except Exception as e:
+            return self.send_json({"error": f"Telegram: {e}"}, 400)
+        return self.send_json({"error": "not found"}, 404)
+
     def body(self, limit=MAX_PART):
         n = int(self.headers.get("Content-Length") or 0)
         if n > limit:
@@ -202,6 +243,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "bad sync token"}, 401)
         if path == "/agent/ping":
             return self.send_json({"ok": True, "time": time.time()})
+        if path == "/agent/plan" and method == "POST":
+            items = tp.parse_voucher_list(tp.parse_xml(self.body()))
+            return self.send_json(store.plan(q.get("company", ""), q.get("from", ""), q.get("to", ""), items))
         if path == "/agent/stats" and method == "GET":
             return self.send_json(store.agent_stats())
         if path == "/agent/state" and method == "GET":
@@ -230,6 +274,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = self.commit(d, meta)
             finally:
                 shutil.rmtree(d, ignore_errors=True)
+            threading.Thread(target=notify.alert_new_receipts, daemon=True).start()
             return self.send_json(res)
         self.send_json({"error": "not found"}, 404)
 
@@ -278,7 +323,8 @@ class Handler(BaseHTTPRequestHandler):
                             meta.get("alt_mst", ""), parts["groups"], parts["vtypes"],
                             parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"],
                             parts["company"].get(meta["company"]) or next(iter(parts["company"].values()), {}),
-                            parts["ledger_x"], parts["stock_x"])
+                            parts["ledger_x"], parts["stock_x"],
+                            meta.get("months") if isinstance(meta.get("months"), list) else None)
 
     # ------------------------------------------------------------ app endpoints
     def api(self, method, path, q):
@@ -309,6 +355,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": True}, headers={
                 "Set-Cookie": f"tm_session={make_session()}; Path=/; HttpOnly; SameSite=Lax; "
                               f"Max-Age={SESSION_DAYS * 86400}{secure}"})
+
+        if path.startswith("/api/telegram"):
+            return self.telegram(method, path)
 
         mp = re.match(r"^/api/c/(\d+)/(purge|delete)$", path)
         if mp and method == "POST":
@@ -366,6 +415,28 @@ class Handler(BaseHTTPRequestHandler):
             out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0))
         elif what == "voucher" and arg:
             out = store.voucher(cid, int(arg))
+        elif what == "export":
+            r = export.build(cid, q.get("what", ""), {k: unquote(v) for k, v in q.items()})
+            if r:
+                name, data = r
+                safe = re.sub(r"[^A-Za-z0-9 _.-]+", "", name).strip()[:80] or "export"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{safe}.csv"')
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            out = None
+        elif what == "a_parties":
+            out = store.analysis_parties(cid, q.get("kind", "sales"), f, t)
+        elif what == "a_items":
+            out = store.analysis_items(cid, f, t)
+        elif what == "a_years":
+            out = store.analysis_years(cid)
+        elif what == "a_slow":
+            out = store.slow_stock(cid, int(q.get("days", 60) or 60))
         elif what == "check":
             out = store.sync_check(cid)
         elif what == "pl":
@@ -385,6 +456,7 @@ def main():
     shutil.rmtree(STAGING, ignore_errors=True)
     os.makedirs(STAGING, exist_ok=True)
     store.init()
+    notify.start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Tally Mobile listening on :{PORT}", flush=True)
     srv.serve_forever()

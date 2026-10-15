@@ -276,8 +276,9 @@ def _inv_row(e, force_dir=None):
 def parse_vouchers(root):
     out = []
     for v in root.iter("VOUCHER"):
-        if yes(v, "ISCANCELLED") or yes(v, "ISOPTIONAL") or yes(v, "ISDELETED"):
+        if yes(v, "ISDELETED"):
             continue
+        status = "cancelled" if yes(v, "ISCANCELLED") else "optional" if yes(v, "ISOPTIONAL") else ""
         date = tdate(txt(v, "DATE"))
         if not date:
             continue
@@ -333,6 +334,8 @@ def parse_vouchers(root):
 
         out.append({
             "extra": voucher_extra(v),
+            "status": status,
+            "alterid": int(num(txt(v, "ALTERID"))),
             "guid": txt(v, "GUID") or v.get("REMOTEID") or "",
             "reference": txt(v, "REFERENCE"),
             "party_gstin": txt(v, "PARTYGSTIN"),
@@ -460,4 +463,14 @@ def parse_stock_extra(root):
                 if hsn:
                     break
         out[n] = {"hsn": hsn or txt(el, "HSNCODE")}
+    return out
+
+
+def parse_voucher_list(root):
+    """Light list (GUID, AlterID, date) of every voucher - used to work out which months changed."""
+    out = []
+    for v in root.iter("VOUCHER"):
+        d = tdate(txt(v, "DATE"))
+        if d:
+            out.append((txt(v, "GUID") or v.get("REMOTEID") or "", int(num(txt(v, "ALTERID"))), d))
     return out

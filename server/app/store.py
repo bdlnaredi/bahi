@@ -9,7 +9,7 @@ from datetime import date, timedelta
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", "/data"), "tally.db")
 _lock = threading.Lock()
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS stock(
 CREATE TABLE IF NOT EXISTS voucher(
   id INTEGER PRIMARY KEY, company_id INT, guid TEXT, date TEXT, vtype TEXT, base TEXT,
   number TEXT, party TEXT, narration TEXT, amount REAL, balanced INT, reference TEXT, party_gstin TEXT,
-  extra TEXT DEFAULT '{}', posting INT DEFAULT 1, imbalance REAL DEFAULT 0);
+  extra TEXT DEFAULT '{}', posting INT DEFAULT 1, imbalance REAL DEFAULT 0, status TEXT DEFAULT '',
+  alterid INT DEFAULT 0);
+CREATE INDEX IF NOT EXISTS ix_v_guid ON voucher(company_id, guid);
 CREATE INDEX IF NOT EXISTS ix_v_date ON voucher(company_id, date);
 CREATE TABLE IF NOT EXISTS vline(voucher_id INT, ledger TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_vl_l ON vline(ledger, voucher_id);
@@ -171,87 +173,146 @@ def delete_company(cid):
         c.execute("VACUUM")
 
 
+def _month_range(m, d_from, d_to):
+    y, mo = int(m[:4]), int(m[5:7])
+    last = (date(y + (mo == 12), mo % 12 + 1, 1) - timedelta(days=1)).isoformat()
+    return max(f"{m}-01", d_from), min(last, d_to)
+
+
+def plan(company, d_from, d_to, tally_list):
+    """Compare Tally's list of (GUID, AlterID, date) with what is stored; return the months to resend."""
+    with conn() as c:
+        r = c.execute("SELECT id, from_date, to_date, keep_from FROM company WHERE name=? AND last_sync IS NOT NULL",
+                      (company,)).fetchone()
+        if not r or r["from_date"] != max(d_from, r["keep_from"] or "") or r["to_date"] != d_to:
+            return {"full": True, "months": []}
+        stored = {g: (a, d) for g, a, d in c.execute(
+            "SELECT guid, alterid, date FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (r["id"], d_from, d_to))}
+    if not stored:
+        return {"full": True, "months": []}
+    months, seen, counts_t, counts_s = set(), set(), {}, {}
+    for g, a, d in tally_list:
+        if not (d_from <= d <= d_to):
+            continue
+        counts_t[d[:7]] = counts_t.get(d[:7], 0) + 1
+        s_ = stored.get(g) if g else None
+        if s_ is None or s_[0] != a or s_[1] != d:
+            months.add(d[:7])
+            if s_:
+                months.add(s_[1][:7])
+        seen.add(g)
+    for g, (a, d) in stored.items():
+        counts_s[d[:7]] = counts_s.get(d[:7], 0) + 1
+        if g not in seen:
+            months.add(d[:7])          # deleted in Tally
+    for m in set(counts_t) | set(counts_s):
+        if counts_t.get(m, 0) != counts_s.get(m, 0):
+            months.add(m)
+    return {"full": False, "months": sorted(months)}
+
+
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
-           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None):
-    """Replace one company's masters and its vouchers inside [d_from, d_to].
-    bills_rec / bills_pay: lists from Tally's Bills Receivable/Payable report, or None if unavailable."""
-    chains = _chains(groups)
-    bases = _base_types(vtypes)
+           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None):
+    """Store a sync. Masters are replaced when sent (groups/types/details are kept if a partial sync left them out).
+    Vouchers are replaced for the whole [d_from, d_to] range, or only for `months` (YYYY-MM) on a partial sync."""
     with _lock, conn() as c:
         cid = company_id(c, company)
         kf = keep_from(c, cid)
         if kf and d_from < kf:
             d_from = kf
             vouchers = [v for v in vouchers if v["date"] >= kf]
-        c.execute("DELETE FROM grp WHERE company_id=?", (cid,))
-        c.executemany("INSERT OR REPLACE INTO grp VALUES(?,?,?,?)",
-                      [(cid, g["name"], g["parent"], chains[g["name"]]) for g in groups])
-        c.execute("DELETE FROM vtype WHERE company_id=?", (cid,))
-        c.executemany("INSERT OR REPLACE INTO vtype VALUES(?,?,?)",
-                      [(cid, n, b) for n, b in bases.items()])
-        c.execute("DELETE FROM ledger WHERE company_id=?", (cid,))
+        partial = months is not None
+        if groups or not partial:
+            chains = _chains(groups)
+            c.execute("DELETE FROM grp WHERE company_id=?", (cid,))
+            c.executemany("INSERT OR REPLACE INTO grp VALUES(?,?,?,?)",
+                          [(cid, g["name"], g["parent"], chains[g["name"]]) for g in groups])
+        else:
+            chains = {r["name"]: r["chain"] for r in c.execute("SELECT name, chain FROM grp WHERE company_id=?", (cid,))}
+        if vtypes or not partial:
+            bases = _base_types(vtypes)
+            c.execute("DELETE FROM vtype WHERE company_id=?", (cid,))
+            c.executemany("INSERT OR REPLACE INTO vtype VALUES(?,?,?)", [(cid, n, b) for n, b in bases.items()])
+        else:
+            bases = {r["name"]: r["base"] for r in c.execute("SELECT name, base FROM vtype WHERE company_id=?", (cid,))}
+        if not ledger_x and partial:
+            ledger_x = {r["name"]: json.loads(r["extra"] or "{}") for r in
+                        c.execute("SELECT name, extra FROM ledger WHERE company_id=?", (cid,))}
+        if not stock_x and partial:
+            stock_x = {r["name"]: {"hsn": r["hsn"]} for r in c.execute("SELECT name, hsn FROM stock WHERE company_id=?", (cid,))}
         ledger_x = ledger_x or {}
         stock_x = stock_x or {}
-        c.executemany("INSERT OR REPLACE INTO ledger VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
-            (cid, l["name"], l["parent"],
-             chains.get(l["parent"], "|" + l["parent"] + "|") + l["name"] + "|",
-             round(l["opening"], 2), round(l["closing"], 2),
-             l["phone"], l["mobile"], l["email"], l["gstin"] or ledger_x.get(l["name"], {}).get("gstin", ""),
-             l.get("taxtype", ""), l.get("gst_head", ""), json.dumps(ledger_x.get(l["name"], {})))
-            for l in ledgers])
-        c.execute("DELETE FROM stock WHERE company_id=?", (cid,))
-        c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?,?)", [
-            (cid, s["name"], s["parent"], s["unit"], s["opening_qty"], s["opening_value"],
-             s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""))
-            for s in stock])
+        if ledgers or not partial:
+            c.execute("DELETE FROM ledger WHERE company_id=?", (cid,))
+            c.executemany("INSERT OR REPLACE INTO ledger VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+                (cid, l["name"], l["parent"],
+                 chains.get(l["parent"], "|" + l["parent"] + "|") + l["name"] + "|",
+                 round(l["opening"], 2), round(l["closing"], 2),
+                 l["phone"], l["mobile"], l["email"], l["gstin"] or ledger_x.get(l["name"], {}).get("gstin", ""),
+                 l.get("taxtype", ""), l.get("gst_head", ""), json.dumps(ledger_x.get(l["name"], {})))
+                for l in ledgers])
+        if stock or not partial:
+            c.execute("DELETE FROM stock WHERE company_id=?", (cid,))
+            c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?,?)", [
+                (cid, s["name"], s["parent"], s["unit"], s["opening_qty"], s["opening_value"],
+                 s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""))
+                for s in stock])
 
-        old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
-        for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
-            c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, d_from, d_to))
-        c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, d_from, d_to))
-        unbalanced = 0
+        ranges = [_month_range(m, d_from, d_to) for m in months] if partial else [(d_from, d_to)]
+        ranges = [(a, b) for a, b in ranges if a <= b]
+        for a, b in ranges:
+            old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
+            for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+                c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, a, b))
+            c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, a, b))
+        inserted = 0
         for v in vouchers:
-            if not (d_from <= v["date"] <= d_to):
+            if not any(a <= v["date"] <= b for a, b in ranges):
                 continue
+            inserted += 1
             base = bases.get(v["vtype"], v["vtype"])
-            posting = base not in NO_ACCOUNTS
-            if posting and not v["balanced"]:
-                unbalanced += 1
+            status = v.get("status", "")
+            posting = base not in NO_ACCOUNTS and not status
             vid = c.execute(
                 "INSERT INTO voucher(company_id,guid,date,vtype,base,number,party,narration,amount,balanced,"
-                "reference,party_gstin,extra,posting,imbalance) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "reference,party_gstin,extra,posting,imbalance,status,alterid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, v["guid"], v["date"], v["vtype"], base, v["number"],
                  v["party"], v["narration"], v["amount"], 1 if (v["balanced"] or not posting) else 0,
                  v.get("reference", ""), v.get("party_gstin", ""), json.dumps(v.get("extra", {})),
-                 1 if posting else 0, v.get("imbalance", 0))).lastrowid
+                 1 if posting else 0, v.get("imbalance", 0), status, v.get("alterid", 0))).lastrowid
             agg = {}
             for ln, a in v["lines"]:
                 agg[ln] = agg.get(ln, 0) + a
             c.executemany(f"INSERT INTO {'vline' if posting else 'vline_np'} VALUES(?,?,?)",
                           [(vid, ln, round(a, 2)) for ln, a in agg.items()])
-            c.executemany(f"INSERT INTO {'vitem_np' if base in NO_STOCK else 'vitem'} VALUES(?,?,?,?,?,?,?,?,?)",
+            c.executemany(f"INSERT INTO {'vitem_np' if (base in NO_STOCK or status) else 'vitem'} VALUES(?,?,?,?,?,?,?,?,?)",
                           [(vid, i["item"], i["qty"], i["unit"], i["rate"], i["amount"],
                             i.get("hsn") or stock_x.get(i["item"], {}).get("hsn", ""), i.get("disc", 0), i.get("descr", ""))
                            for i in v["items"]])
-            c.executemany("INSERT INTO vbill VALUES(?,?,?,?,?,?)",
-                          [(vid, b["ledger"], b["name"], b["type"], round(b["amount"], 2), b["days"])
-                           for b in v.get("bills", [])])
+            if posting:
+                c.executemany("INSERT INTO vbill VALUES(?,?,?,?,?,?)",
+                              [(vid, b["ledger"], b["name"], b["type"], round(b["amount"], 2), b["days"])
+                               for b in v.get("bills", [])])
 
-        source = "vouchers"
-        c.execute("DELETE FROM bill WHERE company_id=?", (cid,))
-        if bills_rec is not None or bills_pay is not None:
-            source = "tally"
-            for kind, rows in (("receivable", bills_rec or []), ("payable", bills_pay or [])):
-                c.executemany("INSERT INTO bill VALUES(?,?,?,?,?,?,?)",
-                              [(cid, kind, b["party"], b["ref"], b["date"], b["due"], round(b["amount"], 2))
-                               for b in rows])
+        if bills_rec is not None or bills_pay is not None or not partial:
+            source = "vouchers"
+            c.execute("DELETE FROM bill WHERE company_id=?", (cid,))
+            if bills_rec is not None or bills_pay is not None:
+                source = "tally"
+                for kind, rows in (("receivable", bills_rec or []), ("payable", bills_pay or [])):
+                    c.executemany("INSERT INTO bill VALUES(?,?,?,?,?,?,?)",
+                                  [(cid, kind, b["party"], b["ref"], b["date"], b["due"], round(b["amount"], 2))
+                                   for b in rows])
+            c.execute("UPDATE company SET bills_source=? WHERE id=?", (source, cid))
+        if info or not partial:
+            c.execute("UPDATE company SET info=? WHERE id=?", (json.dumps(info or {}), cid))
+        unbalanced = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=? AND balanced=0", (cid,)).fetchone()["n"]
         now = time.time()
         c.execute("UPDATE company SET last_sync=?, last_seen=?, from_date=?, to_date=?, alt_vch=?, alt_mst=?,"
-                  " unbalanced=?, bills_source=?, info=? WHERE id=?",
-                  (now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, source, json.dumps(info or {}), cid))
+                  " unbalanced=? WHERE id=?", (now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, cid))
         n_v = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=?", (cid,)).fetchone()["n"]
     return {"ledgers": len(ledgers), "stock": len(stock), "vouchers": n_v, "unbalanced": unbalanced,
-            "bills": source}
+            "changed": inserted, "months": len(ranges) if partial else "all"}
 
 
 # ---------------------------------------------------------------- reports
@@ -318,7 +379,7 @@ def dashboard(cid, d_from=None, d_to=None):
             AND (chain LIKE '%|Bank Accounts|%' OR chain LIKE '%|Bank OD A/c|%') ORDER BY closing DESC""", (cid,))
         top_debtors = _rows(c, """SELECT name, closing, mobile FROM ledger WHERE company_id=?
             AND chain LIKE '%|Sundry Debtors|%' AND closing > 0.5 ORDER BY closing DESC LIMIT 5""", (cid,))
-        recent = _rows(c, """SELECT id, date, vtype, base, number, party, amount FROM voucher
+        recent = _rows(c, """SELECT id, date, vtype, base, number, party, amount, status FROM voucher
             WHERE company_id=? ORDER BY date DESC, id DESC LIMIT 8""", (cid,))
         info = dict(c.execute("SELECT name, last_sync, last_seen, from_date, to_date, unbalanced FROM company WHERE id=?",
                               (cid,)).fetchone())
@@ -588,7 +649,7 @@ def daybook(cid, d_from=None, d_to=None, base="", offset=0):
         if base:
             extra = " AND base=?"
             args.append(base)
-        rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount FROM voucher
+        rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount, status FROM voucher
             WHERE company_id=? AND date BETWEEN ? AND ?{extra} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?""",
                      args + [PAGE, int(offset)])
         total = c.execute(f"SELECT COUNT(*) n FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?{extra}", args).fetchone()["n"]
@@ -616,7 +677,7 @@ def vouchers(cid, q="", d_from=None, d_to=None, base="", offset=0):
             except ValueError:
                 pass
             where.append(cond + ")")
-        rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount, narration FROM voucher
+        rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount, narration, status FROM voucher
             WHERE {' AND '.join(where)} ORDER BY (number = ?) DESC, date DESC, id DESC LIMIT ? OFFSET ?""",
                      args + [q, PAGE, int(offset)])
         total = c.execute(f"SELECT COUNT(*) n FROM voucher WHERE {' AND '.join(where)}", args).fetchone()["n"]
@@ -794,7 +855,8 @@ def sync_check(cid):
     for g in out:
         g["of"] = total.get(g["vtype"], 0)
     with conn() as c:
-        months = _rows(c, """SELECT substr(date,1,7) m, COUNT(*) n, SUM(CASE WHEN base='Sales' THEN 1 ELSE 0 END) sales
+        months = _rows(c, """SELECT substr(date,1,7) m, COUNT(*) n, SUM(CASE WHEN base='Sales' THEN 1 ELSE 0 END) sales,
+            SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) cancelled
             FROM voucher WHERE company_id=? GROUP BY m ORDER BY m DESC""", (cid,))
     return {"unbalanced": len(rows), "groups": out, "types": counts, "months": months}
 
@@ -808,3 +870,99 @@ def agent_stats():
                 GROUP BY m ORDER BY m""", (co["id"],))
             out.append(co)
         return {"companies": out}
+
+
+# ---------------------------------------------------------------- analysis
+
+def _year_back(d):
+    x = date.fromisoformat(d)
+    try:
+        return x.replace(year=x.year - 1).isoformat()
+    except ValueError:            # 29 Feb
+        return x.replace(year=x.year - 1, day=28).isoformat()
+
+
+def analysis_parties(cid, kind="sales", d_from=None, d_to=None):
+    base = "Sales" if kind == "sales" else "Purchase"
+    with conn() as c:
+        f, t = period(c, cid, d_from, d_to)
+        pf, pt = _year_back(f), _year_back(t)
+        q = """SELECT party, COUNT(*) n, SUM(amount) total, MAX(date) last FROM voucher
+               WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ? AND party<>'' GROUP BY party"""
+        cur = {r["party"]: dict(r) for r in c.execute(q, (cid, base, f, t))}
+        prev = {r["party"]: dict(r) for r in c.execute(q, (cid, base, pf, pt))}
+        has_prev = c.execute("SELECT 1 FROM voucher WHERE company_id=? AND date <= ? LIMIT 1", (cid, pt)).fetchone() is not None
+    total = sum(r["total"] for r in cur.values()) or 1
+    rows = []
+    for p in set(cur) | set(prev):
+        a, b = cur.get(p, {}), prev.get(p, {})
+        now_, before = round(a.get("total") or 0, 2), round(b.get("total") or 0, 2)
+        rows.append({"party": p, "total": now_, "bills": a.get("n", 0), "last": a.get("last") or b.get("last"),
+                     "share": round(now_ / total * 100, 1), "prev": before,
+                     "change": round((now_ - before) / before * 100, 1) if before else None})
+    rows.sort(key=lambda r: (-r["total"], -r["prev"]))
+    return {"kind": kind, "from": f, "to": t, "prev_from": pf, "prev_to": pt, "has_prev": has_prev,
+            "total": round(sum(r["total"] for r in rows), 2), "prev_total": round(sum(r["prev"] for r in rows), 2),
+            "parties": rows}
+
+
+def analysis_items(cid, d_from=None, d_to=None):
+    with conn() as c:
+        f, t = period(c, cid, d_from, d_to)
+        sold = _rows(c, """SELECT vi.item, -SUM(vi.qty) qty, SUM(vi.amount) value, MAX(vi.unit) unit, COUNT(DISTINCT v.id) bills
+            FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+            WHERE v.company_id=? AND v.base='Sales' AND v.date BETWEEN ? AND ? GROUP BY vi.item""", (cid, f, t))
+        cost = {r["item"]: r for r in c.execute("""SELECT vi.item, SUM(vi.qty) qty, SUM(vi.amount) value FROM vitem vi
+            JOIN voucher v ON v.id=vi.voucher_id WHERE v.company_id=? AND v.base='Purchase' AND v.date <= ? GROUP BY vi.item""",
+                                                  (cid, t))}
+        stock = {r["name"]: r for r in c.execute("SELECT name, closing_qty, closing_value, closing_rate FROM stock WHERE company_id=?", (cid,))}
+    total = sum(r["value"] for r in sold) or 1
+    for r in sold:
+        r["rate"] = round(r["value"] / r["qty"], 2) if r["qty"] else 0
+        p = cost.get(r["item"])
+        st_ = stock.get(r["item"])
+        buy = (p["value"] / p["qty"]) if p and p["qty"] else (st_["closing_rate"] if st_ and st_["closing_rate"] else None)
+        r["buy_rate"] = round(buy, 2) if buy else None
+        r["margin"] = round((r["rate"] - buy) / r["rate"] * 100, 1) if buy and r["rate"] else None
+        r["share"] = round(r["value"] / total * 100, 1)
+        s = stock.get(r["item"])
+        r["in_hand"] = s["closing_qty"] if s else None
+    sold.sort(key=lambda r: -r["value"])
+    return {"from": f, "to": t, "total": round(sum(r["value"] for r in sold), 2), "items": sold}
+
+
+def analysis_years(cid):
+    """Sales before tax by month: this financial year against the previous one."""
+    fs, fe = fy_bounds()
+    with conn() as c:
+        r = c.execute("SELECT MAX(date) m FROM voucher WHERE company_id=?", (cid,)).fetchone()
+        if r and r["m"] and r["m"] < fs:
+            fs, fe = fy_bounds(date.fromisoformat(r["m"]))
+        ps, pe = _year_back(fs), _year_back(fe)
+
+        def monthly(a, b):
+            return {x["m"]: -x["s"] for x in c.execute("""SELECT substr(v.date,6,2) m, SUM(vl.amount) s FROM vline vl
+                JOIN voucher v ON v.id=vl.voucher_id JOIN ledger l ON l.company_id=v.company_id AND l.name=vl.ledger
+                WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND l.chain LIKE '%|Sales Accounts|%' GROUP BY m""", (cid, a, b))}
+        cur, prev = monthly(fs, fe), monthly(ps, pe)
+        has_prev = c.execute("SELECT 1 FROM voucher WHERE company_id=? AND date BETWEEN ? AND ? LIMIT 1", (cid, ps, pe)).fetchone() is not None
+    order = ["04", "05", "06", "07", "08", "09", "10", "11", "12", "01", "02", "03"]
+    rows = [{"month": m, "this": round(cur.get(m, 0), 2), "last": round(prev.get(m, 0), 2)} for m in order]
+    return {"this_label": f"{fs[:4]}-{fe[2:4]}", "last_label": f"{ps[:4]}-{pe[2:4]}", "has_prev": has_prev,
+            "months": rows, "this_total": round(sum(cur.values()), 2), "last_total": round(sum(prev.values()), 2)}
+
+
+def slow_stock(cid, days=60):
+    today = date.today()
+    with conn() as c:
+        items = _rows(c, """SELECT s.name, s.unit, s.closing_qty, s.closing_value,
+            (SELECT MAX(v.date) FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+              WHERE v.company_id=s.company_id AND vi.item=s.name AND vi.qty < 0) last_out
+            FROM stock s WHERE s.company_id=? AND s.closing_qty > 0""", (cid,))
+    out = []
+    for it in items:
+        it["idle"] = (today - date.fromisoformat(it["last_out"])).days if it["last_out"] else None
+        if it["idle"] is None or it["idle"] >= days:
+            out.append(it)
+    out.sort(key=lambda x: -x["closing_value"])
+    return {"days": days, "value": round(sum(x["closing_value"] for x in out), 2), "items": out}

@@ -77,7 +77,7 @@ function Masters-Xml([string]$accountType, [string]$company) {
 }
 
 $VchFields = @(
-    "Date", "GUID", "VoucherTypeName", "VoucherNumber", "PartyLedgerName", "PartyGSTIN", "Narration", "Reference",
+    "Date", "GUID", "AlterID", "VoucherTypeName", "VoucherNumber", "PartyLedgerName", "PartyGSTIN", "Narration", "Reference",
     "ReferenceDate", "IsCancelled", "IsOptional", "IsDeleted", "PlaceOfSupply", "StateName", "BasicBuyerName",
     "BasicDueDateOfPymt", "BasicShipDocumentNo", "BasicShippedBy", "BasicFinalDestination", "BasicOrderRef",
     "AllLedgerEntries.LedgerName", "AllLedgerEntries.Amount", "AllLedgerEntries.IsDeemedPositive",
@@ -241,6 +241,9 @@ if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yel
 
 $BaseFrom = $FromDate
 $exitCode = 0
+$MethodFile = Join-Path $Here "TallySync.method"
+$script:VchMethod = "daybook"
+try { if ((Test-Path $MethodFile) -and ((Get-Content $MethodFile -Raw).Trim() -eq "collection")) { $script:VchMethod = "collection" } } catch {}
 
 foreach ($co in $companies) {
     try {
@@ -259,28 +262,68 @@ foreach ($co in $companies) {
         }
         $t0 = Get-Date
         $run = [guid]::NewGuid().ToString("N")
-        Log ("Syncing " + $co.Name + " (" + $fromIso + " to " + $toIso + ") ...") "Cyan"
 
-        Send-Part $run "groups"  (Tally-Raw (Collection-Xml "TMGroups" "Group" "Name, Parent" $co.Name))
-        Send-Part $run "vtypes"  (Tally-Raw (Collection-Xml "TMVchTypes" "VoucherType" "Name, Parent" $co.Name))
+        # 1. A light list of every voucher (GUID, change counter, date): tells the server what changed
+        $light = $null; $expected = $null
+        try {
+            $light = Tally-Raw (VchCollection-Xml $co.Name $FromDate $ToDate "Date, GUID, AlterID, IsCancelled, IsOptional")
+            $lx = Parse-Xml $light
+            $expected = @{}
+            if ($lx) {
+                foreach ($v in $lx.SelectNodes("//VOUCHER")) {
+                    $dn = $v.SelectSingleNode("DATE")
+                    $d = if ($dn) { Iso-Date $dn.InnerText } else { "" }
+                    if ($d) { $k = $d.Substring(0, 7); $expected[$k] = 1 + [int]$expected[$k] }
+                }
+            } else {
+                foreach ($mt in [regex]::Matches([System.Text.Encoding]::UTF8.GetString($light), '<VOUCHER[ >][\s\S]*?<DATE[^>]*>([^<]+)</DATE>')) {
+                    $d = Iso-Date $mt.Groups[1].Value
+                    if ($d) { $k = $d.Substring(0, 7); $expected[$k] = 1 + [int]$expected[$k] }
+                }
+            }
+        } catch { $light = $null; $expected = $null }
+
+        # 2. Ask the server which months need resending
+        $full = $true; $months = @()
+        if ($light -and -not $Force) {
+            try {
+                $wc = Server-Client
+                $wc.Headers.Add("Content-Type", "application/octet-stream"); $wc.Headers.Add("X-Gzip", "1")
+                $q = "company=" + [uri]::EscapeDataString($co.Name) + "&from=$fromIso&to=$toIso"
+                $plan = [System.Text.Encoding]::UTF8.GetString($wc.UploadData("$Server/agent/plan?$q", "POST", (Gzip $light))) | ConvertFrom-Json
+                $full = [bool]$plan.full
+                $months = @($plan.months)
+            } catch { $full = $true }
+        }
+        $mastersChanged = $full -or ($state.alt_mst -ne $co.AltMst)
+        if ($full) { Log ("Syncing " + $co.Name + " (" + $fromIso + " to " + $toIso + ") - full ...") "Cyan" }
+        else { Log ("Syncing " + $co.Name + " - " + $(if ($months.Count) { "changed months: " + ($months -join ", ") } else { "balances only" }) + " ...") "Cyan" }
+
+        # 3. Masters: ledgers and stock every time (their balances move with every entry), the rest only when changed
+        if ($mastersChanged) {
+            Send-Part $run "groups"  (Tally-Raw (Collection-Xml "TMGroups" "Group" "Name, Parent" $co.Name))
+            Send-Part $run "vtypes"  (Tally-Raw (Collection-Xml "TMVchTypes" "VoucherType" "Name, Parent" $co.Name))
+        }
         Send-Part $run "ledgers" (Tally-Raw (Collection-Xml "TMLedgers" "Ledger" `
             "Name, Parent, OpeningBalance, ClosingBalance, LedgerPhone, LedgerMobile, Email, PartyGSTIN, TaxType, GSTDutyHead" $co.Name))
         Send-Part $run "stock"   (Tally-Raw (Collection-Xml "TMStock" "StockItem" `
             "Name, Parent, BaseUnits, OpeningBalance, OpeningValue, ClosingBalance, ClosingValue, ClosingRate" $co.Name))
 
-        # Details used for printing invoices and statements (optional - skipped if Tally refuses)
-        $extras = @(
-            @("company",  { Collection-Xml "TMCompanyInfo" "Company" "Name, Address, StateName, PinCode, Email, PhoneNumber, IncomeTaxNumber, GSTRegistrationNumber, CountryName, Website" $co.Name }),
-            @("ledger_x", { Masters-Xml "Ledgers" $co.Name }),
-            @("stock_x",  { Masters-Xml "Stock Items" $co.Name })
-        )
-        foreach ($x in $extras) {
-            $data = $null
-            try { $data = Tally-Raw (& $x[1]) }
-            catch { Log ("Could not read " + $x[0] + " details from Tally: " + $_.Exception.Message) "Yellow" }
-            if ($data) {
-                try { Send-Part $run $x[0] $data }
-                catch { Log ("The server refused " + $x[0] + " details - update the Bahi server to the latest version. (" + $_.Exception.Message + ")") "Yellow" }
+        if ($mastersChanged) {
+            # Details used for printing invoices and statements (optional - skipped if Tally refuses)
+            $extras = @(
+                @("company",  { Collection-Xml "TMCompanyInfo" "Company" "Name, Address, StateName, PinCode, Email, PhoneNumber, IncomeTaxNumber, GSTRegistrationNumber, CountryName, Website" $co.Name }),
+                @("ledger_x", { Masters-Xml "Ledgers" $co.Name }),
+                @("stock_x",  { Masters-Xml "Stock Items" $co.Name })
+            )
+            foreach ($x in $extras) {
+                $data = $null
+                try { $data = Tally-Raw (& $x[1]) }
+                catch { Log ("Could not read " + $x[0] + " details from Tally: " + $_.Exception.Message) "Yellow" }
+                if ($data) {
+                    try { Send-Part $run $x[0] $data }
+                    catch { Log ("The server refused " + $x[0] + " details - update the Bahi server to the latest version. (" + (Error-Detail $_) + ")") "Yellow" }
+                }
             }
         }
 
@@ -291,31 +334,20 @@ foreach ($co in $companies) {
             catch { Log ("Could not read " + $r[1] + " from Tally: " + $_.Exception.Message) "Yellow" }
             if ($data) {
                 try { Send-Part $run $r[0] $data }
-                catch { Log ("The server refused " + $r[1] + " - update the Bahi server to the latest version. (" + $_.Exception.Message + ")") "Yellow" }
+                catch { Log ("The server refused " + $r[1] + " - update the Bahi server to the latest version. (" + (Error-Detail $_) + ")") "Yellow" }
             }
         }
 
-        # How many vouchers does Tally hold per month? (a light list of dates, used to verify what we receive)
-        $expected = $null
-        try {
-            $lx = Parse-Xml (Tally-Raw (VchCollection-Xml $co.Name $FromDate $ToDate "Date, IsCancelled, IsOptional"))
-            if ($lx) {
-                $expected = @{}
-                foreach ($v in $lx.SelectNodes("//VOUCHER")) {
-                    $opt = $v.SelectSingleNode("ISOPTIONAL"); $can = $v.SelectSingleNode("ISCANCELLED")
-                    if (($opt -and $opt.InnerText -eq "Yes") -or ($can -and $can.InnerText -eq "Yes")) { continue }
-                    $dn = $v.SelectSingleNode("DATE")
-                    $d = if ($dn) { Iso-Date $dn.InnerText } else { "" }
-                    if ($d) { $k = $d.Substring(0, 7); $expected[$k] = 1 + [int]$expected[$k] }
-                }
-            }
-        } catch { $expected = $null }
-
-        # Vouchers, one month at a time. Day Book first; if Tally ignores the dates or sends too few,
-        # use a date-filtered voucher collection instead (and keep using it for the remaining months).
-        $method = "daybook"; $sentTotal = 0; $expTotal = 0; $short = @()
+        # 4. Vouchers, one month at a time (all months on a full sync, only changed ones otherwise).
+        # Day Book first; if Tally ignores the dates or sends too few, use a date-filtered voucher collection.
+        $todo = @()
         $m = Get-Date -Year $FromDate.Year -Month $FromDate.Month -Day 1
         while ($m -le $ToDate) {
+            if ($full -or ($months -contains $m.ToString("yyyy-MM"))) { $todo += $m }
+            $m = $m.AddMonths(1)
+        }
+        $method = $script:VchMethod; $sentTotal = 0; $expTotal = 0; $short = @()
+        foreach ($m in $todo) {
             $mEnd = $m.AddMonths(1).AddDays(-1)
             $a = if ($m -lt $FromDate) { $FromDate } else { $m }
             $b = if ($mEnd -gt $ToDate) { $ToDate } else { $mEnd }
@@ -333,24 +365,28 @@ foreach ($co in $companies) {
                 if ($c.Ok -and $c.Entries -and $c.In -gt $bestIn) { $best = $raw; $bestIn = $c.In }
                 if ($good) {
                     $best = $raw; $bestIn = $c.In
-                    if ($how -ne $method) { Log ("This Tally's Day Book export ignores dates - using the voucher collection method instead") "Gray"; $method = $how }
+                    if ($how -ne $method) {
+                        if ($how -eq "collection") { Log ("This Tally's Day Book export ignores dates - using the voucher collection method instead") "Gray" }
+                        $method = $how
+                    }
                     break
                 }
             }
             if ($best) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn) }
             if ($want -ge 0 -and $bestIn -lt $want) { $short += ("{0}: {1} of {2}" -f $key, [math]::Max(0, $bestIn), $want) }
-            $m = $m.AddMonths(1)
         }
-        if ($expected -and $short.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in this period received") }
+        if ($method -ne $script:VchMethod) { try { Set-Content $MethodFile $method } catch {} }
+        $script:VchMethod = $method
+        if ($expected -and $todo.Count -and $short.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in the " + $todo.Count + " month(s) sent were received") }
         if ($short.Count -gt 0) { Log ("Warning: some months came back incomplete - " + ($short -join "; ") + ". Please report this.") "Yellow" }
 
-        $res = Server-Json "POST" "/agent/commit" @{
-            run = $run; company = $co.Name; from = $fromIso; to = $toIso; alt_vch = $co.AltVch; alt_mst = $co.AltMst
-        }
+        $meta = @{ run = $run; company = $co.Name; from = $fromIso; to = $toIso; alt_vch = $co.AltVch; alt_mst = $co.AltMst }
+        if (-not $full) { $meta.months = @($todo | ForEach-Object { $_.ToString("yyyy-MM") }) }
+        $res = Server-Json "POST" "/agent/commit" $meta
         $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
         Log ("Done: " + $res.ledgers + " ledgers, " + $res.stock + " stock items, " + $res.vouchers +
              " vouchers in $secs s") "Green"
-        if ($res.unbalanced -gt 0) { Log ("Warning: " + $res.unbalanced + " vouchers did not balance - see Reports, Sync check in the app") "Yellow" }
+        if ($res.unbalanced -gt 0) { Log ("Note: " + $res.unbalanced + " vouchers did not balance - see Reports, Sync check in the app") "Yellow" }
     } catch {
         $exitCode = 1
         Log ("Sync failed for " + $co.Name + ": " + (Error-Detail $_)) "Red"
