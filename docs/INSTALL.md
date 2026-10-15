@@ -214,5 +214,6 @@ You can change the backup time with the `BACKUP_TIME` variable, e.g. `BACKUP_TIM
 
 - The app password protects the phone app. The sync token protects the upload from the Tally PC. Use different, long values for each.
 - Cloudflare Access adds a login before anyone reaches Bahi at all. Use it if the app is reachable from the internet.
-- The agent only **reads** from Tally. It never changes your books.
+- The agent reads from Tally. The only thing it ever writes into Tally is an entry made in the app (receipt, payment or sales order) that you or an approved staff member saved. It never changes or deletes an existing voucher.
+- Staff passwords are stored hashed in `users.json` in the data folder.
 - To start fresh, stop the container, delete `/mnt/user/appdata/bahi/data`, start it again, and run `Sync-Now.bat`.

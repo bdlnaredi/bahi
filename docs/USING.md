@@ -224,6 +224,54 @@ After that you can change the time, the minimum amount, send a summary now, or t
 
 <br clear="right">
 
+## Entering receipts, payments and orders
+
+<table><tr>
+<td><img src="images/entry-order.png" width="230" alt="New sales order"></td>
+<td><img src="images/entries.png" width="230" alt="Entries from phone"></td>
+</tr></table>
+
+Tap **+ Receipt**, **+ Payment** or **+ Sales order** at the top of **Home**.
+
+- **Receipt / Payment:** pick the date, the party (start typing a name), and the cash or bank account. For a customer or supplier, their pending bills appear: tick the bills this settles and the amount fills in. Anything left over goes *on account*. Add a narration such as the cheque or UTR number.
+- **Sales order:** pick the customer, add items with quantity and rate (the rate starts at the item's last selling rate), and an optional delivery date. GST is added later, when you turn the order into an invoice in Tally.
+
+The entry does **not** go into Tally straight away. Your server keeps it, and the Tally PC adds it to Tally the next time it syncs: within 10 minutes while the PC is on and Tally is open, or at once with `Sync-Now.bat`. Each one gets *(entered on phone by …)* added to its narration, so you can spot them in Tally.
+
+**Reports → Entries from phone** shows every entry and where it is:
+
+| Status | Meaning |
+|---|---|
+| Waiting for owner's approval | Made by a staff member. Approve or reject it. |
+| Waiting for the Tally PC | Approved, will go in at the next sync |
+| In Tally | Added. It also shows in the app as a normal voucher after that sync. |
+| Tally didn't accept it | Tally's own message is shown, e.g. a ledger was renamed. Fix it in Tally and tap **Try again**, or **Cancel**. |
+
+You can cancel an entry until it's in Tally. After that, change or delete it in Tally as usual.
+
+## Staff logins
+
+<img src="images/staff-home.png" width="260" align="right" alt="What a salesman sees">
+
+Give staff their own login so they see only what they need. In **Reports → Settings → Staff logins**, tap **Add a staff member**, set a name and password, and tick what they may see and do:
+
+| Tick | They can |
+|---|---|
+| Money figures | See Home figures, Profit & Loss, Balance Sheet, cash and bank, GST and sales analysis |
+| Sales by day | See daily sales |
+| All ledgers / Customer and supplier ledgers only | Open ledgers. *Only customers and suppliers* hides bank, cash, expenses and capital. |
+| Vouchers and Day Book | Search and open any voucher |
+| Dues and follow-up list | See who owes what, send reminders, write follow-up notes |
+| Stock | See stock |
+| Enter receipts / payments / sales orders | Make those entries |
+| No approval | Their entries go to Tally without waiting for you |
+
+**Salesman** and **Accountant** buttons tick a sensible set for you. With two companies, you can also limit someone to one company.
+
+Staff log in with their **name** and password. You log in as before, with the name left empty and the app password. Staff can change their own password in Settings. **Switch off** or a new password logs them out at once. Only you can see Settings for Telegram, backups, staff and deleting data.
+
+<br clear="right">
+
 ## Backups
 
 The server makes a backup every night at 02:30 and keeps the last 7. **Reports → Settings → Backups** shows when the last one ran, lets you download any of them, and has a **Back up now** button.

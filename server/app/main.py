@@ -28,6 +28,8 @@ import pdf  # noqa: E402
 import export  # noqa: E402
 import notify  # noqa: E402
 import backup  # noqa: E402
+import users  # noqa: E402
+import entries  # noqa: E402
 import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -37,7 +39,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.4.1"
+APP_VERSION = "2.5"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -84,19 +86,31 @@ def _secret():
         return (f.read().strip() + (st["hash"] if st else APP_PASSWORD)).encode()
 
 
-def make_session():
+def make_session(user=None):
+    """Owner: "exp.sig". Staff: "name-hex.gen.exp.sig" - changing their password or switching them off
+    bumps gen, which signs them out."""
     exp = str(int(time.time()) + SESSION_DAYS * 86400)
-    sig = hmac.new(_secret(), exp.encode(), hashlib.sha256).hexdigest()
-    return f"{exp}.{sig}"
+    body = exp if not user or user["owner"] else f"{user['name'].encode().hex()}.{user['gen']}.{exp}"
+    sig = hmac.new(_secret(), body.encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{sig}"
 
 
 def check_session(tok):
+    """The logged-in user (owner or staff), or None."""
     try:
-        exp, sig = tok.split(".", 1)
-        good = hmac.new(_secret(), exp.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, good) and int(exp) > time.time()
+        body, sig = tok.rsplit(".", 1)
+        good = hmac.new(_secret(), body.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, good):
+            return None
+        parts = body.split(".")
+        if int(parts[-1]) < time.time():
+            return None
+        if len(parts) == 1:
+            return dict(users.OWNER)
+        u = users.get(bytes.fromhex(parts[0]).decode())
+        return u if u and str(u["gen"]) == parts[1] else None
     except Exception:
-        return False
+        return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -188,7 +202,46 @@ class Handler(BaseHTTPRequestHandler):
         return ""
 
     def authed(self):
-        return check_session(self.cookie("tm_session"))
+        self.user = check_session(self.cookie("tm_session"))
+        return self.user
+
+    def cookie_header(self, user):
+        secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+        return {"Set-Cookie": f"tm_session={make_session(user)}; Path=/; HttpOnly; SameSite=Lax; "
+                              f"Max-Age={SESSION_DAYS * 86400}{secure}"}
+
+    def allowed(self, cid, what, q, arg):
+        """Can the logged-in user see this? The owner sees everything."""
+        u = self.user
+        if u["owner"]:
+            return True
+        co = next((c for c in store.companies() if c["id"] == cid), None)
+        if not co or not users.can_company(u, co["name"]):
+            return False
+        need = {"dashboard": "accounts", "daily": "sales", "group": "accounts", "stock": "stock", "stock_item": "stock",
+                "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
+                "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
+                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts"}
+        if what == "export":
+            w = q.get("what", "")
+            what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
+                    "ledger": "ledger"}.get(w, "a_items" if w.startswith("a_") else "")
+            if not what:
+                return False
+        if what in need:
+            return users.can(u, need[what])
+        if what == "ledgers":
+            return users.can(u, "ledgers") or users.can(u, "parties")
+        if what in ("ledger", "ledger_pdf"):
+            return users.can(u, "ledgers") or (users.can(u, "parties") and unquote(q.get("name", "")) in store.party_names(cid))
+        if what in ("voucher", "voucher_pdf"):
+            if users.can(u, "vouchers"):
+                return True
+            return (users.can(u, "parties") or users.can(u, "dues")) and arg and \
+                store.voucher_party(cid, int(arg)) in store.party_names(cid)
+        if what in ("entry_form", "party_bills", "entries", "entry"):
+            return any(users.can(u, p) for p in entries.PERM.values())
+        return False
 
     def agent_ok(self):
         auth = self.headers.get("Authorization") or ""
@@ -251,6 +304,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(store.agent_stats())
         if path == "/agent/state" and method == "GET":
             return self.send_json(store.get_alt(q.get("company", "")))
+        if path == "/agent/outbox" and method == "GET":
+            return self.send_json({"entries": entries.outbox(q.get("company", ""))})
+        if path == "/agent/outbox/result" and method == "POST":
+            r = json.loads(self.body(65536) or b"{}")
+            entries.result(int(r.get("id", 0)), bool(r.get("ok")), str(r.get("error") or ""), bool(r.get("retry")))
+            return self.send_json({"ok": True})
         if path == "/agent/heartbeat" and method == "POST":
             store.heartbeat(json.loads(self.body(1 << 20) or b"{}").get("companies", []))
             return self.send_json({"ok": True})
@@ -331,17 +390,61 @@ class Handler(BaseHTTPRequestHandler):
     def api(self, method, path, q):
         if path == "/api/login" and method == "POST":
             data = json.loads(self.body(4096) or b"{}")
-            if check_password(str(data.get("password", ""))):
-                secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
-                return self.send_json({"ok": True}, headers={
-                    "Set-Cookie": f"tm_session={make_session()}; Path=/; HttpOnly; SameSite=Lax; "
-                                  f"Max-Age={SESSION_DAYS * 86400}{secure}"})
+            name, pw = str(data.get("name", "")).strip(), str(data.get("password", ""))
+            if not name and check_password(pw):
+                return self.send_json({"ok": True}, headers=self.cookie_header(None))
+            u = users.check(name, pw) if name else None
+            if u:
+                return self.send_json({"ok": True}, headers=self.cookie_header(u))
             time.sleep(1.5)
-            return self.send_json({"error": "Wrong password"}, 401)
+            return self.send_json({"error": "Wrong name or password" if name else "Wrong password"}, 401)
         if path == "/api/logout":
             return self.send_json({"ok": True}, headers={"Set-Cookie": "tm_session=; Path=/; Max-Age=0"})
         if not self.authed():
             return self.send_json({"error": "login required"}, 401)
+
+        u = self.user
+        if path == "/api/me":
+            out = {"name": u["name"], "owner": u["owner"], "perms": u["perms"], "version": APP_VERSION}
+            if u["owner"]:
+                out["perm_list"] = users.PERMS
+            return self.send_json(out)
+
+        if path == "/api/password" and method == "POST" and not u["owner"]:
+            data = json.loads(self.body(4096) or b"{}")
+            cur, new = str(data.get("current", "")), str(data.get("new", ""))
+            if not users.check(u["name"], cur):
+                time.sleep(1.5)
+                return self.send_json({"error": "Your current password isn't right."}, 400)
+            if len(new) < 6:
+                return self.send_json({"error": "Use at least 6 characters for the new password."}, 400)
+            users.save(u["name"], password=new)
+            return self.send_json({"ok": True}, headers=self.cookie_header(users.get(u["name"])))
+
+        if path == "/api/companies":
+            return self.send_json({"companies": [c for c in store.companies() if users.can_company(u, c["name"])],
+                                   "now": time.time(),
+                                   "approvals": sum(entries.pending_count(c["name"]) for c in store.companies()) if u["owner"] else 0})
+
+        # everything below the staff list is for the owner only, except the company screens
+        if not u["owner"] and not path.startswith("/api/c/"):
+            return self.send_json({"error": "Only the owner can do that."}, 403)
+        if not u["owner"] and re.match(r"^/api/c/\d+/(purge|delete)$", path):
+            return self.send_json({"error": "Only the owner can do that."}, 403)
+
+        if path == "/api/users":
+            if method == "POST":
+                data = json.loads(self.body(8192) or b"{}")
+                try:
+                    if data.get("remove"):
+                        users.remove(data.get("name", ""))
+                    else:
+                        users.save(data.get("name", ""), password=data.get("password") or None,
+                                   perms=data.get("perms"), companies=data.get("companies"),
+                                   active=data.get("active"), new=bool(data.get("new")))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            return self.send_json({"users": users.listing(), "perms": users.PERMS})
 
         if path == "/api/password" and method == "POST":
             data = json.loads(self.body(4096) or b"{}")
@@ -352,10 +455,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(new) < 8:
                 return self.send_json({"error": "Use at least 8 characters for the new password."}, 400)
             set_password(new)
-            secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
-            return self.send_json({"ok": True}, headers={
-                "Set-Cookie": f"tm_session={make_session()}; Path=/; HttpOnly; SameSite=Lax; "
-                              f"Max-Age={SESSION_DAYS * 86400}{secure}"})
+            return self.send_json({"ok": True}, headers=self.cookie_header(None))
 
         if path.startswith("/api/telegram"):
             return self.telegram(method, path)
@@ -380,8 +480,31 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
 
+        mp = re.match(r"^/api/c/(\d+)/entry(?:/(\d+)/([a-z]+))?$", path)
+        if mp and method == "POST":
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "entry", q, None):
+                return self.send_json({"error": "You can't make entries."}, 403)
+            try:
+                if mp.group(2):
+                    e = entries.get(int(mp.group(2)))
+                    co = next((c for c in store.companies() if c["id"] == cid), None)
+                    if not e or not co or e["company"] != co["name"]:
+                        return self.send_json({"error": "not found"}, 404)
+                    self.body(4096)
+                    return self.send_json({"entry": entries.action(e["id"], mp.group(3), u)})
+                data = json.loads(self.body(65536) or b"{}")
+                kind = data.get("kind", "")
+                if kind not in entries.PERM or not users.can(u, entries.PERM[kind]):
+                    return self.send_json({"error": "You can't make this kind of entry."}, 403)
+                return self.send_json({"entry": entries.create(cid, kind, data, u)})
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+
         mp = re.match(r"^/api/c/(\d+)/followup$", path)
         if mp and method == "POST":
+            if not self.allowed(int(mp.group(1)), "followup", q, None):
+                return self.send_json({"error": "not allowed"}, 403)
             data = json.loads(self.body(4096) or b"{}")
             promise = str(data.get("promise", "") or "")
             if promise and not re.match(r"^\d{4}-\d{2}-\d{2}$", promise):
@@ -401,15 +524,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Pick a date."}, 400)
             return self.send_json({"ok": True, "deleted": store.purge_before(cid, day)})
 
-        if path == "/api/companies":
-            return self.send_json({"companies": store.companies(), "now": time.time()})
-
         m = re.match(r"^/api/c/(\d+)/([a-z_]+)(?:/(\d+))?$", path)
         if not m:
             return self.send_json({"error": "not found"}, 404)
         cid, what, arg = int(m.group(1)), m.group(2), m.group(3)
+        if not self.allowed(cid, what, q, arg):
+            return self.send_json({"error": "You don't have access to this. Ask the owner."}, 403)
         f, t = q.get("from"), q.get("to")
         name = unquote(q.get("name", ""))
+        if what == "ledgers" and not users.can(u, "ledgers"):
+            pn = store.party_names(cid)
+            return self.send_json({"ledgers": [r for r in store.ledgers(cid, q.get("q", ""), q.get("sort", "name")) if r["name"] in pn]})
+        if what == "entry_form":
+            k = q.get("kind", "")
+            if k not in entries.PERM or not users.can(u, entries.PERM[k]):
+                return self.send_json({"error": "You can't make this kind of entry."}, 403)
+            return self.send_json(entries.form(cid, k))
+        if what == "party_bills":
+            return self.send_json(entries.party_bills(cid, name))
+        if what == "entries":
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            return self.send_json({"entries": entries.listing(co["name"], u) if co else []})
         if what == "dashboard":
             out = store.dashboard(cid, f, t)
         elif what == "ledgers":

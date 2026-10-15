@@ -28,6 +28,8 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 - **Telegram:** a morning summary of yesterday's business and an alert when a large payment comes in.
 - **Reports:** Day Book, Profit & Loss, GST summary (output tax, input credit and net payable by month), and a group summary.
 - **PDFs like TallyPrime prints:** Tax Invoice, Receipt/Payment/Journal voucher, and Ledger Account.
+- **Enter receipts, payments and sales orders on the phone.** They go into Tally at the next sync.
+- **Staff logins** that show each person only what you allow, with your approval for their entries.
 - **Nightly backups** on your server, the last 7 kept.
 - **Works offline:** your phone keeps the last data you opened.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.
@@ -37,7 +39,7 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 <img src="docs/images/how-it-works.svg" alt="Tally PC sync agent sends data to the Bahi container on Unraid; the phone opens it through Cloudflare Tunnel" width="100%">
 
 1. TallyPrime's built-in data server (port 9000) lets programs on the same PC read your books.
-2. The **sync agent** (PowerShell, no install needed) runs every 10 minutes. When something has changed in Tally, it sends only the months that changed, plus masters and outstanding bills.
+2. The **sync agent** (PowerShell, no install needed) runs every 10 minutes. When something has changed in Tally, it sends only the months that changed, plus masters and outstanding bills. It also adds entries made on the phone into Tally.
 3. The **Bahi server** (one Docker container) stores the data and serves the phone app.
 4. Your **phone** opens the app in Chrome and installs it to the home screen like a normal app.
 

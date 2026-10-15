@@ -1,13 +1,28 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.4.1";
+const APP_VERSION = "2.5";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
 const S = {
   companies: [], cid: null, period: null, // period: {key, from, to} or null = full synced year
-  dueKind: "receivable", dayType: "", cache: {},
+  dueKind: "receivable", dayType: "", cache: {}, me: { owner: true, perms: [], name: "" }, approvals: 0,
 };
+const can = (p) => S.me.owner || S.me.perms.includes(p);
+const canLedgers = () => can("ledgers") || can("parties");
+const ENTRY = { receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], order: ["Sales order", "e_order"] };
+const entryKinds = () => Object.keys(ENTRY).filter((k) => can(ENTRY[k][1]));
+function applyTabs() {
+  const show = { home: true, sales: can("sales"), parties: canLedgers(), vouchers: can("vouchers"), dues: can("dues"), reports: true };
+  document.querySelectorAll("#tabs a").forEach((a) => a.hidden = !show[a.dataset.tab]);
+}
+function entryBar() {
+  const ks = entryKinds();
+  if (!ks.length && !S.approvals) return "";
+  return `<section class="page entrybar">
+    ${S.me.owner && S.approvals ? `<a class="row" href="#/entries"><div class="main"><div class="name od">${S.approvals} ${S.approvals === 1 ? "entry waits" : "entries wait"} for your approval</div><div class="meta">Made by staff on their phones</div></div><span class="chev"></span></a>` : ""}
+    ${ks.length ? `<div class="actions">${ks.map((k) => `<a class="btn" href="#/new/${k}">+ ${ENTRY[k][0]}</a>`).join("")}<a class="btn" href="#/entries">Entries</a></div>` : ""}</section>`;
+}
 try { S.cid = Number(localStorage.getItem("cid")) || null; } catch (e) {}
 try { S.lsort = localStorage.getItem("lsort") || "name"; S.esort = localStorage.getItem("esort") || "old"; } catch (e) { S.lsort = "name"; S.esort = "old"; }
 function savePref(k, v) { S[k] = v; try { localStorage.setItem(k, v); } catch (e) {} }
@@ -81,6 +96,7 @@ function periodParams() { return S.period ? { from: S.period.from, to: S.period.
 async function loadCompanies() {
   const d = await api("/api/companies");
   S.companies = d.companies;
+  S.approvals = d.approvals || 0;
   if (!S.companies.find((c) => c.id === S.cid)) {
     // start with the company holding the most recent vouchers (usually the current year's)
     const latest = S.companies.slice().sort((a, b) => (b.last_vch || "").localeCompare(a.last_vch || ""))[0];
@@ -142,7 +158,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", day: "sales", stock: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
 }
@@ -150,9 +166,10 @@ function setTitle(back) {
 /* ---------------------------------------------------------------- views */
 async function vHome() {
   setTitle(false);
+  if (!can("accounts")) return vStaffHome();
   const d = await api(cpath("dashboard", periodParams()));
   const thisMonth = new Date().toISOString().slice(0, 7);
-  view.innerHTML = `
+  view.innerHTML = `${entryBar()}
   <section class="page">
     <div class="hero">
       <a href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div></a>
@@ -454,26 +471,30 @@ async function vItem(name) {
 function vReports() {
   setTitle(false);
   const c = S.companies.find((x) => x.id === S.cid);
-  view.innerHTML = `<section class="page">
-    <a class="row" href="#/vouchers"><div class="main"><div class="name">Vouchers</div><div class="meta">Search and open any voucher</div></div><span class="chev"></span></a>
-    <a class="row" href="#/daybook"><div class="main"><div class="name">Day Book</div><div class="meta">Every voucher by date</div></div><span class="chev"></span></a>
-    <a class="row" href="#/analysis"><div class="main"><div class="name">Sales analysis</div><div class="meta">Top customers and items, margins, this year against last, slow stock</div></div><span class="chev"></span></a>
-    <a class="row" href="#/pl"><div class="main"><div class="name">Profit &amp; Loss</div><div class="meta">Sales, purchases, expenses and profit</div></div><span class="chev"></span></a>
-    <a class="row" href="#/bs"><div class="main"><div class="name">Balance Sheet</div><div class="meta">What the business owns and owes, as on today</div></div><span class="chev"></span></a>
-    <a class="row" href="#/cashbook"><div class="main"><div class="name">Cash and bank book</div><div class="meta">Money in and out each day, with opening and closing balances</div></div><span class="chev"></span></a>
-    <a class="row" href="#/collect"><div class="main"><div class="name">Follow-up list</div><div class="meta">Who should pay you: overdue, due this week, promises</div></div><span class="chev"></span></a>
-    <a class="row" href="#/gst"><div class="main"><div class="name">GST summary</div><div class="meta">Output tax, input credit and net payable by month</div></div><span class="chev"></span></a>
-    <a class="row" href="#/groups"><div class="main"><div class="name">Group summary</div><div class="meta">Balances by Tally group</div></div><span class="chev"></span></a>
-    <a class="row" href="#/dues/receivable"><div class="main"><div class="name">Outstanding</div><div class="meta">Bill-wise dues with ageing</div></div><span class="chev"></span></a>
-    <a class="row" href="#/stock"><div class="main"><div class="name">Stock summary</div><div class="meta">Quantity and value of every item</div></div><span class="chev"></span></a>
+  const R = [
+    ["#/entries", "Entries from phone", "Receipts, payments and orders made in the app, and their status", entryKinds().length || S.me.owner],
+    ["#/vouchers", "Vouchers", "Search and open any voucher", can("vouchers")],
+    ["#/daybook", "Day Book", "Every voucher by date", can("vouchers")],
+    ["#/analysis", "Sales analysis", "Top customers and items, margins, this year against last, slow stock", can("accounts")],
+    ["#/pl", "Profit &amp; Loss", "Sales, purchases, expenses and profit", can("accounts")],
+    ["#/bs", "Balance Sheet", "What the business owns and owes, as on today", can("accounts")],
+    ["#/cashbook", "Cash and bank book", "Money in and out each day, with opening and closing balances", can("accounts")],
+    ["#/collect", "Follow-up list", "Who should pay you: overdue, due this week, promises", can("dues")],
+    ["#/gst", "GST summary", "Output tax, input credit and net payable by month", can("accounts")],
+    ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
+    ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
+    ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
+  ].filter((r) => r[3]);
+  view.innerHTML = `${S.me.owner ? "" : `<p class="subtitle" style="margin-top:4px">Logged in as ${h(S.me.name)}</p>`}<section class="page">
+    ${R.map(([href, name, meta]) => `<a class="row" href="${href}"><div class="main"><div class="name">${name}${href === "#/entries" && S.me.owner && S.approvals ? ` <span class="badge">${S.approvals} to approve</span>` : ""}</div><div class="meta">${meta}</div></div><span class="chev"></span></a>`).join("")}
   </section>
-  ${c ? `<section class="page"><div class="block-title">Sync</div><div class="info">
+  ${c && S.me.owner ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
     <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
     <div>App version ${APP_VERSION}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
   <section class="page">
-    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Telegram summaries, backups, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}</div></div><span class="chev"></span></a>
+    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">${S.me.owner ? `Staff logins, Telegram summaries, backups, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}` : "Change your password"}</div></div><span class="chev"></span></a>
     <div class="actions" style="padding-top:12px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
@@ -770,6 +791,7 @@ async function vCheck() {
 async function vSettings() {
   setTitle(true);
   await loadCompanies();
+  if (!S.me.owner) return vMySettings();
   const range = (c) => c.first_vch ? `${fdate(c.first_vch)} to ${fdate(c.last_vch)}` : "no vouchers yet";
   let tg = {};
   try { tg = await api("/api/telegram"); } catch (e) {}
@@ -789,6 +811,7 @@ async function vSettings() {
         <form class="form" id="tgc"><label>Bot token<input type="text" id="tgtoken" autocomplete="off" placeholder="123456789:AA..." required></label>
         <button class="btn primary" type="submit">Connect</button><div class="msg" id="tgmsg" role="status"></div></form>`}
     </section>
+    <section class="page" id="stsec"></section>
     <section class="page" id="bksec"></section>
     <section class="page"><div class="block-title">Change app password</div>
       <form id="pwf" class="form">
@@ -844,6 +867,7 @@ async function vSettings() {
       try { showBackups(await post("/api/backups", {})); toast("Backup made."); } catch (err) { toast(err.message); showBackups(); } };
   };
   showBackups();
+  showStaff().catch(() => {});
   $("#pwf").onsubmit = async (e) => {
     e.preventDefault();
     const msg = $("#pwmsg");
@@ -873,6 +897,223 @@ async function vSettings() {
     await fetch(`/api/c/${c.id}/delete`, { method: "POST" });
     toast("Deleted."); S.cid = null; await loadCompanies(); location.hash = "#/reports";
   });
+}
+
+function vMySettings() {
+  view.innerHTML = `<h1 class="title">Settings</h1><p class="subtitle">Logged in as ${h(S.me.name)}</p>
+    <section class="page"><div class="block-title">Change your password</div>
+      <form id="pwf" class="form">
+        <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
+        <label>New password<input type="password" id="pw1" autocomplete="new-password" minlength="6" required></label>
+        <label>New password again<input type="password" id="pw2" autocomplete="new-password" minlength="6" required></label>
+        <button class="btn primary" type="submit">Change password</button><div class="msg" id="pwmsg" role="status"></div>
+        <p class="hint">Forgot it? Ask the owner to set a new one.</p></form></section>`;
+  $("#pwf").onsubmit = async (e) => {
+    e.preventDefault();
+    const msg = $("#pwmsg");
+    if ($("#pw1").value !== $("#pw2").value) { msg.textContent = "The two new passwords don't match."; return; }
+    const r = await fetch("/api/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ current: $("#pw0").value, new: $("#pw1").value }) });
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = r.ok ? "Password changed." : (j.error || "Couldn't change the password.");
+    if (r.ok) $("#pwf").reset();
+  };
+}
+
+/* ---------------------------------------------------------------- staff logins (owner) */
+const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_receipt", "e_payment", "e_order"] };
+async function showStaff() {
+  const d = await api("/api/users");
+  const sec = $("#stsec");
+  if (!sec) return;
+  const label = Object.fromEntries(d.perms);
+  const permBoxes = (sel, id) => d.perms.map(([k, l]) => `<label><span><input type="checkbox" name="perm" value="${k}" ${sel.includes(k) ? "checked" : ""}> ${h(l)}</span></label>`).join("");
+  const coBoxes = (sel) => S.companies.length > 1 ? `<div class="block-title" style="padding:6px 0 0">Companies</div>
+      <label><span><input type="checkbox" name="allco" ${!sel.length ? "checked" : ""}> All companies</span></label>
+      ${S.companies.map((c) => `<label><span><input type="checkbox" name="co" value="${h(c.name)}" ${sel.includes(c.name) ? "checked" : ""}> ${h(c.name)}</span></label>`).join("")}` : "";
+  const summary = (u) => u.perms.filter((p) => !p.startsWith("e_")).map((p) => ({ accounts: "money figures", sales: "sales", ledgers: "all ledgers", parties: "party ledgers", vouchers: "vouchers", dues: "dues", stock: "stock" }[p])).join(", ") +
+    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_receipt", "e_payment", "e_order"].includes(p)).map((p) => ({ e_receipt: "receipts", e_payment: "payments", e_order: "orders" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
+  sec.innerHTML = `<div class="block-title">Staff logins <span>${d.users.length}</span></div>
+    <div class="info"><div>Staff log in with their name and their own password, and see only what you tick. You always log in with the app password and see everything.</div></div>
+    ${d.users.map((u, i) => `<div class="party"><button class="row" aria-expanded="false" data-su="${i}"><div class="main"><div class="name">${h(u.name)}${u.active ? "" : ' <span class="badge">switched off</span>'}</div>
+        <div class="meta">${h(summary(u) || "nothing ticked yet")}</div><div class="meta">${u.last_login ? `Last logged in ${ago(u.last_login)}` : "Hasn't logged in yet"}</div></div><span class="chev down"></span></button>
+      <div class="bills" id="su${i}" hidden><form class="form staff" data-name="${h(u.name)}" style="padding:12px 14px 14px">
+        ${permBoxes(u.perms)}${coBoxes(u.companies)}
+        <label>New password (leave empty to keep)<input type="text" name="password" autocomplete="off" minlength="6"></label>
+        <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save</button>
+          <button class="btn" type="button" data-toggle>${u.active ? "Switch off" : "Switch on"}</button><button class="btn danger" type="button" data-remove>Remove</button></div>
+      </form></div></div>`).join("")}
+    <div class="party"><button class="row" aria-expanded="false" data-su="new"><div class="main"><div class="name">+ Add a staff member</div></div><span class="chev down"></span></button>
+      <div class="bills" id="sunew" hidden><form class="form staff" data-new="1" style="padding:12px 14px 14px">
+        <label>Name they log in with<input type="text" name="name" required maxlength="40" autocomplete="off"></label>
+        <label>Password<input type="text" name="password" required minlength="6" autocomplete="off"></label>
+        <div class="actions" style="padding:0">Quick pick: ${Object.keys(PRESETS).map((k) => `<button class="chip" type="button" data-preset="${k}">${k}</button>`).join("")}</div>
+        ${permBoxes([])}${coBoxes([])}
+        <button class="btn primary" type="submit">Add</button></form></div></div>
+    <p class="hint" style="padding:0 14px 14px">Staff entries wait for your approval in <b>Entries from phone</b> unless you tick the last box. Switching someone off or giving a new password logs them out at once.</p>`;
+  sec.querySelectorAll("[data-su]").forEach((b) => b.onclick = () => {
+    const el = document.getElementById("su" + b.dataset.su); el.hidden = !el.hidden;
+    b.setAttribute("aria-expanded", String(!el.hidden)); b.querySelector(".chev").classList.toggle("up", !el.hidden);
+  });
+  const send = async (body) => {
+    const r = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { toast(j.error || "Couldn't save."); return false; }
+    showStaff(); return true;
+  };
+  const read = (f) => {
+    const perms = [...f.querySelectorAll("[name=perm]:checked")].map((x) => x.value);
+    const all = f.querySelector("[name=allco]");
+    const companies = !all || all.checked ? [] : [...f.querySelectorAll("[name=co]:checked")].map((x) => x.value);
+    return { perms, companies };
+  };
+  sec.querySelectorAll("form.staff").forEach((f) => {
+    f.querySelectorAll("[data-preset]").forEach((b) => b.onclick = () => {
+      const set = PRESETS[b.dataset.preset]; f.querySelectorAll("[name=perm]").forEach((x) => x.checked = set.includes(x.value)); });
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      const body = { ...read(f), password: f.password.value || undefined };
+      if (f.dataset.new) Object.assign(body, { name: f.name.value, new: true }); else body.name = f.dataset.name;
+      if (await send(body)) toast(f.dataset.new ? `${body.name} added. Tell them their name and password.` : "Saved.");
+    };
+    const tg = f.querySelector("[data-toggle]");
+    if (tg) tg.onclick = () => send({ name: f.dataset.name, active: tg.textContent === "Switch on" });
+    const rm = f.querySelector("[data-remove]");
+    if (rm) rm.onclick = () => confirm(`Remove ${f.dataset.name}? Their entries stay.`) && send({ name: f.dataset.name, remove: true });
+  });
+}
+
+/* ---------------------------------------------------------------- staff home */
+async function vStaffHome() {
+  const tiles = [["#/dues", "Dues", "Who owes what, with bills", can("dues")], ["#/collect", "Follow-up list", "Overdue and due this week", can("dues")],
+    ["#/parties", "Ledgers", can("ledgers") ? "All ledgers" : "Customers and suppliers", canLedgers()], ["#/stock", "Stock", "Items in hand", can("stock")],
+    ["#/sales", "Sales by day", "Daily sales", can("sales")], ["#/vouchers", "Vouchers", "Search any voucher", can("vouchers")]].filter((t) => t[3]);
+  view.innerHTML = `<h1 class="title">Hello, ${h(S.me.name)}</h1>${entryBar()}
+    <section class="page">${tiles.map(([href, n, m]) => `<a class="row" href="${href}"><div class="main"><div class="name">${n}</div><div class="meta">${m}</div></div><span class="chev"></span></a>`).join("")
+      || '<div class="empty">The owner hasn\'t given you access to anything yet.</div>'}</section>`;
+}
+
+/* ---------------------------------------------------------------- entries from the phone */
+const EST = { approval: ["Waiting for owner's approval", ""], queued: ["Waiting for the Tally PC", ""], sending: ["Being added to Tally", ""],
+  done: ["In Tally", "ok"], failed: ["Tally didn't accept it", "bad"], rejected: ["Rejected by owner", "bad"], cancelled: ["Cancelled", ""] };
+async function vEntries() {
+  setTitle(true);
+  const d = await api(cpath("entries"));
+  const me = S.me.owner ? "Owner" : S.me.name;
+  view.innerHTML = `<h1 class="title">Entries from phone</h1>${entryBar()}
+    <section class="page">${d.entries.map((e) => {
+      const x = e.data, [st, cls] = EST[e.status] || [e.status, ""];
+      const detail = e.kind === "order" ? x.items.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)}`).join("<br>")
+        : `${e.kind === "receipt" ? "Into" : "From"} ${h(x.account)}${x.bills.length ? `, against ${x.bills.map((b) => h(b.ref)).join(", ")}` : ""}`;
+      const btn = [];
+      if (S.me.owner && e.status === "approval") btn.push(`<button class="btn primary" data-act="approve" data-id="${e.id}">Approve</button><button class="btn" data-act="reject" data-id="${e.id}">Reject</button>`);
+      if (e.status === "failed" && (S.me.owner || e.by === me)) btn.push(`<button class="btn" data-act="retry" data-id="${e.id}">Try again</button>`);
+      if (["approval", "queued", "failed"].includes(e.status) && (S.me.owner || e.by === me)) btn.push(`<button class="btn" data-act="cancel" data-id="${e.id}">Cancel</button>`);
+      return `<div class="entry"><div class="row" style="cursor:default"><div class="main"><div class="name">${h(x.vtype)}: ${h(x.party)}</div>
+          <div class="meta">${fdate(x.date)}, by ${h(e.by)}${e.approved_by && e.approved_by !== e.by ? `, approved by ${h(e.approved_by)}` : ""}</div>
+          <div class="meta">${detail}${x.narration ? `<br><i>${h(x.narration)}</i>` : ""}</div>
+          <div class="meta"><span class="est ${cls}">${st}</span>${e.status === "done" && e.done ? ` ${ago(e.done)}` : ""}</div>
+          ${e.error ? `<div class="meta od">${h(e.error)}</div>` : ""}</div>
+        <div class="end">${money(x.amount)}</div></div>${btn.length ? `<div class="actions" style="padding:0 14px 12px">${btn.join("")}</div>` : ""}</div>`;
+    }).join("") || '<div class="empty">No entries made in the app yet.</div>'}</section>
+    <p class="note" style="border:0">Entries go into Tally the next time the Tally PC syncs (every 10 minutes while Tally is open), then show up in the app like any other voucher. Each has "entered on phone by …" in its narration.</p>`;
+  view.querySelectorAll("[data-act]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.act === "reject" && !confirm("Reject this entry? It won't go into Tally.")) return;
+    b.disabled = true;
+    const r = await fetch(cpath(`entry/${b.dataset.id}/${b.dataset.act}`), { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) toast(j.error || "Couldn't do that.");
+    await loadCompanies().catch(() => {}); vEntries().catch(fail);
+  });
+}
+
+async function vNewEntry(kind) {
+  setTitle(true);
+  if (!ENTRY[kind] || !can(ENTRY[kind][1])) { view.innerHTML = '<div class="empty">You can\'t make this kind of entry.</div>'; return; }
+  const f = await api(cpath("entry_form", { kind }));
+  const order = kind === "order", rec = kind === "receipt";
+  const list = (id, arr) => `<datalist id="${id}">${arr.map((x) => `<option value="${h(x)}">`).join("")}</datalist>`;
+  const sel = (name, arr) => `<select name="${name}">${arr.map((x) => `<option>${h(x)}</option>`).join("")}</select>`;
+  view.innerHTML = `<h1 class="title">New ${ENTRY[kind][0].toLowerCase()}</h1>
+    <section class="page"><form class="form" id="ef" style="padding-top:14px" autocomplete="off">
+      ${f.vtypes.length > 1 ? `<label>Voucher type${sel("vtype", f.vtypes)}</label>` : ""}
+      <label>Date<input type="date" name="date" value="${f.today}" required></label>
+      <label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>
+      ${order ? `
+        <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
+        <div class="total">Total before tax <b id="otot">₹0</b></div>
+        <label>Deliver by (optional)<input type="date" name="due"></label>
+        ${f.sales_ledgers.length > 1 ? `<label>Sales ledger${sel("sales_ledger", f.sales_ledgers)}</label>` : ""}
+        <p class="hint">GST is added when the order is turned into an invoice in Tally.</p>`
+      : `<label>${rec ? "Into" : "From"}${sel("account", f.accounts)}</label>
+        <div id="bills"></div>
+        <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`}
+      <label>Narration (optional)<input name="narration" maxlength="500" placeholder="${order ? "e.g. Deliver to shop" : "e.g. Cheque no. 12345"}"></label>
+      <button class="btn primary" type="submit">Save</button><div class="msg" id="emsg" role="status"></div>
+      <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs." : "The owner approves it first, then it goes into Tally at the next sync."}</p>
+    </form></section>`;
+  const form = $("#ef");
+  if (order) {
+    const items = Object.fromEntries(f.items.map((i) => [i.name, i]));
+    const add = () => {
+      const row = document.createElement("div"); row.className = "irow";
+      row.innerHTML = `<label>Item<input name="item" list="ilist" placeholder="Start typing an item"></label>
+        <div class="two"><label>Qty<input name="qty" type="number" min="0" step="any" inputmode="decimal"></label><label>Rate<input name="rate" type="number" min="0" step="0.01" inputmode="decimal"></label></div>
+        <div class="meta" data-info></div>`;
+      $("#items").appendChild(row);
+      row.querySelector("[name=item]").onchange = (e) => {
+        const it = items[e.target.value]; const r = row.querySelector("[name=rate]");
+        row.querySelector("[data-info]").textContent = it ? `${nfq.format(it.in_hand || 0)} ${it.unit} in hand` : "Pick an item from the list";
+        if (it && !r.value) r.value = it.rate || "";
+        tot();
+      };
+      row.oninput = tot;
+    };
+    const tot = () => {
+      let t = 0;
+      $("#items").querySelectorAll(".irow").forEach((r) => { t += (+r.querySelector("[name=qty]").value || 0) * (+r.querySelector("[name=rate]").value || 0); });
+      $("#otot").textContent = rupees(t);
+    };
+    $("#additem").onclick = add; add();
+  } else {
+    let typed = false;
+    form.amount.oninput = () => { typed = true; };
+    form.party.onchange = async () => {
+      $("#bills").innerHTML = "";
+      if (!f.parties.includes(form.party.value)) return;
+      const b = await api(cpath("party_bills", { name: form.party.value })).catch(() => ({ bills: [] }));
+      if (!b.bills.length) return;
+      $("#bills").innerHTML = `<div class="block-title" style="padding:4px 0 0">Against bills (optional)</div>
+        ${b.bills.map((x, i) => `<div class="pbill"><label><span><input type="checkbox" data-b="${i}"> ${h(x.ref)} <span class="meta">${x.date ? fdate(x.date) : ""}${x.overdue ? `, ${x.overdue} days overdue` : ""}</span></span></label>
+          <input type="number" step="0.01" min="0" data-ba="${i}" value="${x.amount}" aria-label="Amount against ${h(x.ref)}"></div>`).join("")}
+        <p class="hint">Tick the bills this ${rec ? "receipt" : "payment"} settles. Anything left over goes "on account".</p>`;
+      const sum = () => {
+        if (typed) return;
+        let t = 0; $("#bills").querySelectorAll("[data-b]:checked").forEach((c) => { t += +$("#bills").querySelector(`[data-ba="${c.dataset.b}"]`).value || 0; });
+        form.amount.value = t ? t.toFixed(2) : "";
+      };
+      $("#bills").oninput = sum; $("#bills").onchange = sum;
+      $("#bills")._bills = b.bills;
+    };
+  }
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { kind, date: form.date.value, party: form.party.value, narration: form.narration.value, vtype: form.vtype ? form.vtype.value : undefined };
+    if (order) {
+      body.items = [...$("#items").querySelectorAll(".irow")].map((r) => ({ item: r.querySelector("[name=item]").value, qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value })).filter((i) => i.item);
+      body.due = form.due.value; body.sales_ledger = form.sales_ledger ? form.sales_ledger.value : undefined;
+    } else {
+      body.account = form.account.value; body.amount = form.amount.value;
+      const bl = $("#bills")._bills || [];
+      body.bills = [...$("#bills").querySelectorAll("[data-b]:checked")].map((c) => ({ ref: bl[c.dataset.b].ref, amount: $("#bills").querySelector(`[data-ba="${c.dataset.b}"]`).value }));
+    }
+    const btn = form.querySelector("button[type=submit]"); btn.disabled = true; $("#emsg").textContent = "Saving";
+    const r = await fetch(cpath("entry"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    btn.disabled = false;
+    if (!r.ok) { $("#emsg").textContent = j.error || "Couldn't save."; return; }
+    toast(j.entry.status === "approval" ? "Saved. It goes to the owner for approval." : "Saved. It goes into Tally at the next sync.");
+    location.hash = "#/entries";
+  };
 }
 
 function fyStart(day) {
@@ -1034,12 +1275,14 @@ async function vCollect() {
 function showLogin(msg = "") {
   $("#tabs").hidden = true; $("#status").innerHTML = ""; $("#company").textContent = "Bahi"; $("#back").hidden = true;
   view.innerHTML = `<div class="login"><form id="lf"><h1>Open your books</h1><p>Enter the app password you set on the server.</p>
-    <input type="password" id="pw" autocomplete="current-password" aria-label="App password" placeholder="App password" required>
+    <input type="text" id="lname" autocomplete="username" aria-label="Your name" placeholder="Your name (staff only)">
+    <input type="password" id="pw" autocomplete="current-password" aria-label="Password" placeholder="Password" required>
+    <p style="font-size:13px;margin:0">Owner: leave the name empty and use the app password.</p>
     <button class="btn primary" type="submit">Open</button><div class="err" role="alert">${h(msg)}</div></form></div>`;
   $("#pw").focus();
   $("#lf").onsubmit = async (e) => {
     e.preventDefault();
-    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: $("#pw").value }) });
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: $("#lname").value.trim(), password: $("#pw").value }) });
     if (r.ok) { $("#tabs").hidden = false; start(); } else showLogin((await r.json().catch(() => ({}))).error || "Could not log in.");
   };
 }
@@ -1081,6 +1324,8 @@ async function route() {
       case "bs": await vBS(); break;
       case "cashbook": await vCashbook(); break;
       case "collect": await vCollect(); break;
+      case "entries": await vEntries(); break;
+      case "new": await vNewEntry(parts[1]); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;
       case "analysis": await vAnalysis(parts[1]); break;
@@ -1109,7 +1354,8 @@ function pickCompany() {
 }
 
 async function start() {
-  try { await loadCompanies(); } catch (e) { return fail(e); }
+  try { S.me = await api("/api/me"); await loadCompanies(); } catch (e) { return fail(e); }
+  applyTabs();
   $("#tabs").hidden = false;
   route();
 }

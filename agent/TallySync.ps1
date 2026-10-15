@@ -245,8 +245,50 @@ $MethodFile = Join-Path $Here "TallySync.method"
 $script:VchMethod = "daybook"
 try { if ((Test-Path $MethodFile) -and ((Get-Content $MethodFile -Raw).Trim() -eq "collection")) { $script:VchMethod = "collection" } } catch {}
 
+# Entries made on the phone that are already in Tally (guards against adding one twice)
+$SentPath = Join-Path $Here "TallySync.sent"
+$Sent = @{}
+try { if (Test-Path $SentPath) { foreach ($l in (Get-Content $SentPath)) { if ($l.Trim()) { $Sent[$l.Trim()] = 1 } } } } catch {}
+
+function Push-Entries($co) {
+    # Receipts, payments and orders made on the phone: put them into this company in Tally
+    $made = 0
+    try { $ob = Server-Json "GET" ("/agent/outbox?company=" + [uri]::EscapeDataString($co.Name)) $null }
+    catch {
+        if ($_.Exception.Message -notmatch "\(404\)") { Log ("Could not check for phone entries: " + (Error-Detail $_)) "Yellow" }
+        return 0
+    }
+    foreach ($e in @($ob.entries)) {
+        if (-not $e) { continue }
+        $res = @{ id = $e.id; ok = $false; error = ""; retry = $false }
+        if ($Sent.ContainsKey([string]$e.uid)) {
+            $res.ok = $true
+        } else {
+            try {
+                $txt = [System.Text.Encoding]::UTF8.GetString((Tally-Raw $e.xml))
+                $created = [regex]::Match($txt, '<CREATED>\s*(\d+)').Groups[1].Value
+                $errs = @([regex]::Matches($txt, '<LINEERROR>([\s\S]*?)</LINEERROR>') | ForEach-Object { $_.Groups[1].Value.Trim() })
+                if ($created -and [int]$created -ge 1) {
+                    Add-Content -Path $SentPath -Value $e.uid -Encoding UTF8
+                    $Sent[[string]$e.uid] = 1
+                    $res.ok = $true; $made++
+                    Log ("Phone entry added to Tally: " + $e.label) "Green"
+                } else {
+                    $res.error = if ($errs.Count) { $errs -join "; " } else { "Tally did not accept it: " + $txt.Substring(0, [Math]::Min(300, $txt.Length)) }
+                    Log ("Phone entry not accepted by Tally (" + $e.label + "): " + $res.error) "Yellow"
+                }
+            } catch {
+                $res.error = "Could not reach Tally: " + $_.Exception.Message; $res.retry = $true
+            }
+        }
+        try { [void](Server-Json "POST" "/agent/outbox/result" $res) } catch { Log ("Could not report a phone entry back: " + (Error-Detail $_)) "Yellow" }
+    }
+    return $made
+}
+
 foreach ($co in $companies) {
     try {
+        $madeEntries = Push-Entries $co
         $state = Server-Json "GET" ("/agent/state?company=" + [uri]::EscapeDataString($co.Name)) $null
         # "Delete older vouchers" in the app sets keep_from: don't send anything before it
         $FromDate = $BaseFrom
@@ -254,7 +296,7 @@ foreach ($co in $companies) {
             $FromDate = [datetime]::ParseExact($state.keep_from, "yyyy-MM-dd", $null)
         }
         $fromIso = $FromDate.ToString("yyyy-MM-dd"); $toIso = $ToDate.ToString("yyyy-MM-dd")
-        $unchanged = $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
+        $unchanged = ($madeEntries -eq 0) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
                      ($state.alt_mst -eq $co.AltMst) -and ($state.from_date -eq $fromIso)
         if ($unchanged -and -not $Force) {
             if ($Verbose) { Log ("No changes in " + $co.Name) }

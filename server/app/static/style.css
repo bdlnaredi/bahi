@@ -302,3 +302,19 @@ a.bill:active { background: var(--rule); }
 .daybar span { display: block; height: 100%; background: var(--bar); border-radius: 2px; }
 
 .notep { font-style: italic; color: var(--ink-2); }
+
+/* entries and staff */
+.form select { border: 1px solid var(--rule); background: var(--paper); border-radius: 8px; padding: 10px; font-size: 16px; }
+.irow { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.irow .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.irow .two input { min-width: 0; width: 100%; box-sizing: border-box; }
+.total { display: flex; justify-content: space-between; font-size: 15px; padding: 4px 0; }
+.pbill { display: grid; grid-template-columns: 1fr 120px; gap: 8px; align-items: center; }
+.pbill input[type=number] { min-width: 0; }
+.pbill .meta { font-size: 12px; color: var(--ink-3); }
+.entry + .entry { border-top: 1px solid var(--rule); }
+.est { font-weight: 600; }
+.est.ok { color: var(--good); }
+.est.bad { color: var(--cr); }
+.entrybar .actions { padding: 12px 14px; }
+.login input[type=text] { margin-bottom: 8px; }

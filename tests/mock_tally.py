@@ -316,6 +316,72 @@ def apply_edit():
     return target["date"], newv["date"], victim["date"]
 
 
+IMPORTED = []
+
+
+def import_voucher(req):
+    """Tally's Import Data for one voucher, with the checks Tally makes."""
+    import xml.etree.ElementTree as ET
+    def err(msg):
+        return (f"<RESPONSE><LINEERROR>{escape(msg)}</LINEERROR><CREATED>0</CREATED><ALTERED>0</ALTERED>"
+                f"<ERRORS>1</ERRORS></RESPONSE>")
+    root = ET.fromstring(req)
+    co = root.findtext(".//SVCURRENTCOMPANY") or ""
+    if co != COMPANY:
+        return err(f"Could not set 'SVCurrentCompany' to '{co}'")
+    v = root.find(".//VOUCHER")
+    vt = v.findtext("VOUCHERTYPENAME")
+    if vt not in {n for n, _ in VTYPES}:
+        return err(f"Voucher Type '{vt}' does not exist!")
+    d = tdate(v.findtext("DATE"))
+    party = v.findtext("PARTYLEDGERNAME")
+    base = dict(VTYPES).get(vt) or vt
+    same = [x for x in VOUCHERS if x["type"] == vt]
+    nv = {"date": d, "type": vt, "no": str(len(same) + 1), "party": party, "narration": v.findtext("NARRATION") or "",
+          "guid": f"guid-imp-{len(IMPORTED) + 1}", "alterid": max(x["alterid"] for x in VOUCHERS) + 1}
+    if base == "Sales Order":
+        items = []
+        for ie in v.findall("ALLINVENTORYENTRIES.LIST"):
+            name = ie.findtext("STOCKITEMNAME")
+            st = next((x for x in STOCK if x[0] == name), None)
+            if not st:
+                return err(f"Stock Item '{name}' does not exist!")
+            if ie.find("BATCHALLOCATIONS.LIST/GODOWNNAME") is None:
+                return err("Godown not specified")
+            for al in ie.findall("ACCOUNTINGALLOCATIONS.LIST"):
+                if al.findtext("LEDGERNAME") not in LEDGERS:
+                    return err(f"Ledger '{al.findtext('LEDGERNAME')}' does not exist!")
+            q = float(ie.findtext("ACTUALQTY").split()[0])
+            a = float(ie.findtext("AMOUNT"))
+            items.append((name, q, st[2], round(a / q, 2), a))
+        if party not in LEDGERS:
+            return err(f"Ledger '{party}' does not exist!")
+        nv.update(kind="order", items=items, ledgers=[], nonposting=True)
+    else:
+        lines, allocs = [], []
+        for le in v.findall("ALLLEDGERENTRIES.LIST"):
+            ln = le.findtext("LEDGERNAME")
+            if ln not in LEDGERS:
+                return err(f"Ledger '{ln}' does not exist!")
+            amt_ = -float(le.findtext("AMOUNT"))      # back to debit-positive
+            lines.append((ln, amt_))
+            for b in le.findall("BILLALLOCATIONS.LIST"):
+                ref, bt, ba_ = b.findtext("NAME") or "", b.findtext("BILLTYPE"), -float(b.findtext("AMOUNT"))
+                allocs.append((ref, bt, ba_, 0))
+                if bt == "Agst Ref":
+                    for ob in OPEN_BILLS.get(ln, []):
+                        if ob[0] == ref:
+                            ob[2] -= abs(ba_)
+                    OPEN_BILLS[ln] = [ob for ob in OPEN_BILLS.get(ln, []) if ob[2] > 0.005]
+        if abs(sum(a for _, a in lines)) > 0.005:
+            return err("Voucher totals do not match!")
+        nv.update(kind="acct", ledgers=lines, billalloc=allocs)
+    VOUCHERS.append(nv)
+    IMPORTED.append(nv)
+    return ("<RESPONSE><CREATED>1</CREATED><ALTERED>0</ALTERED><DELETED>0</DELETED><LASTVCHID>%d</LASTVCHID>"
+            "<LASTMID>0</LASTMID><COMBINED>0</COMBINED><IGNORED>0</IGNORED><ERRORS>0</ERRORS><CANCELLED>0</CANCELLED></RESPONSE>" % (9000 + len(IMPORTED)))
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -337,7 +403,9 @@ class H(BaseHTTPRequestHandler):
         typ, rid = g("TYPE"), g("ID")
         f, t = tdate(g("SVFROMDATE")), tdate(g("SVTODATE"))
         co = g("SVCURRENTCOMPANY").replace("&amp;", "&")
-        if co and co != COMPANY:
+        if "<TALLYREQUEST>Import Data</TALLYREQUEST>" in req:
+            out = import_voucher(req)
+        elif co and co != COMPANY:
             out = "<ENVELOPE><LINEERROR>Could not find Company</LINEERROR></ENVELOPE>"
         elif typ == "Data" and rid in ("Bills Receivable", "Bills Payable"):
             want = {n for n, _, _ in DEBTORS} if rid == "Bills Receivable" else {n for n, _ in CREDITORS}

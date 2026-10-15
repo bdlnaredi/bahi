@@ -1191,3 +1191,15 @@ def collections(cid, days=7):
             "due_soon": round(sum(x["due_soon"] for x in out), 2),
             "promised_today": [x["name"] for x in out if x["promise"] == t],
             "parties": out}
+
+
+def party_names(cid):
+    with conn() as c:
+        return {r["name"] for r in c.execute("""SELECT name FROM ledger WHERE company_id=?
+            AND (chain LIKE '%|Sundry Debtors|%' OR chain LIKE '%|Sundry Creditors|%')""", (cid,))}
+
+
+def voucher_party(cid, vid):
+    with conn() as c:
+        r = c.execute("SELECT party FROM voucher WHERE company_id=? AND id=?", (cid, vid)).fetchone()
+        return r["party"] if r else None

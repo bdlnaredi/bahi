@@ -4,3 +4,4 @@ agent/TallySync.config.json
 agent/TallySync.log*
 agent/Bahi-Diagnosis.txt
 agent/TallySync.method
+agent/TallySync.sent
