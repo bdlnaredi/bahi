@@ -156,6 +156,24 @@ function Check-Vouchers([byte[]]$raw, [datetime]$from, [datetime]$to) {
     return $r
 }
 
+# The server explains every failure in its reply; show that text instead of just "(500)"
+function Error-Detail($err) {
+    $detail = $err.Exception.Message
+    $e = $err.Exception
+    while ($e) {
+        if ($e -is [System.Net.WebException] -and $e.Response) {
+            try {
+                $sr = New-Object System.IO.StreamReader($e.Response.GetResponseStream())
+                $body = $sr.ReadToEnd()
+                try { $j = $body | ConvertFrom-Json; if ($j.error) { $body = $j.error } } catch {}
+                if ($body) { return ("server says: " + $body) }
+            } catch {}
+        }
+        $e = $e.InnerException
+    }
+    return $detail
+}
+
 function Gzip([byte[]]$data) {
     $ms = New-Object System.IO.MemoryStream
     $gz = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
@@ -328,9 +346,7 @@ foreach ($co in $companies) {
         if ($res.unbalanced -gt 0) { Log ("Warning: " + $res.unbalanced + " vouchers did not balance - see Reports, Sync check in the app") "Yellow" }
     } catch {
         $exitCode = 1
-        $detail = $_.Exception.Message
-        if ($_.Exception.InnerException) { $detail += " / " + $_.Exception.InnerException.Message }
-        Log ("Sync failed for " + $co.Name + ": " + $detail) "Red"
+        Log ("Sync failed for " + $co.Name + ": " + (Error-Detail $_)) "Red"
     }
 }
 

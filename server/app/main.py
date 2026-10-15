@@ -33,6 +33,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
+APP_VERSION = "2.1"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -191,7 +192,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "not found"}, 404)
         except Exception as e:
             traceback.print_exc()
-            self.send_json({"error": str(e)}, 500)
+            tb = traceback.extract_tb(e.__traceback__)
+            where = f" (in {tb[-1].name}, {os.path.basename(tb[-1].filename)} line {tb[-1].lineno})" if tb else ""
+            self.send_json({"error": f"{type(e).__name__}: {e}{where} [server {APP_VERSION}]"}, 500)
 
     # ------------------------------------------------------------ agent endpoints
     def agent(self, method, path, q):
@@ -257,7 +260,7 @@ class Handler(BaseHTTPRequestHandler):
                 parts[kind] += fns[kind](tp.parse_xml(raw))
             except Exception as e:
                 if kind != "daybook":
-                    raise
+                    raise ValueError(f"could not read the {kind} data from Tally: {e}") from e
                 skipped.append(str(e)[:200])
                 print("voucher part skipped:", e, file=sys.stderr)
         if not parts["ledgers"]:

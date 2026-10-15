@@ -375,6 +375,8 @@ class H(BaseHTTPRequestHandler):
             elif ctype == "VoucherType":
                 for n, p in VTYPES:
                     out += f'<VOUCHERTYPE NAME="{escape(n)}"><PARENT TYPE="String">{escape(p)}</PARENT></VOUCHERTYPE>'
+            elif ctype == "Ledger" and os.environ.get("BROKEN_LEDGERS") == "1":
+                out += '<LEDGER NAME="Bad <"><PARENT>x</PARENT></LEDGER>'
             elif ctype == "Ledger":
                 bal = closing_balances(t or END)
                 for n, (p, o) in LEDGERS.items():
