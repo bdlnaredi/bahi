@@ -117,6 +117,15 @@ def summary_text(cid, day=None):
              f"Cash {_inr(dash['cash'])}, bank {_inr(dash['bank_total'])}",
              f"To receive: <b>{_inr(rec['total'])}</b>, overdue {_inr(rec['overdue'])}",
              f"To pay: {_inr(pay['total'])}, overdue {_inr(pay['overdue'])}"]
+    col = store.collections(cid, 7)
+    if col["due_soon"] > 0.5:
+        n = sum(1 for p in col["parties"] if p["due_soon"] > 0.5)
+        lines += [f"Falling due this week: {_inr(col['due_soon'])} from {n} parties"]
+    if col["promised_today"]:
+        lines += ["", "Promised to pay today: " + ", ".join(_esc(x) for x in col["promised_today"][:8])]
+    missed = [p["name"] for p in col["parties"] if p["promise_missed"]]
+    if missed:
+        lines += ["Promise date passed, still unpaid: " + ", ".join(_esc(x) for x in missed[:8])]
     if worst:
         lines += ["", "Biggest overdue:"]
         lines += [f"  {_esc(p['name'])}: {_inr(p['overdue_amount'])}" for p in worst]

@@ -200,6 +200,16 @@ When an update changes how data is stored, the server clears its copy and the ne
 | The phone shows an old version | In Chrome: **⋮ → Settings → Site settings → All sites → your Bahi address → Clear & reset**, then log in again. |
 | Unraid says **unauthorized** or **manifest unknown** when installing | The image isn't public yet. On GitHub: **Packages → bahi → Package settings → Change visibility → Public**. |
 
+## Restoring a backup
+
+Bahi backs up every night into `/mnt/user/appdata/bahi/data/backups`. To go back to one:
+
+1. Stop the bahi container.
+2. Open the backup `.zip` and copy everything in it (`tally.db`, `followups.json` and any settings files) into `/mnt/user/appdata/bahi/data`, replacing the files there.
+3. Start the container, then run `Sync-Now.bat` on the Tally PC to bring it up to date.
+
+You can change the backup time with the `BACKUP_TIME` variable, e.g. `BACKUP_TIME=23:30`.
+
 ## Security notes
 
 - The app password protects the phone app. The sync token protects the upload from the Tally PC. Use different, long values for each.

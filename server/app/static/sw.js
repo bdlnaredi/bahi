@@ -1,5 +1,5 @@
 /* Bahi service worker: always try the server first, fall back to the saved copy when offline */
-const SHELL = "bahi-shell-v4", DATA = "bahi-data-v1";
+const SHELL = "bahi-shell-v5", DATA = "bahi-data-v1";
 const FILES = ["/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -27,7 +27,7 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.pathname.startsWith("/agent/") || url.pathname === "/api/logout" || url.pathname.includes("_pdf") || url.pathname.endsWith("/export")) return;
+  if (url.pathname.startsWith("/agent/") || url.pathname === "/api/logout" || url.pathname.includes("_pdf") || url.pathname.endsWith("/export") || url.pathname.startsWith("/api/backups")) return;
 
   if (url.origin === location.origin && url.pathname.startsWith("/api/")) {
     e.respondWith((async () => {

@@ -300,3 +300,5 @@ a.bill:active { background: var(--rule); }
 .form input[type=checkbox] { width: 18px; height: 18px; padding: 0; }
 .daybar { height: 4px; background: var(--rule); border-radius: 2px; margin-top: 6px; overflow: hidden; max-width: 220px; }
 .daybar span { display: block; height: 100%; background: var(--bar); border-radius: 2px; }
+
+.notep { font-style: italic; color: var(--ink-2); }

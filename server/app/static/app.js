@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.4";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -142,7 +142,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", day: "sales", stock: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
 }
@@ -385,6 +385,7 @@ async function vDues(kind) {
     <div class="toolbar" role="group" aria-label="Dues">
       <a class="chip ${rec ? "on" : ""}" href="#/dues/receivable" aria-pressed="${rec}">To receive</a>
       <a class="chip ${!rec ? "on" : ""}" href="#/dues/payable" aria-pressed="${!rec}">To pay</a>
+      <a class="chip" href="#/collect">Follow-up list</a>
     </div>
     <section class="page">
       <div class="hero"><div><div class="label">${rec ? "You will receive" : "You owe"}</div>
@@ -458,8 +459,11 @@ function vReports() {
     <a class="row" href="#/daybook"><div class="main"><div class="name">Day Book</div><div class="meta">Every voucher by date</div></div><span class="chev"></span></a>
     <a class="row" href="#/analysis"><div class="main"><div class="name">Sales analysis</div><div class="meta">Top customers and items, margins, this year against last, slow stock</div></div><span class="chev"></span></a>
     <a class="row" href="#/pl"><div class="main"><div class="name">Profit &amp; Loss</div><div class="meta">Sales, purchases, expenses and profit</div></div><span class="chev"></span></a>
+    <a class="row" href="#/bs"><div class="main"><div class="name">Balance Sheet</div><div class="meta">What the business owns and owes, as on today</div></div><span class="chev"></span></a>
+    <a class="row" href="#/cashbook"><div class="main"><div class="name">Cash and bank book</div><div class="meta">Money in and out each day, with opening and closing balances</div></div><span class="chev"></span></a>
+    <a class="row" href="#/collect"><div class="main"><div class="name">Follow-up list</div><div class="meta">Who should pay you: overdue, due this week, promises</div></div><span class="chev"></span></a>
     <a class="row" href="#/gst"><div class="main"><div class="name">GST summary</div><div class="meta">Output tax, input credit and net payable by month</div></div><span class="chev"></span></a>
-    <a class="row" href="#/groups"><div class="main"><div class="name">Group summary</div><div class="meta">Balances by Tally group, like the Balance Sheet</div></div><span class="chev"></span></a>
+    <a class="row" href="#/groups"><div class="main"><div class="name">Group summary</div><div class="meta">Balances by Tally group</div></div><span class="chev"></span></a>
     <a class="row" href="#/dues/receivable"><div class="main"><div class="name">Outstanding</div><div class="meta">Bill-wise dues with ageing</div></div><span class="chev"></span></a>
     <a class="row" href="#/stock"><div class="main"><div class="name">Stock summary</div><div class="meta">Quantity and value of every item</div></div><span class="chev"></span></a>
   </section>
@@ -469,7 +473,7 @@ function vReports() {
     <div>App version ${APP_VERSION}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
   <section class="page">
-    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Telegram summaries, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}</div></div><span class="chev"></span></a>
+    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Telegram summaries, backups, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}</div></div><span class="chev"></span></a>
     <div class="actions" style="padding-top:12px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
@@ -785,6 +789,7 @@ async function vSettings() {
         <form class="form" id="tgc"><label>Bot token<input type="text" id="tgtoken" autocomplete="off" placeholder="123456789:AA..." required></label>
         <button class="btn primary" type="submit">Connect</button><div class="msg" id="tgmsg" role="status"></div></form>`}
     </section>
+    <section class="page" id="bksec"></section>
     <section class="page"><div class="block-title">Change app password</div>
       <form id="pwf" class="form">
         <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
@@ -826,6 +831,19 @@ async function vSettings() {
       try { await post("/api/telegram/test", { cid: S.cid }); $("#tgmsg").textContent = "Sent. Check Telegram."; } catch (err) { $("#tgmsg").textContent = err.message; } };
     $("#tgoff").onclick = async () => { if (!confirm("Stop Telegram messages?")) return; await post("/api/telegram", { off: true }); vSettings().catch(fail); };
   }
+  const showBackups = async (b) => {
+    b = b || await api("/api/backups").catch(() => null);
+    if (!b) return;
+    const last = b.backups[0];
+    $("#bksec").innerHTML = `<div class="block-title">Backups <span>${b.backups.length} kept</span></div>
+      <div class="info"><div>${last ? `Last backup ${ago(last.time)}.` : "No backup yet."} A copy is made every night at ${h(b.at)}, and the last ${b.keep} are kept in the <code>backups</code> folder next to your data on the server.</div>
+      <div>Your books are always safe in Tally. The backup saves the synced copy, your follow-up notes and settings, so nothing is lost if the server's disk fails.</div></div>
+      ${b.backups.map((x) => `<a class="row" href="/api/backups/${enc(x.name)}" download><div class="main"><div class="name">${h(x.name)}</div><div class="meta">${(x.size / 1048576).toFixed(1)} MB</div></div><span class="chev"></span></a>`).join("")}
+      <div class="actions"><button class="btn" id="bknow">Back up now</button></div>`;
+    $("#bknow").onclick = async () => { $("#bknow").textContent = "Backing up"; $("#bknow").disabled = true;
+      try { showBackups(await post("/api/backups", {})); toast("Backup made."); } catch (err) { toast(err.message); showBackups(); } };
+  };
+  showBackups();
   $("#pwf").onsubmit = async (e) => {
     e.preventDefault();
     const msg = $("#pwmsg");
@@ -892,6 +910,121 @@ async function vPL() {
   });
 }
 
+/* ---------------------------------------------------------------- balance sheet */
+async function vBS() {
+  setTitle(true);
+  const d = await api(cpath("bs"));
+  let k = 0;
+  const side = (title, list) => `<section class="page"><div class="block-title"><span>${title}</span><span>₹</span></div>
+    ${list.map((g) => {
+      const id = "bs" + (k++);
+      const sub = g.lines.map((l) => {
+        const href = l.stock ? "#/stock" : g.pl ? "" : l.group ? `#/group/${enc(l.name)}` : `#/ledger/${enc(l.name)}`;
+        return href ? `<a class="pl-line sub" style="text-decoration:none" href="${href}"><span>${h(l.name)}</span>${money(l.amount)}</a>`
+          : `<div class="pl-line sub" style="cursor:default"><span>${h(l.name)}</span>${money(l.amount)}</div>`;
+      }).join("");
+      const label = g.pl ? (g.loss ? "Profit &amp; Loss A/c (loss)" : "Profit &amp; Loss A/c") : h(g.name);
+      return g.ledger ? `<a class="pl-line" style="text-decoration:none" href="#/ledger/${enc(g.name)}"><span>${label}</span>${money(g.amount)}</a>`
+        : `<button class="pl-line" aria-expanded="false" data-x="${id}"><span>${label}</span>${money(g.amount)}</button><div id="${id}" hidden>${sub}</div>`;
+    }).join("")}
+    <div class="pl-line result"><span>Total</span><span class="amt">${rupees(d.total)}</span></div></section>`;
+  const gap = Math.abs((d.pl_this_period || 0));
+  view.innerHTML = `<h1 class="title">Balance Sheet</h1><p class="subtitle">As on ${fdate(d.as_on)}, from Tally's closing balances at the last sync</p>
+    ${side("Liabilities", d.liabilities)}${side("Assets", d.assets)}
+    <p class="note" style="border:0">Tap a line to see what's in it. Profit &amp; Loss A/c is last year's balance from Tally plus this year's profit worked out so both sides match. If it looks wrong, the cause is usually an opening balance difference${d.unbalanced ? ` or the ${d.unbalanced} vouchers that didn't add up (see Sync check)` : ""}.${d.stock_in_ledgers ? " Closing stock is taken from your stock ledgers." : ""}</p>`;
+  view.querySelectorAll("[data-x]").forEach((b) => b.onclick = () => {
+    const el = document.getElementById(b.dataset.x); el.hidden = !el.hidden; b.setAttribute("aria-expanded", String(!el.hidden));
+  });
+}
+
+/* ---------------------------------------------------------------- cash and bank book */
+async function vCashbook() {
+  setTitle(true);
+  const d = await api(cpath("cashbank", periodParams()));
+  view.innerHTML = `<h1 class="title">Cash and bank book</h1>${periodBar(d.from, d.to)}
+    <section class="page"><div class="hero"><div><div class="label">Opening, ${fdate(d.from)}</div><div class="big" style="font-size:22px">${short(d.opening)}</div></div>
+      <div><div class="label">Closing, ${fdate(d.to)}</div><div class="big">${short(d.closing)}</div></div>
+      <div><div class="label">Money in</div><div class="big" style="font-size:20px;color:var(--good)">${short(d.in)}</div></div>
+      <div><div class="label">Money out</div><div class="big owe" style="font-size:20px">${short(d.out)}</div></div></div>
+      <div class="note">Money in and out of each account includes transfers between your own cash and bank accounts.</div></section>
+    <section class="page"><div class="block-title"><span>Account</span><span>Closing</span></div>
+      ${d.ledgers.map((l) => `<a class="row" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div>
+        <div class="meta">${l.kind}. Opening ${short(l.opening)}, in ${short(l.in)}, out ${short(l.out)}</div></div><div class="end">${drcr(l.closing)}</div><span class="chev"></span></a>`).join("") || '<div class="empty">No cash or bank ledgers found.</div>'}</section>
+    <section class="page"><div class="block-title"><span>Day</span><span>In / out, closing</span></div>
+      ${d.days.map((x, i) => `<div class="party"><button class="row" aria-expanded="false" data-cd="${i}"><div class="main"><div class="name">${fdate(x.date)}</div>
+          <div class="meta">${x.in ? `<span class="up">+${money(x.in)}</span> ` : ""}${x.out ? `<span class="down">−${money(x.out)}</span>` : ""}${!x.in && !x.out ? "transfers only" : ""}</div></div>
+          <div class="end">${money(x.closing)}<div class="meta">opening ${money(x.opening)}</div></div><span class="chev down"></span></button>
+        <div class="bills" id="cd${i}" hidden></div></div>`).join("")
+        || '<div class="empty">No cash or bank entries in this period.</div>'}</section>`;
+  const entries = (x) => x.entries.map((e) => `<a class="row" href="#/voucher/${e.id}"><div class="main"><div class="name">${h(e.party || e.vtype)}</div>
+          <div class="meta">${h(e.vtype)} ${h(e.number)}, ${e.transfer ? "transfer between " + e.ledgers.map(h).join(" and ") : h(e.ledgers.join(", "))}</div></div>
+          <div class="end ${e.amount < 0 ? "down" : e.transfer ? "" : "up"}">${e.transfer ? "transfer" : (e.amount < 0 ? "−" : "+") + money(Math.abs(e.amount))}</div></a>`).join("");
+  wirePeriod(d.from, d.to);
+  view.querySelectorAll("[data-cd]").forEach((b) => b.onclick = () => {
+    const el = document.getElementById("cd" + b.dataset.cd);
+    if (!el.innerHTML) el.innerHTML = entries(d.days[+b.dataset.cd]);
+    el.hidden = !el.hidden;
+    b.setAttribute("aria-expanded", String(!el.hidden)); b.querySelector(".chev").classList.toggle("up", !el.hidden);
+  });
+}
+
+/* ---------------------------------------------------------------- collection follow-up */
+async function vCollect() {
+  setTitle(true);
+  S.cf = S.cf || "all";
+  const d = await api(cpath("collections"));
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  const F = { all: ["Everyone", () => true], overdue: ["Overdue", (p) => p.overdue > 0.5], week: ["Due this week", (p) => p.due_soon > 0.5],
+    promised: ["Promised", (p) => p.promise] };
+  const list = d.parties.filter(F[S.cf][1]);
+  const bill = (b, txt, late) => {
+    const inner = `<div><div class="ref">${h(b.ref)}</div><div class="meta">${b.date ? fdate(b.date) : ""}${b.due ? `, due ${fdate(b.due)}` : ""}</div></div>
+      <div class="end">${money(b.amount)}<div class="meta">${late ? `<span class="od">${txt}</span>` : txt}</div></div>${b.vid ? '<span class="chev"></span>' : ""}`;
+    return b.vid ? `<a class="bill" href="#/voucher/${b.vid}">${inner}</a>` : `<div class="bill">${inner}</div>`;
+  };
+  view.innerHTML = `<h1 class="title">Follow-up list</h1>
+    <div class="toolbar" role="group" aria-label="Show">${Object.entries(F).map(([k, [l]]) => `<button class="chip ${k === S.cf ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div>
+    <section class="page"><div class="hero"><div><div class="label">Overdue</div><div class="big owe">${short(d.overdue)}</div></div>
+      <div><div class="label">Falling due in ${d.days} days</div><div class="big">${short(d.due_soon)}</div></div></div>
+      ${d.promised_today.length ? `<div class="note">Promised to pay today: <b>${d.promised_today.map(h).join(", ")}</b></div>` : ""}</section>
+    <section class="page">${list.map((p, i) => {
+      const ph = digits(p.mobile || p.phone);
+      const od = p.overdue_bills.map((b) => ({ ...b, overdue: b.late }));
+      const status = p.promise_missed ? `<span class="od">promised ${fdate(p.promise)}, not paid</span>` :
+        p.promise ? `promised ${fdate(p.promise)}` : "";
+      return `<div class="party"><button class="row" aria-expanded="false" data-c="${i}"><div class="main"><div class="name">${h(p.name)}</div>
+          <div class="meta">${p.overdue > 0.5 ? `<span class="od">${rupees(p.overdue, false)} overdue</span>, up to ${p.late} days late` : `${rupees(p.due_soon, false)} due this week`}${status ? `, ${status}` : ""}</div>
+          ${p.note ? `<div class="meta notep">${h(p.note)}</div>` : ""}</div>
+          <div class="end">${money(p.balance)}<div class="meta">balance</div></div><span class="chev down"></span></button>
+        <div class="bills" id="cb${i}" hidden>
+          ${p.overdue_bills.map((b) => bill(b, `${b.late} days late`, true)).join("")}
+          ${p.soon_bills.map((b) => bill(b, b.in_days ? `due in ${b.in_days} days` : "due today")).join("")}
+          <form class="form fu" data-party="${h(p.name)}" style="padding:12px 14px 14px;border-top:1px solid var(--rule)">
+            <label>Note<input type="text" name="note" maxlength="300" value="${h(p.note)}" placeholder="e.g. Will pay half after Diwali"></label>
+            <label>Promised to pay on<input type="date" name="promise" value="${h(p.promise)}"></label>
+            <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save note</button>${p.note || p.promise ? '<button class="btn" type="button" data-clear>Clear</button>' : ""}
+              ${ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
+              <a class="btn" href="#/ledger/${enc(p.name)}">Ledger</a></div></form>
+        </div></div>`;
+    }).join("") || `<div class="empty">${S.cf === "all" ? "Nobody is overdue or due this week." : "Nobody in this list."}</div>`}</section>
+    <p class="note" style="border:0">Bills without a credit period count as due on the bill date. Notes are kept on your server, not in Tally.</p>`;
+  view.querySelectorAll("[data-f]").forEach((b) => b.onclick = () => { S.cf = b.dataset.f; vCollect().catch(fail); });
+  view.querySelectorAll("[data-c]").forEach((b) => b.onclick = () => {
+    const el = document.getElementById("cb" + b.dataset.c); el.hidden = !el.hidden;
+    b.setAttribute("aria-expanded", String(!el.hidden)); b.querySelector(".chev").classList.toggle("up", !el.hidden);
+  });
+  const save = async (form, note, promise) => {
+    const r = await fetch(cpath("followup"), { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ party: form.dataset.party, note, promise }) });
+    if (!r.ok) { toast((await r.json().catch(() => ({}))).error || "Couldn't save."); return; }
+    toast(note || promise ? "Note saved." : "Note cleared."); vCollect().catch(fail);
+  };
+  view.querySelectorAll("form.fu").forEach((f) => {
+    f.onsubmit = (e) => { e.preventDefault(); save(f, f.note.value.trim(), f.promise.value); };
+    const c = f.querySelector("[data-clear]"); if (c) c.onclick = () => save(f, "", "");
+  });
+}
+
 /* ---------------------------------------------------------------- login, errors, router */
 function showLogin(msg = "") {
   $("#tabs").hidden = true; $("#status").innerHTML = ""; $("#company").textContent = "Bahi"; $("#back").hidden = true;
@@ -940,6 +1073,9 @@ async function route() {
       case "daybook": await vDaybook(params.get("type") ?? ""); break;
       case "voucher": await vVoucher(parts[1]); break;
       case "pl": await vPL(); break;
+      case "bs": await vBS(); break;
+      case "cashbook": await vCashbook(); break;
+      case "collect": await vCollect(); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;
       case "analysis": await vAnalysis(parts[1]); break;

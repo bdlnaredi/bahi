@@ -27,6 +27,7 @@ import tally_parse as tp  # noqa: E402
 import pdf  # noqa: E402
 import export  # noqa: E402
 import notify  # noqa: E402
+import backup  # noqa: E402
 import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -36,7 +37,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -359,6 +360,35 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/telegram"):
             return self.telegram(method, path)
 
+        if path == "/api/backups":
+            if method == "POST":
+                self.body(4096)
+                backup.run()
+            return self.send_json({"backups": backup.listing(), "keep": backup.KEEP, "at": backup.AT})
+        if path.startswith("/api/backups/"):
+            p = backup.path_of(path.rsplit("/", 1)[-1])
+            if not p:
+                return self.send_json({"error": "not found"}, 404)
+            with open(p, "rb") as fh:
+                data = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(p)}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        mp = re.match(r"^/api/c/(\d+)/followup$", path)
+        if mp and method == "POST":
+            data = json.loads(self.body(4096) or b"{}")
+            promise = str(data.get("promise", "") or "")
+            if promise and not re.match(r"^\d{4}-\d{2}-\d{2}$", promise):
+                return self.send_json({"error": "Pick a date."}, 400)
+            ok = store.set_followup(int(mp.group(1)), str(data.get("party", "")), str(data.get("note", "")).strip(), promise)
+            return self.send_json({"ok": ok})
+
         mp = re.match(r"^/api/c/(\d+)/(purge|delete)$", path)
         if mp and method == "POST":
             cid = int(mp.group(1))
@@ -439,6 +469,12 @@ class Handler(BaseHTTPRequestHandler):
             out = store.slow_stock(cid, int(q.get("days", 60) or 60))
         elif what == "check":
             out = store.sync_check(cid)
+        elif what == "bs":
+            out = store.balance_sheet(cid)
+        elif what == "cashbank":
+            out = store.cash_bank(cid, f, t)
+        elif what == "collections":
+            out = store.collections(cid, int(q.get("days", 7) or 7))
         elif what == "pl":
             out = store.profit_loss(cid, f, t)
         else:
@@ -457,6 +493,7 @@ def main():
     os.makedirs(STAGING, exist_ok=True)
     store.init()
     notify.start()
+    backup.start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Tally Mobile listening on :{PORT}", flush=True)
     srv.serve_forever()

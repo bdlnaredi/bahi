@@ -966,3 +966,228 @@ def slow_stock(cid, days=60):
             out.append(it)
     out.sort(key=lambda x: -x["closing_value"])
     return {"days": days, "value": round(sum(x["closing_value"] for x in out), 2), "items": out}
+
+
+# ---------------------------------------------------------------- balance sheet
+LIAB_PRIMARY = ["Capital Account", "Loans (Liability)", "Current Liabilities", "Branch / Divisions", "Suspense A/c"]
+ASSET_PRIMARY = ["Fixed Assets", "Investments", "Current Assets", "Misc. Expenses (ASSET)"]
+PL_PRIMARY = {"Sales Accounts", "Purchase Accounts", "Direct Incomes", "Direct Expenses",
+              "Indirect Incomes", "Indirect Expenses"}
+
+
+def balance_sheet(cid):
+    """As on the last sync, from Tally's closing balances. Profit & Loss A/c is what makes both sides equal:
+    its opening (last years' profit) comes from Tally, the rest is this period's profit."""
+    with conn() as c:
+        prim = [r["name"] for r in c.execute("SELECT name FROM grp WHERE company_id=? AND parent=''", (cid,))]
+        sides = {"liabilities": [], "assets": []}
+        plain_assets = plain_liab = 0.0
+        for g in prim:
+            if g in PL_PRIMARY:
+                continue
+            total = _closing_group(c, cid, g)
+            if g in LIAB_PRIMARY:
+                side = "liabilities"
+            elif g in ASSET_PRIMARY:
+                side = "assets"
+            else:                                   # a primary group the user made: place it by its balance
+                side = "assets" if total >= 0 else "liabilities"
+            sign = 1 if side == "assets" else -1
+            subs = []
+            for k in c.execute("SELECT name FROM grp WHERE company_id=? AND parent=? ORDER BY name", (cid, g)):
+                v = _closing_group(c, cid, k["name"])
+                if abs(v) > 0.5:
+                    subs.append({"name": k["name"], "amount": round(v * sign, 2), "group": True})
+            for l in c.execute("SELECT name, closing FROM ledger WHERE company_id=? AND parent=? AND ABS(closing) > 0.5",
+                               (cid, g)):
+                subs.append({"name": l["name"], "amount": round(l["closing"] * sign, 2), "group": False})
+            subs.sort(key=lambda x: -abs(x["amount"]))
+            if abs(total) > 0.5 or subs:
+                sides[side].append({"name": g, "amount": round(total * sign, 2), "lines": subs})
+            if side == "assets":
+                plain_assets += total
+            else:
+                plain_liab -= total
+        # ledgers outside every group: Tally's own "Profit & Loss A/c", or anything unusual
+        known = set(prim)
+        pl_open = 0.0
+        for l in c.execute("SELECT name, chain, closing FROM ledger WHERE company_id=?", (cid,)):
+            top = (l["chain"] or "||").split("|")[1] if l["chain"] else ""
+            if top in known:
+                continue
+            if abs(l["closing"]) < 0.005:
+                continue
+            if "profit" in l["name"].lower() and "loss" in l["name"].lower():
+                pl_open += -l["closing"]
+            else:
+                side = "assets" if l["closing"] >= 0 else "liabilities"
+                amt = abs(l["closing"])
+                sides[side].append({"name": l["name"], "amount": round(amt, 2), "lines": [], "ledger": True})
+                if side == "assets":
+                    plain_assets += amt
+                else:
+                    plain_liab += amt
+        # closing stock: from stock items, unless stock is kept in ledgers (accounts not linked with inventory)
+        stock_in_ledgers = c.execute("""SELECT COUNT(*) n FROM ledger WHERE company_id=? AND chain LIKE '%|Stock-in-Hand|%'
+            AND ABS(closing) > 0.5""", (cid,)).fetchone()["n"] > 0
+        stock_val = 0.0 if stock_in_ledgers else c.execute(
+            "SELECT COALESCE(SUM(closing_value),0) s FROM stock WHERE company_id=?", (cid,)).fetchone()["s"]
+        if stock_val:
+            ca = next((x for x in sides["assets"] if x["name"] == "Current Assets"), None)
+            if not ca:
+                ca = {"name": "Current Assets", "amount": 0.0, "lines": []}
+                sides["assets"].append(ca)
+            ca["amount"] = round(ca["amount"] + stock_val, 2)
+            ca["lines"].insert(0, {"name": "Closing stock", "amount": round(stock_val, 2), "group": False, "stock": True})
+            plain_assets += stock_val
+        profit_total = plain_assets - plain_liab
+        pl = {"name": "Profit & Loss A/c", "amount": round(abs(profit_total), 2), "pl": True, "loss": profit_total < 0,
+              "lines": [{"name": "Opening balance", "amount": round(pl_open if profit_total >= 0 else -pl_open, 2)},
+                        {"name": "This period", "amount": round((profit_total - pl_open) * (1 if profit_total >= 0 else -1), 2)}]}
+        sides["assets" if profit_total < 0 else "liabilities"].append(pl)
+        order = {n: i for i, n in enumerate(LIAB_PRIMARY + ASSET_PRIMARY + ["Profit & Loss A/c"])}
+        for s in sides.values():
+            s.sort(key=lambda x: (order.get(x["name"], 50), -x["amount"]))
+        comp = c.execute("SELECT to_date, last_sync FROM company WHERE id=?", (cid,)).fetchone()
+        total = round(sum(x["amount"] for x in sides["assets"]), 2)
+        unbalanced = c.execute("SELECT unbalanced FROM company WHERE id=?", (cid,)).fetchone()["unbalanced"]
+        return {"unbalanced": unbalanced, "pl_this_period": pl["lines"][1]["amount"] * (-1 if pl["loss"] else 1),
+                "as_on": min(date.today().isoformat(), comp["to_date"] or date.today().isoformat()),
+                "last_sync": comp["last_sync"], "liabilities": sides["liabilities"], "assets": sides["assets"],
+                "total": total, "stock_in_ledgers": stock_in_ledgers}
+
+
+# ---------------------------------------------------------------- cash and bank book
+CASH_BANK = ("Cash-in-Hand", "Bank Accounts", "Bank OD A/c")
+
+
+def _opening_at(c, cid, name, closing, sync_from, day):
+    moved = c.execute("""SELECT COALESCE(SUM(CASE WHEN v.date < ? THEN vl.amount ELSE 0 END),0) b, COALESCE(SUM(vl.amount),0) a
+        FROM vline vl JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=? AND vl.ledger=? AND v.date >= ?""",
+                      (day, cid, name, sync_from)).fetchone()
+    return closing - moved["a"] + moved["b"]
+
+
+def cash_bank(cid, d_from=None, d_to=None):
+    with conn() as c:
+        comp = c.execute("SELECT from_date FROM company WHERE id=?", (cid,)).fetchone()
+        sync_from = (comp and comp["from_date"]) or "2000-01-01"
+        f, t = period(c, cid, d_from, d_to)
+        f = max(f, sync_from)
+        t = min(t, date.today().isoformat()) if t >= date.today().isoformat() else t
+        where = " OR ".join("chain LIKE ?" for _ in CASH_BANK)
+        args = [f"%|{g}|%" for g in CASH_BANK]
+        leds = _rows(c, f"SELECT name, closing, chain FROM ledger WHERE company_id=? AND ({where}) ORDER BY name",
+                     [cid] + args)
+        names = [l["name"] for l in leds]
+        out_l = []
+        for l in leds:
+            op = _opening_at(c, cid, l["name"], l["closing"], sync_from, f)
+            mv = c.execute("""SELECT COALESCE(SUM(CASE WHEN vl.amount>0 THEN vl.amount END),0) i,
+                COALESCE(-SUM(CASE WHEN vl.amount<0 THEN vl.amount END),0) o
+                FROM vline vl JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=? AND vl.ledger=? AND v.date BETWEEN ? AND ?""",
+                           (cid, l["name"], f, t)).fetchone()
+            kind = "Cash" if "|Cash-in-Hand|" in l["chain"] else "Bank"
+            if abs(op) > 0.005 or mv["i"] or mv["o"] or abs(l["closing"]) > 0.005:
+                out_l.append({"name": l["name"], "kind": kind, "opening": round(op, 2), "in": round(mv["i"], 2),
+                              "out": round(mv["o"], 2), "closing": round(op + mv["i"] - mv["o"], 2)})
+        opening = sum(x["opening"] for x in out_l)
+        days = {}
+        if names:
+            ph = ",".join("?" for _ in names)
+            for r in c.execute(f"""SELECT v.id, v.date, v.vtype, v.number, v.party, v.narration, SUM(vl.amount) net,
+                    GROUP_CONCAT(vl.ledger, '|') leds
+                    FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+                    WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND vl.ledger IN ({ph})
+                    GROUP BY v.id ORDER BY v.date, v.id""", [cid, f, t] + names):
+                d = days.setdefault(r["date"], {"date": r["date"], "in": 0.0, "out": 0.0, "entries": []})
+                net = r["net"] or 0
+                if net > 0:
+                    d["in"] += net
+                else:
+                    d["out"] -= net
+                d["entries"].append({"id": r["id"], "vtype": r["vtype"], "number": r["number"],
+                                     "party": r["party"] or r["narration"][:60], "amount": round(net, 2),
+                                     "transfer": abs(net) < 0.005, "ledgers": sorted(set(r["leds"].split("|")))})
+        bal = opening
+        rows = []
+        for k in sorted(days):
+            d = days[k]
+            d["opening"] = round(bal, 2)
+            bal += d["in"] - d["out"]
+            d["closing"] = round(bal, 2)
+            d["in"], d["out"] = round(d["in"], 2), round(d["out"], 2)
+            rows.append(d)
+        rows.reverse()
+        return {"from": f, "to": t, "ledgers": out_l, "opening": round(opening, 2),
+                "in": round(sum(x["in"] for x in out_l), 2), "out": round(sum(x["out"] for x in out_l), 2),
+                "closing": round(bal, 2), "days": rows}
+
+
+# ---------------------------------------------------------------- collection follow-up
+FOLLOW = os.path.join(os.path.dirname(DB_PATH), "followups.json")
+_flock = threading.Lock()
+
+
+def _follow_all():
+    try:
+        with open(FOLLOW) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def set_followup(cid, party, note, promise):
+    co = next((x for x in companies() if x["id"] == cid), None)
+    if not co:
+        return False
+    with _flock:
+        allf = _follow_all()
+        per = allf.setdefault(co["name"], {})
+        if note or promise:
+            per[party] = {"note": note[:300], "promise": promise, "updated": time.time()}
+        else:
+            per.pop(party, None)
+        tmp = FOLLOW + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(allf, f)
+        os.replace(tmp, FOLLOW)
+    return True
+
+
+def collections(cid, days=7):
+    """Who should pay: overdue bills and bills falling due in the next few days, with your notes."""
+    co = next((x for x in companies() if x["id"] == cid), None)
+    notes = _follow_all().get(co["name"], {}) if co else {}
+    today = date.today()
+    soon = (today + timedelta(days=days)).isoformat()
+    t = today.isoformat()
+    d = outstanding(cid, "receivable")
+    out = []
+    for p in d["parties"]:
+        od, due_soon = [], []
+        for b in p["bills"]:
+            if b["amount"] <= 0.5:
+                continue
+            due = b["due"] or b["date"]
+            if not due:
+                continue
+            if due < t:
+                od.append({**b, "late": (today - date.fromisoformat(due)).days})
+            elif due <= soon:
+                due_soon.append({**b, "in_days": (date.fromisoformat(due) - today).days})
+        n = notes.get(p["name"])
+        if not od and not due_soon and not n:
+            continue
+        od.sort(key=lambda b: -b["late"])
+        due_soon.sort(key=lambda b: b["in_days"])
+        out.append({"name": p["name"], "mobile": p["mobile"], "phone": p["phone"], "balance": p["amount"],
+                    "overdue": round(sum(b["amount"] for b in od), 2), "due_soon": round(sum(b["amount"] for b in due_soon), 2),
+                    "late": od[0]["late"] if od else 0, "overdue_bills": od, "soon_bills": due_soon,
+                    "note": n.get("note", "") if n else "", "promise": n.get("promise", "") if n else "",
+                    "promise_missed": bool(n and n.get("promise") and n["promise"] < t and od)})
+    out.sort(key=lambda x: (not x["promise_missed"], -x["overdue"], -x["due_soon"]))
+    return {"days": days, "today": t, "overdue": round(sum(x["overdue"] for x in out), 2),
+            "due_soon": round(sum(x["due_soon"] for x in out), 2),
+            "promised_today": [x["name"] for x in out if x["promise"] == t],
+            "parties": out}

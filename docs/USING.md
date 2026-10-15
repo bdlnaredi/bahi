@@ -125,9 +125,12 @@ The list shows every item's quantity, rate and value, with the total closing sto
 | **Vouchers** | Search and open any voucher |
 | **Day Book** | All vouchers by date, filter by type |
 | **Sales analysis** | Best customers and suppliers against last year, item-wise sales with margin, a month-by-month comparison with last year, and stock that hasn't sold |
+| **Balance Sheet** | Liabilities and assets as on the last sync. Tap a line to open its groups and ledgers. |
+| **Cash and bank book** | Money in and out each day, with opening and closing balances |
+| **Follow-up list** | Who should pay you, with your notes and promised dates |
 | **Profit & Loss** | Sales, purchases, stock, expenses, gross and net profit. Tap a line to see its ledgers. |
 | **GST summary** | Output tax, input credit and net GST payable, month by month |
-| **Group summary** | Balances by Tally group, like the Balance Sheet. Tap to drill down. |
+| **Group summary** | Balances by Tally group. Tap to drill down. |
 | **Outstanding** | Same as Dues |
 | **Stock summary** | Same as Stock |
 
@@ -143,6 +146,41 @@ The **Sync** box shows the synced date range, the number of ledgers and vouchers
 </tr></table>
 
 > **GST summary** is a quick check worked out from your vouchers. GST payments to the government and set-off entries are left out. File your returns from Tally or the GST portal.
+
+## Balance Sheet
+
+<img src="images/balance-sheet.png" width="260" align="right" alt="Balance Sheet">
+
+Liabilities and assets from Tally's closing balances at the last sync, laid out like Tally's Balance Sheet. Tap a group to see what's in it, then tap again to open the group or ledger. Closing stock is shown under Current Assets.
+
+**Profit & Loss A/c** is last year's balance from Tally plus this year's profit, worked out so that both sides match. If it doesn't agree with Tally, the usual reason is a difference in opening balances, or vouchers that didn't add up (see **Sync check**).
+
+<br clear="right">
+
+## Cash and bank book
+
+<img src="images/cash-book.png" width="260" align="right" alt="Cash and bank book">
+
+- The top shows opening and closing cash and bank for the period, and the total money in and out.
+- **Account** lists each cash and bank account with its opening, money in, money out and closing balance. Tap one for its full statement.
+- **Day** lists each day, newest first, with money in and out and the closing balance. Tap a day to see its entries, and tap an entry to open the voucher. Transfers between your own accounts are marked *transfer* and don't count as money in or out for the day.
+
+<br clear="right">
+
+## Follow-up list
+
+<img src="images/follow-up.png" width="260" align="right" alt="Follow-up list">
+
+Open it from **Dues → Follow-up list** or **Reports**. It lists customers with overdue bills or bills falling due in the next 7 days, and anyone you've written a note for.
+
+- Tap a customer to see the bills, then **Remind** on WhatsApp, **Call**, or open the ledger.
+- Write a **note** ("will pay half after Diwali") and a **promised date**. On that date the customer shows under *Promised to pay today*. If the date passes and they're still overdue, they move to the top marked *promised, not paid*.
+- Use the chips at the top to show only **Overdue**, **Due this week** or **Promised**.
+- Bills without a credit period count as due on the bill date. Notes stay on your server; Tally isn't changed.
+
+The Telegram morning summary also lists what falls due this week, who promised to pay today, and broken promises.
+
+<br clear="right">
 
 ## Sales analysis
 
@@ -185,6 +223,12 @@ To set it up, in **Reports → Settings**:
 After that you can change the time, the minimum amount, send a summary now, or turn it off. Only you can see your bot's messages, but don't share the token.
 
 <br clear="right">
+
+## Backups
+
+The server makes a backup every night at 02:30 and keeps the last 7. **Reports → Settings → Backups** shows when the last one ran, lets you download any of them, and has a **Back up now** button.
+
+Each backup is a `.zip` file in the `backups` folder next to your data on Unraid (`/mnt/user/appdata/bahi/data/backups`). It holds the synced copy of your books, your follow-up notes and your settings. Your books themselves are always in Tally; the backup saves you a long re-sync and keeps your notes. See [restoring a backup](INSTALL.md#restoring-a-backup).
 
 ## Ledger statement PDF
 

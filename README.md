@@ -21,11 +21,14 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 - **Vouchers:** search by party, voucher number, amount or narration. Open any voucher as an invoice with items, GST, bill references and narration.
 - **Dues:** bill-wise receivables and payables with ageing (0-30, 31-60, 61-90 and 90+ days), overdue amounts, and WhatsApp payment reminders that list the overdue bills.
 - **Stock:** quantity, rate and value of every item, plus item movements.
+- **Balance Sheet** and a **cash and bank book** with daily opening and closing balances.
+- **Follow-up list:** overdue and due-this-week customers, with your notes and promised payment dates.
 - **Sales analysis:** customers and items against last year, item margins, month by month this year against last, and slow-moving stock.
 - **Excel downloads** of ledgers, vouchers, dues and analysis.
 - **Telegram:** a morning summary of yesterday's business and an alert when a large payment comes in.
 - **Reports:** Day Book, Profit & Loss, GST summary (output tax, input credit and net payable by month), and a group summary.
 - **PDFs like TallyPrime prints:** Tax Invoice, Receipt/Payment/Journal voucher, and Ledger Account.
+- **Nightly backups** on your server, the last 7 kept.
 - **Works offline:** your phone keeps the last data you opened.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.
 
