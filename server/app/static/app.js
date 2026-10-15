@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "1.3";
+const APP_VERSION = "1.4";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -282,6 +282,7 @@ async function vLedger(name) {
       ${L.gstin || L.mobile || L.phone || L.email ? `<div class="info" style="padding-top:12px">${L.gstin ? `<div>GSTIN ${h(L.gstin)}</div>` : ""}${L.mobile || L.phone ? `<div>${h(L.mobile || L.phone)}</div>` : ""}${L.email ? `<div>${h(L.email)}</div>` : ""}</div>` : ""}
       <div class="actions" style="${L.gstin || L.mobile || L.phone || L.email ? "" : "padding-top:12px"}">
         <button class="btn primary" id="sharepdf">${ICON.share}Share PDF</button>
+        <a class="btn" href="${pdfUrl}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
         ${phone ? `<a class="btn wa" href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}">${ICON.call}Call</a>` : ""}
       </div>
       <div class="totals">
@@ -542,6 +543,7 @@ async function vVoucher(id) {
       ${V.party ? `<a class="vparty" href="#/ledger/${enc(V.party)}"><div class="name">${h(V.party)}</div>${gstin ? `<div class="meta">GSTIN ${h(gstin)}</div>` : ""}</a>` : ""}
       <div class="vtotal">${rupees(V.amount)}</div>
       <div class="actions" style="padding:12px 0 0"><button class="btn primary" id="vpdf">${ICON.share}Share PDF</button>
+        <a class="btn" href="/api/c/${S.cid}/voucher_pdf/${id}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
         ${V.party ? `<a class="btn" href="#/ledger/${enc(V.party)}">Party ledger</a>` : ""}</div>
     </section>
     ${d.items.length ? `<section class="page"><div class="block-title"><span>Items</span><span>Amount</span></div>

@@ -173,7 +173,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": True})
         if path == "/agent/part" and method == "POST":
             run, kind = q.get("run", ""), q.get("kind", "")
-            if not RUN_RE.match(run) or kind not in ("groups", "vtypes", "ledgers", "stock", "daybook", "bills_rec", "bills_pay"):
+            if not RUN_RE.match(run) or kind not in ("groups", "vtypes", "ledgers", "stock", "daybook", "bills_rec", "bills_pay",
+                                                             "company", "ledger_x", "stock_x"):
                 return self.send_json({"error": "bad part"}, 400)
             d = os.path.join(STAGING, run)
             os.makedirs(d, exist_ok=True)
@@ -196,13 +197,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def commit(self, d, meta):
         parts = {"groups": [], "vtypes": [], "ledgers": [], "stock": [], "daybook": [],
-                 "bills_rec": None, "bills_pay": None}
+                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}}
+        extra_fns = {"company": tp.parse_company_info, "ledger_x": tp.parse_ledger_extra, "stock_x": tp.parse_stock_extra}
         fns = {"groups": tp.parse_groups, "vtypes": tp.parse_vtypes, "ledgers": tp.parse_ledgers,
                "stock": tp.parse_stock, "daybook": tp.parse_vouchers}
         for fn in sorted(os.listdir(d)) if os.path.isdir(d) else []:
             kind = fn.split("_", 1)[1].rsplit(".", 1)[0]
             with open(os.path.join(d, fn), "rb") as f:
                 raw = f.read()
+            if kind in extra_fns:
+                try:
+                    parts[kind].update(extra_fns[kind](tp.parse_xml(raw)))
+                except Exception as e:  # printing details are optional
+                    print(f"{kind} not usable:", e, file=sys.stderr)
+                continue
             if kind in ("bills_rec", "bills_pay"):
                 try:
                     parts[kind] = tp.parse_bill_report(tp.parse_xml(raw))
@@ -221,7 +229,9 @@ class Handler(BaseHTTPRequestHandler):
             vouchers.append(v)
         return store.ingest(meta["company"], meta["from"], meta["to"], meta.get("alt_vch", ""),
                             meta.get("alt_mst", ""), parts["groups"], parts["vtypes"],
-                            parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"])
+                            parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"],
+                            parts["company"].get(meta["company"]) or next(iter(parts["company"].values()), {}),
+                            parts["ledger_x"], parts["stock_x"])
 
     # ------------------------------------------------------------ app endpoints
     def api(self, method, path, q):
@@ -269,8 +279,7 @@ class Handler(BaseHTTPRequestHandler):
         elif what == "ledger_pdf":
             d = store.ledger(cid, name, f, t)
             if d:
-                co = next((c["name"] for c in store.companies() if c["id"] == cid), "")
-                return self.send_pdf(pdf.ledger_pdf(co, d), d["ledger"]["name"] + " statement")
+                return self.send_pdf(pdf.ledger_pdf(d), d["ledger"]["name"] + " ledger")
             out = None
         elif what == "voucher_pdf" and arg:
             d = store.voucher(cid, int(arg))

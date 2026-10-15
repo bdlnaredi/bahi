@@ -219,12 +219,23 @@ def _inv_row(e, force_dir=None):
         inward = yes(e, "ISDEEMEDPOSITIVE")
     else:
         inward = amount < 0
+    hsn = ""
+    for tag in ("GSTHSNNAME", "HSNCODE", "GSTHSNCODE"):
+        el = e.find(".//" + tag)
+        if el is not None and (el.text or "").strip():
+            hsn = el.text.strip()
+            break
+    descr = [d.text.strip() for d in e.findall(".//BASICUSERDESCRIPTION.LIST/BASICUSERDESCRIPTION") if d.text and d.text.strip()]
+    rtxt = txt(e, "RATE")
     return {
         "item": item,
         "qty": qty if inward else -qty,
-        "unit": unit_of(qtxt),
-        "rate": num(txt(e, "RATE")),
+        "unit": unit_of(qtxt) or rtxt.split("/")[-1].strip() if "/" in rtxt else unit_of(qtxt),
+        "rate": num(rtxt),
         "amount": abs(amount),
+        "hsn": hsn,
+        "disc": num(txt(e, "DISCOUNT")),
+        "descr": " ".join(descr),
     }
 
 
@@ -285,6 +296,7 @@ def parse_vouchers(root):
                               "days": int(num(txt(b, "BILLCREDITPERIOD")))})
 
         out.append({
+            "extra": voucher_extra(v),
             "guid": txt(v, "GUID") or v.get("REMOTEID") or "",
             "reference": txt(v, "REFERENCE"),
             "party_gstin": txt(v, "PARTYGSTIN"),
@@ -299,4 +311,116 @@ def parse_vouchers(root):
             "lines": lines,
             "items": items,
         })
+    return out
+
+
+# ---------------------------------------------------------------- details used for printing
+
+def _lines(el, path):
+    return [x.text.strip() for x in el.findall(path) if x.text and x.text.strip()]
+
+
+def _first(el, *tags):
+    for t in tags:
+        x = el.find(".//" + t) if "/" not in t else el.find(t)
+        if x is not None and (x.text or "").strip():
+            return x.text.strip()
+    return ""
+
+
+def voucher_extra(v):
+    """Invoice header fields Tally keeps on the voucher (buyer, consignee, dispatch, orders)."""
+    x = {
+        "buyer_name": _first(v, "BASICBUYERNAME"),
+        "buyer_address": _lines(v, "BASICBUYERADDRESS.LIST/BASICBUYERADDRESS") or _lines(v, "ADDRESS.LIST/ADDRESS"),
+        "buyer_state": txt(v, "STATENAME"),
+        "buyer_gstin": txt(v, "PARTYGSTIN"),
+        "buyer_pincode": txt(v, "PARTYPINCODE"),
+        "consignee_name": txt(v, "CONSIGNEEMAILINGNAME"),
+        "consignee_address": _lines(v, "CONSIGNEEADDRESS.LIST/CONSIGNEEADDRESS"),
+        "consignee_state": txt(v, "CONSIGNEESTATENAME"),
+        "consignee_gstin": txt(v, "CONSIGNEEGSTIN"),
+        "place_of_supply": txt(v, "PLACEOFSUPPLY"),
+        "delivery_note": txt(v, "BASICSHIPDELIVERYNOTE") or _first(v, "INVOICEDELNOTES.LIST/BASICSHIPDELIVERYNOTE"),
+        "delivery_note_date": tdate(_first(v, "INVOICEDELNOTES.LIST/BASICSHIPPINGDATE")),
+        "terms_payment": txt(v, "BASICDUEDATEOFPYMT"),
+        "reference_date": tdate(txt(v, "REFERENCEDATE")),
+        "other_refs": txt(v, "BASICORDERREF"),
+        "order_no": _first(v, "INVOICEORDERLIST.LIST/BASICPURCHASEORDERNO") or txt(v, "BASICPURCHASEORDERNO"),
+        "order_date": tdate(_first(v, "INVOICEORDERLIST.LIST/BASICORDERDATE")),
+        "dispatch_doc": txt(v, "BASICSHIPDOCUMENTNO"),
+        "dispatched_through": txt(v, "BASICSHIPPEDBY"),
+        "destination": txt(v, "BASICFINALDESTINATION"),
+        "terms_delivery": " ".join(_lines(v, "BASICORDERTERMS.LIST/BASICORDERTERMS")),
+        "vehicle_no": txt(v, "BASICSHIPVESSELNO"),
+        "irn": txt(v, "IRN") or txt(v, "IRNACKNO"),
+    }
+    return {k: val for k, val in x.items() if val}
+
+
+def _mailing(el):
+    """Address/state/pincode from a ledger or company: TallyPrime 3+ keeps them in a
+    dated *MAILINGDETAILS.LIST; older releases on the object itself. Latest dated entry wins."""
+    blocks = el.findall("LEDMAILINGDETAILS.LIST") + el.findall("COMPANYMAILINGDETAILS.LIST")
+    if blocks:
+        b = sorted(blocks, key=lambda x: txt(x, "APPLICABLEFROM"))[-1]
+        return {"address": _lines(b, "ADDRESS.LIST/ADDRESS"), "state": txt(b, "STATE"),
+                "pincode": txt(b, "PINCODE"), "country": txt(b, "COUNTRY"), "mailing_name": txt(b, "MAILINGNAME")}
+    return {"address": _lines(el, "ADDRESS.LIST/ADDRESS"),
+            "state": txt(el, "LEDSTATENAME") or txt(el, "STATENAME"),
+            "pincode": txt(el, "PINCODE"), "country": txt(el, "COUNTRYNAME"),
+            "mailing_name": _first(el, "MAILINGNAME.LIST/MAILINGNAME")}
+
+
+def parse_company_info(root):
+    """{company name: details} for every company in the response."""
+    out = {}
+    for el in root.iter("COMPANY"):
+        info = _mailing(el)
+        gst = txt(el, "GSTREGISTRATIONNUMBER") or _first(el, "GSTIN", "GSTREGNUMBER")
+        info.update({
+            "name": name_of(el), "gstin": gst, "pan": txt(el, "INCOMETAXNUMBER"),
+            "email": txt(el, "EMAIL"), "phone": txt(el, "PHONENUMBER") or txt(el, "MOBILENUMBERS"),
+            "website": txt(el, "WEBSITE"),
+        })
+        if not info["state"]:
+            info["state"] = _first(el, "GSTREGISTRATIONDETAILS.LIST/STATE", "STATENAME")
+        if info["name"]:
+            out[info["name"]] = {k: v for k, v in info.items() if v}
+    return out
+
+
+def parse_ledger_extra(root):
+    out = {}
+    for el in root.iter("LEDGER"):
+        n = name_of(el)
+        if not n:
+            continue
+        info = _mailing(el)
+        info.update({
+            "pan": txt(el, "INCOMETAXNUMBER"),
+            "gstin": txt(el, "PARTYGSTIN") or _first(el, "LEDGSTREGDETAILS.LIST/GSTIN"),
+            "bank_account": txt(el, "BANKDETAILS") or txt(el, "BANKACCOUNTNUMBER"),
+            "ifsc": txt(el, "IFSCODE"), "branch": txt(el, "BANKBRANCHNAME"),
+            "holder": txt(el, "BANKACCHOLDERNAME"),
+        })
+        out[n] = {k: v for k, v in info.items() if v}
+    return out
+
+
+def parse_stock_extra(root):
+    out = {}
+    for el in root.iter("STOCKITEM"):
+        n = name_of(el)
+        if not n:
+            continue
+        hsn = ""
+        for path in ("HSNDETAILS.LIST", "GSTDETAILS.LIST"):
+            blocks = el.findall(path)
+            if blocks:
+                b = sorted(blocks, key=lambda x: txt(x, "APPLICABLEFROM"))[-1]
+                hsn = txt(b, "HSNCODE") or txt(b, "HSN")
+                if hsn:
+                    break
+        out[n] = {"hsn": hsn or txt(el, "HSNCODE")}
     return out

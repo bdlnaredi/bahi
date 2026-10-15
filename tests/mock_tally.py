@@ -43,6 +43,9 @@ STOCK = [("PVC Pipe 1 inch", "Pipes", "Nos", 400, 120.0), ("PVC Pipe 2 inch", "P
          ("Wall Paint 20L", "Paints", "Nos", 60, 3200.0), ("Primer 4L", "Paints", "Nos", 90, 650.0),
          ("TMT Bar 12mm", "Steel", "Kg", 1500, 62.0)]
 # stock opening value is part of capital too (closing stock asset) - ignore for ledger TB in this mock
+ADDR = {"Sharma & Sons": ["12, Station Road", "Nagpur 440001"], "Patel Enterprises": ["Unit 4, Andheri Industrial Estate", "Andheri East, Mumbai 400069"],
+        "Gupta Hardware": ["Main Bazaar", "Wardha 442001"], "Krishna Agencies": ["Shop 7, Crawford Market", "Mumbai 400001"]}
+HSN = {"PVC Pipe 1 inch": "39172390", "PVC Pipe 2 inch": "39172390", "Wall Paint 20L": "32091090", "Primer 4L": "32089090", "TMT Bar 12mm": "72142090"}
 PHONES = {"Sharma & Sons": "9876543210", "Patel Enterprises": "9123456780", "Krishna Agencies": "9988776655"}
 
 START, END = date(2026, 4, 1), date(2026, 10, 15)
@@ -222,7 +225,12 @@ def xml_voucher(v):
             f'<VOUCHERTYPENAME>{escape(v["type"])}</VOUCHERTYPENAME><VOUCHERNUMBER>{v["no"]}</VOUCHERNUMBER>'
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
             f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ""}</REFERENCE>'
-            f'<PARTYGSTIN>{"27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else ""}</PARTYGSTIN>')
+            f'<PARTYGSTIN>{"27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else ""}</PARTYGSTIN>'
+            + (f'<BASICBUYERNAME>{escape(v["party"])}</BASICBUYERNAME><STATENAME>Maharashtra</STATENAME><PLACEOFSUPPLY>Maharashtra</PLACEOFSUPPLY>'
+               f'<BASICBUYERADDRESS.LIST>{"".join(f"<BASICBUYERADDRESS>{escape(a)}</BASICBUYERADDRESS>" for a in ADDR.get(v["party"], []))}</BASICBUYERADDRESS.LIST>'
+               f'<BASICDUEDATEOFPYMT>30 Days</BASICDUEDATEOFPYMT><BASICSHIPDOCUMENTNO>LR-{v["no"][2:]}</BASICSHIPDOCUMENTNO>'
+               f'<BASICSHIPPEDBY>VRL Logistics</BASICSHIPPEDBY><BASICFINALDESTINATION>{escape((ADDR.get(v["party"]) or ["Nagpur"])[-1].split(" ")[0])}</BASICFINALDESTINATION>'
+               if v["kind"] == "sales" else ""))
     body = ""
     def ba(ln):
         if ln != v["party"]:
@@ -243,6 +251,8 @@ def xml_voucher(v):
                      f"<ISDEEMEDPOSITIVE>{'Yes' if inward else 'No'}</ISDEEMEDPOSITIVE>"
                      f"<RATE>{rate:.2f}/{unit}</RATE><AMOUNT>{amt(sign * a)}</AMOUNT>"
                      f"<ACTUALQTY> {q} {unit}</ACTUALQTY><BILLEDQTY> {q} {unit}</BILLEDQTY>"
+                     + ("<BASICUSERDESCRIPTION.LIST><BASICUSERDESCRIPTION>Asian Paints Apex, colour: Ivory</BASICUSERDESCRIPTION></BASICUSERDESCRIPTION.LIST>" if name == "Wall Paint 20L" else "")
+                     + 
                      f"<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>{escape(v['sales_ledger'])}</LEDGERNAME>"
                      f"<AMOUNT>{amt(sign * a)}</AMOUNT></ACCOUNTINGALLOCATIONS.LIST></ALLINVENTORYENTRIES.LIST>")
         for ln, a in v["ledgers"]:
@@ -280,6 +290,29 @@ class H(BaseHTTPRequestHandler):
                             f"<BILLPARTY>{escape(p)}</BILLPARTY></BILLFIXED><BILLCL>{-left if rid == 'Bills Receivable' else left:.2f}</BILLCL>"
                             f"<BILLDUE>{due.day}-{due.strftime('%b-%y')}</BILLDUE><BILLOVERDUE>{od}</BILLOVERDUE>")
             out += "</ENVELOPE>"
+        elif typ == "Data" and rid == "List of Accounts":
+            at = g("ACCOUNTTYPE")
+            out = "<ENVELOPE><BODY><IMPORTDATA><REQUESTDATA>"
+            if at == "Ledgers":
+                for n, (par, o) in LEDGERS.items():
+                    out += f'<TALLYMESSAGE><LEDGER NAME="{escape(n)}"><PARENT>{escape(par)}</PARENT>'
+                    if n in ADDR and n == "Patel Enterprises":   # TallyPrime 3+ style
+                        out += ("<LEDMAILINGDETAILS.LIST><APPLICABLEFROM>20200401</APPLICABLEFROM><ADDRESS.LIST>"
+                                + "".join(f"<ADDRESS>{escape(a)}</ADDRESS>" for a in ADDR[n])
+                                + "</ADDRESS.LIST><STATE>Maharashtra</STATE><PINCODE>400069</PINCODE></LEDMAILINGDETAILS.LIST>"
+                                + "<LEDGSTREGDETAILS.LIST><GSTIN>27ABCDE1234F1Z5</GSTIN></LEDGSTREGDETAILS.LIST>")
+                    elif n in ADDR:                                      # older style
+                        out += ("<ADDRESS.LIST>" + "".join(f"<ADDRESS>{escape(a)}</ADDRESS>" for a in ADDR[n])
+                                + "</ADDRESS.LIST><LEDSTATENAME>Maharashtra</LEDSTATENAME>")
+                    if n == "HDFC Bank":
+                        out += "<BANKDETAILS>50200012345678</BANKDETAILS><IFSCODE>HDFC0001234</IFSCODE><BANKBRANCHNAME>Sitabuldi, Nagpur</BANKBRANCHNAME>"
+                    out += "</LEDGER></TALLYMESSAGE>"
+            elif at == "Stock Items":
+                for name, grp, unit, oq, rate in STOCK:
+                    tag = "HSNDETAILS.LIST" if "Paint" in name else "GSTDETAILS.LIST"
+                    out += (f'<TALLYMESSAGE><STOCKITEM NAME="{escape(name)}"><{tag}><APPLICABLEFROM>20170701</APPLICABLEFROM>'
+                            f'<HSNCODE>{HSN[name]}</HSNCODE></{tag}></STOCKITEM></TALLYMESSAGE>')
+            out += "</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>"
         elif typ == "Data" and rid == "Day Book":
             vs = "".join(xml_voucher(v) for v in VOUCHERS if f <= v["date"] <= t)
             out = f"<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA>{vs}</DATA></BODY></ENVELOPE>"
@@ -288,6 +321,9 @@ class H(BaseHTTPRequestHandler):
             out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA><COLLECTION>"
             if ctype == "Company":
                 out += (f'<COMPANY NAME="{escape(COMPANY)}"><NAME>{escape(COMPANY)}</NAME>'
+                        f'<ADDRESS.LIST><ADDRESS>Plot 21, Wardhaman Nagar</ADDRESS><ADDRESS>Central Avenue, Nagpur 440008</ADDRESS></ADDRESS.LIST>'
+                        f'<STATENAME>Maharashtra</STATENAME><EMAIL>accounts@demotraders.in</EMAIL><INCOMETAXNUMBER>AABCD1234E</INCOMETAXNUMBER>'
+                        f'<GSTREGISTRATIONNUMBER>27AABCD1234E1Z9</GSTREGISTRATIONNUMBER>'
                         f'<ALTVCHID TYPE="Number"> {len(VOUCHERS)}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID></COMPANY>')
             elif ctype == "Group":
                 for n, p in GROUPS:

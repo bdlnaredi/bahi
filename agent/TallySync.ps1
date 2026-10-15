@@ -69,6 +69,12 @@ function Report-Xml([string]$report, [string]$company, [datetime]$from, [datetim
            "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES></DESC></BODY></ENVELOPE>"
 }
 
+function Masters-Xml([string]$accountType, [string]$company) {
+    $sv = Static-Vars $company $FromDate $ToDate
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Data</TYPE><ID>List of Accounts</ID></HEADER>" +
+           "<BODY><DESC><STATICVARIABLES>$sv<ACCOUNTTYPE>$accountType</ACCOUNTTYPE></STATICVARIABLES></DESC></BODY></ENVELOPE>"
+}
+
 function Gzip([byte[]]$data) {
     $ms = New-Object System.IO.MemoryStream
     $gz = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
@@ -149,6 +155,17 @@ foreach ($co in $companies) {
             "Name, Parent, OpeningBalance, ClosingBalance, LedgerPhone, LedgerMobile, Email, PartyGSTIN, TaxType, GSTDutyHead" $co.Name))
         Send-Part $run "stock"   (Tally-Raw (Collection-Xml "TMStock" "StockItem" `
             "Name, Parent, BaseUnits, OpeningBalance, OpeningValue, ClosingBalance, ClosingValue, ClosingRate" $co.Name))
+
+        # Details used for printing invoices and statements (optional - skipped if Tally refuses)
+        $extras = @(
+            @("company",  { Collection-Xml "TMCompanyInfo" "Company" "Name, Address, StateName, PinCode, Email, PhoneNumber, IncomeTaxNumber, GSTRegistrationNumber, CountryName, Website" $co.Name }),
+            @("ledger_x", { Masters-Xml "Ledgers" $co.Name }),
+            @("stock_x",  { Masters-Xml "Stock Items" $co.Name })
+        )
+        foreach ($x in $extras) {
+            try { Send-Part $run $x[0] (Tally-Raw (& $x[1])) }
+            catch { Log ("Could not read " + $x[0] + " details from Tally: " + $_.Exception.Message) "Yellow" }
+        }
 
         # Bill-wise outstanding as Tally calculates it (skipped quietly if this Tally can't export it)
         foreach ($r in @(@("bills_rec", "Bills Receivable"), @("bills_pay", "Bills Payable"))) {

@@ -1,4 +1,5 @@
 """SQLite storage, ingest of a sync run, and the report queries."""
+import json
 import os
 import sqlite3
 import threading
@@ -8,33 +9,35 @@ from datetime import date, timedelta
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", "/data"), "tally.db")
 _lock = threading.Lock()
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS company(
   id INTEGER PRIMARY KEY, name TEXT UNIQUE, last_sync REAL, last_seen REAL,
   from_date TEXT, to_date TEXT, alt_vch TEXT, alt_mst TEXT, unbalanced INTEGER DEFAULT 0,
-  bills_source TEXT DEFAULT 'vouchers');
+  bills_source TEXT DEFAULT 'vouchers', info TEXT DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS grp(
   company_id INT, name TEXT, parent TEXT, chain TEXT, PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS vtype(
   company_id INT, name TEXT, base TEXT, PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS ledger(
   company_id INT, name TEXT, parent TEXT, chain TEXT, opening REAL, closing REAL,
-  phone TEXT, mobile TEXT, email TEXT, gstin TEXT, taxtype TEXT, gst_head TEXT,
+  phone TEXT, mobile TEXT, email TEXT, gstin TEXT, taxtype TEXT, gst_head TEXT, extra TEXT DEFAULT '{}',
   PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS stock(
   company_id INT, name TEXT, parent TEXT, unit TEXT, opening_qty REAL, opening_value REAL,
-  closing_qty REAL, closing_value REAL, closing_rate REAL, PRIMARY KEY(company_id, name));
+  closing_qty REAL, closing_value REAL, closing_rate REAL, hsn TEXT DEFAULT '', PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS voucher(
   id INTEGER PRIMARY KEY, company_id INT, guid TEXT, date TEXT, vtype TEXT, base TEXT,
-  number TEXT, party TEXT, narration TEXT, amount REAL, balanced INT, reference TEXT, party_gstin TEXT);
+  number TEXT, party TEXT, narration TEXT, amount REAL, balanced INT, reference TEXT, party_gstin TEXT,
+  extra TEXT DEFAULT '{}');
 CREATE INDEX IF NOT EXISTS ix_v_date ON voucher(company_id, date);
 CREATE TABLE IF NOT EXISTS vline(voucher_id INT, ledger TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_vl_l ON vline(ledger, voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vl_v ON vline(voucher_id);
-CREATE TABLE IF NOT EXISTS vitem(voucher_id INT, item TEXT, qty REAL, unit TEXT, rate REAL, amount REAL);
+CREATE TABLE IF NOT EXISTS vitem(voucher_id INT, item TEXT, qty REAL, unit TEXT, rate REAL, amount REAL,
+  hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '');
 CREATE INDEX IF NOT EXISTS ix_vi_i ON vitem(item, voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vi_v ON vitem(voucher_id);
 CREATE TABLE IF NOT EXISTS vbill(voucher_id INT, ledger TEXT, name TEXT, btype TEXT, amount REAL, days INT);
@@ -120,7 +123,7 @@ def get_alt(name):
 
 
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
-           bills_rec=None, bills_pay=None):
+           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None):
     """Replace one company's masters and its vouchers inside [d_from, d_to].
     bills_rec / bills_pay: lists from Tally's Bills Receivable/Payable report, or None if unavailable."""
     chains = _chains(groups)
@@ -134,16 +137,20 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
         c.executemany("INSERT OR REPLACE INTO vtype VALUES(?,?,?)",
                       [(cid, n, b) for n, b in bases.items()])
         c.execute("DELETE FROM ledger WHERE company_id=?", (cid,))
-        c.executemany("INSERT OR REPLACE INTO ledger VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", [
+        ledger_x = ledger_x or {}
+        stock_x = stock_x or {}
+        c.executemany("INSERT OR REPLACE INTO ledger VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", [
             (cid, l["name"], l["parent"],
              chains.get(l["parent"], "|" + l["parent"] + "|") + l["name"] + "|",
              round(l["opening"], 2), round(l["closing"], 2),
-             l["phone"], l["mobile"], l["email"], l["gstin"], l.get("taxtype", ""), l.get("gst_head", ""))
+             l["phone"], l["mobile"], l["email"], l["gstin"] or ledger_x.get(l["name"], {}).get("gstin", ""),
+             l.get("taxtype", ""), l.get("gst_head", ""), json.dumps(ledger_x.get(l["name"], {})))
             for l in ledgers])
         c.execute("DELETE FROM stock WHERE company_id=?", (cid,))
-        c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?)", [
+        c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?,?)", [
             (cid, s["name"], s["parent"], s["unit"], s["opening_qty"], s["opening_value"],
-             s["closing_qty"], s["closing_value"], s["closing_rate"]) for s in stock])
+             s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""))
+            for s in stock])
 
         old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
         for t in ("vline", "vitem", "vbill"):
@@ -156,16 +163,18 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             unbalanced += 0 if v["balanced"] else 1
             vid = c.execute(
                 "INSERT INTO voucher(company_id,guid,date,vtype,base,number,party,narration,amount,balanced,"
-                "reference,party_gstin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "reference,party_gstin,extra) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, v["guid"], v["date"], v["vtype"], bases.get(v["vtype"], v["vtype"]), v["number"],
                  v["party"], v["narration"], v["amount"], 1 if v["balanced"] else 0,
-                 v.get("reference", ""), v.get("party_gstin", ""))).lastrowid
+                 v.get("reference", ""), v.get("party_gstin", ""), json.dumps(v.get("extra", {})))).lastrowid
             agg = {}
             for ln, a in v["lines"]:
                 agg[ln] = agg.get(ln, 0) + a
             c.executemany("INSERT INTO vline VALUES(?,?,?)", [(vid, ln, round(a, 2)) for ln, a in agg.items()])
-            c.executemany("INSERT INTO vitem VALUES(?,?,?,?,?,?)",
-                          [(vid, i["item"], i["qty"], i["unit"], i["rate"], i["amount"]) for i in v["items"]])
+            c.executemany("INSERT INTO vitem VALUES(?,?,?,?,?,?,?,?,?)",
+                          [(vid, i["item"], i["qty"], i["unit"], i["rate"], i["amount"],
+                            i.get("hsn") or stock_x.get(i["item"], {}).get("hsn", ""), i.get("disc", 0), i.get("descr", ""))
+                           for i in v["items"]])
             c.executemany("INSERT INTO vbill VALUES(?,?,?,?,?,?)",
                           [(vid, b["ledger"], b["name"], b["type"], round(b["amount"], 2), b["days"])
                            for b in v.get("bills", [])])
@@ -180,8 +189,8 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                                for b in rows])
         now = time.time()
         c.execute("UPDATE company SET last_sync=?, last_seen=?, from_date=?, to_date=?, alt_vch=?, alt_mst=?,"
-                  " unbalanced=?, bills_source=? WHERE id=?",
-                  (now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, source, cid))
+                  " unbalanced=?, bills_source=?, info=? WHERE id=?",
+                  (now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, source, json.dumps(info or {}), cid))
         n_v = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=?", (cid,)).fetchone()["n"]
     return {"ledgers": len(ledgers), "stock": len(stock), "vouchers": n_v, "unbalanced": unbalanced,
             "bills": source}
@@ -269,7 +278,8 @@ def ledger(cid, name, d_from=None, d_to=None):
         if not info:
             return None
         info = dict(info)
-        comp = c.execute("SELECT from_date, to_date FROM company WHERE id=?", (cid,)).fetchone()
+        info["extra"] = json.loads(info.get("extra") or "{}")
+        comp = c.execute("SELECT from_date, to_date, name, info FROM company WHERE id=?", (cid,)).fetchone()
         sync_from = comp["from_date"] or "2000-01-01"
         f, t = period(c, cid, d_from, d_to)
         f = max(f, sync_from)
@@ -302,7 +312,8 @@ def ledger(cid, name, d_from=None, d_to=None):
         kind, bills = ledger_bills(c, cid, name)
         return {"ledger": info, "from": f, "to": t, "opening": round(opening, 2),
                 "debit": round(dr, 2), "credit": round(cr, 2), "closing": round(bal, 2), "entries": rows,
-                "bill_kind": kind, "bills": bills}
+                "bill_kind": kind, "bills": bills,
+                "company": comp["name"], "company_info": json.loads(comp["info"] or "{}")}
 
 
 def group(cid, name=""):
@@ -525,21 +536,36 @@ def voucher(cid, vid):
             WHERE vl.voucher_id=? ORDER BY ABS(vl.amount) DESC""", (cid, vid))
         for ln in lines:
             chain = ln.pop("chain") or ""
+            ln["cashbank"] = any(g in chain for g in ("|Bank Accounts|", "|Cash-in-Hand|", "|Bank OD A/c|"))
             ln["kind"] = ("party" if ln["ledger"] == v["party"] else
                           "tax" if _is_tax({**ln, "chain": chain}) else
                           "sales" if "|Sales Accounts|" in chain or "|Purchase Accounts|" in chain else "other")
             for k in ("taxtype", "gst_head", "name"):
                 ln.pop(k, None)
-        party = c.execute("SELECT name, gstin, mobile, phone, chain FROM ledger WHERE company_id=? AND name=?",
+        party = c.execute("SELECT name, gstin, mobile, phone, email, chain, extra FROM ledger WHERE company_id=? AND name=?",
                           (cid, v["party"])).fetchone()
-        comp = c.execute("SELECT name FROM company WHERE id=?", (cid,)).fetchone()["name"]
-        return {"company": comp, "voucher": v, "lines": lines,
-                "items": _rows(c, "SELECT item, qty, unit, rate, amount FROM vitem WHERE voucher_id=?", (vid,)),
+        crow = c.execute("SELECT name, info FROM company WHERE id=?", (cid,)).fetchone()
+        v["extra"] = json.loads(v.get("extra") or "{}")
+        bank = None
+        for b in c.execute("""SELECT name, extra FROM ledger WHERE company_id=? AND chain LIKE '%|Bank Accounts|%'
+                ORDER BY ABS(closing) DESC""", (cid,)):
+            bx = json.loads(b["extra"] or "{}")
+            if bx.get("bank_account"):
+                bank = {"name": b["name"], **bx}
+                break
+        pinfo = None
+        if party:
+            pinfo = {k: party[k] for k in ("name", "gstin", "mobile", "phone", "email")}
+            pinfo.update(json.loads(party["extra"] or "{}"))
+            pinfo["gstin"] = party["gstin"] or pinfo.get("gstin", "")
+        return {"company": crow["name"], "company_info": json.loads(crow["info"] or "{}"), "bank": bank,
+                "voucher": v, "lines": lines,
+                "items": _rows(c, "SELECT item, qty, unit, rate, amount, hsn, disc, descr FROM vitem WHERE voucher_id=?", (vid,)),
                 "bills": [dict(b, vid=(c.execute("""SELECT v.id FROM vbill x JOIN voucher v ON v.id=x.voucher_id
                     WHERE v.company_id=? AND x.ledger=? AND x.name=? AND x.btype='New Ref' AND v.id<>? LIMIT 1""",
                     (cid, b["ledger"], b["name"], vid)).fetchone() or {"id": None})["id"])
                     for b in _rows(c, "SELECT ledger, name, btype, amount, days FROM vbill WHERE voucher_id=?", (vid,))],
-                "party": {k: party[k] for k in ("name", "gstin", "mobile", "phone")} if party else None}
+                "party": pinfo}
 
 
 GST_HEADS = ["IGST", "CGST", "SGST", "Cess"]
