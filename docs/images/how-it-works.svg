@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" font-family="Helvetica, Arial, sans-serif">
+  <rect width="960" height="330" fill="#ffffff"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1b2333"/>
+    </marker>
+  </defs>
+
+  <!-- Tally PC -->
+  <rect x="20" y="40" width="250" height="230" rx="12" fill="#f3f5f9" stroke="#c9d3e3"/>
+  <text x="145" y="68" text-anchor="middle" font-size="17" font-weight="700" fill="#1b2333">Tally PC (Windows)</text>
+  <rect x="45" y="88" width="200" height="56" rx="8" fill="#fff" stroke="#c9d3e3"/>
+  <text x="145" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1b2333">TallyPrime</text>
+  <text x="145" y="131" text-anchor="middle" font-size="12" fill="#4a5468">data server on port 9000</text>
+  <rect x="45" y="180" width="200" height="66" rx="8" fill="#fff" stroke="#8f1d1d"/>
+  <text x="145" y="204" text-anchor="middle" font-size="14" font-weight="600" fill="#8f1d1d">Bahi sync agent</text>
+  <text x="145" y="222" text-anchor="middle" font-size="12" fill="#4a5468">runs every 10 minutes,</text>
+  <text x="145" y="237" text-anchor="middle" font-size="12" fill="#4a5468">sends only when Tally changed</text>
+  <line x1="145" y1="178" x2="145" y2="146" stroke="#1b2333" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="152" y="167" font-size="11" fill="#4a5468">reads XML</text>
+
+  <!-- Unraid -->
+  <rect x="355" y="40" width="250" height="230" rx="12" fill="#f3f5f9" stroke="#c9d3e3"/>
+  <text x="480" y="68" text-anchor="middle" font-size="17" font-weight="700" fill="#1b2333">Unraid server</text>
+  <rect x="380" y="88" width="200" height="158" rx="8" fill="#fff" stroke="#8f1d1d"/>
+  <text x="480" y="114" text-anchor="middle" font-size="14" font-weight="600" fill="#8f1d1d">bahi container</text>
+  <text x="480" y="136" text-anchor="middle" font-size="12" fill="#4a5468">port 8780</text>
+  <text x="480" y="162" text-anchor="middle" font-size="12" fill="#4a5468">stores a copy of your books</text>
+  <text x="480" y="180" text-anchor="middle" font-size="12" fill="#4a5468">in /mnt/user/appdata/bahi/data</text>
+  <text x="480" y="206" text-anchor="middle" font-size="12" fill="#4a5468">serves the phone app,</text>
+  <text x="480" y="224" text-anchor="middle" font-size="12" fill="#4a5468">reports and PDFs</text>
+
+  <!-- Phone -->
+  <rect x="690" y="40" width="250" height="230" rx="12" fill="#f3f5f9" stroke="#c9d3e3"/>
+  <text x="815" y="68" text-anchor="middle" font-size="17" font-weight="700" fill="#1b2333">Your phone</text>
+  <rect x="765" y="86" width="100" height="164" rx="14" fill="#fff" stroke="#1b2333" stroke-width="1.5"/>
+  <rect x="765" y="86" width="100" height="26" rx="14" fill="#8f1d1d"/>
+  <rect x="765" y="100" width="100" height="12" fill="#8f1d1d"/>
+  <text x="815" y="104" text-anchor="middle" font-size="11" font-weight="700" fill="#fff4ef">Bahi</text>
+  <rect x="775" y="122" width="80" height="20" rx="4" fill="#f3f5f9"/>
+  <rect x="775" y="148" width="80" height="12" rx="3" fill="#f3f5f9"/>
+  <rect x="775" y="165" width="80" height="12" rx="3" fill="#f3f5f9"/>
+  <rect x="775" y="182" width="80" height="12" rx="3" fill="#f3f5f9"/>
+  <rect x="775" y="199" width="80" height="12" rx="3" fill="#f3f5f9"/>
+  <text x="815" y="238" text-anchor="middle" font-size="10" fill="#4a5468">Chrome, installed</text>
+
+  <!-- arrows -->
+  <line x1="272" y1="213" x2="378" y2="213" stroke="#1b2333" stroke-width="1.8" marker-end="url(#a)"/>
+  <text x="325" y="200" text-anchor="middle" font-size="12" fill="#1b2333">LAN or</text>
+  <text x="325" y="232" text-anchor="middle" font-size="12" fill="#1b2333">Tailscale</text>
+  <line x1="688" y1="167" x2="582" y2="167" stroke="#1b2333" stroke-width="1.8" marker-end="url(#a)"/>
+  <text x="635" y="150" text-anchor="middle" font-size="12" fill="#1b2333">Cloudflare</text>
+  <text x="635" y="188" text-anchor="middle" font-size="12" fill="#1b2333">Tunnel + Access</text>
+  <text x="480" y="305" text-anchor="middle" font-size="13" fill="#4a5468">Your books are stored only on your own machines. Cloudflare carries the connection to your phone (or use Tailscale instead).</text>
+</svg>

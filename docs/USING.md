@@ -1,0 +1,145 @@
+# User guide
+
+All screenshots use made-up demo data.
+
+The bar at the bottom has six sections: **Home, Ledgers, Vouchers, Dues, Stock and Reports**. The red bar at the top shows your company name, plus a line telling you when data was last synced and whether Tally is connected right now.
+
+- **Tap the company name** to switch company, if you sync more than one.
+- **Tap ↻** to reload the figures.
+- **The period buttons** (This year, This month, Last month, This quarter, All dates, Custom) appear on most screens and decide which dates are shown. The app remembers your choice.
+
+---
+
+## Home
+
+<img src="images/home.png" width="260" align="right" alt="Home screen">
+
+- **You will receive / You owe:** total of Sundry Debtors and Sundry Creditors. Tap either to open Dues.
+- **Cash, Bank, Stock:** current balances. Tap to see the ledgers behind them.
+- **Sales:** sales this financial year, this month, and purchases, with a bar for each month. Tap a bar to see the exact figure.
+- **Bank balances**, **Biggest dues** and **Latest entries:** tap any row to open it.
+
+<br clear="right">
+
+## Ledgers
+
+<img src="images/ledgers.png" width="230" align="right" alt="Ledger list">
+
+Type in the search box to find any ledger. The chips below the search box jump straight to **Debtors**, **Creditors**, **Banks** or **All groups**.
+
+<br clear="right">
+
+### A party's ledger
+
+<img src="images/ledger.png" width="260" align="right" alt="Party ledger">
+
+- The top shows phone, GSTIN, and **Opening, Closing, Debits and Credits** for the selected period.
+- **Share PDF** sends a Tally-style *Ledger Account* PDF, e.g. to the party on WhatsApp. **View PDF** opens it on the phone.
+- **Remind** opens WhatsApp with a ready-made payment reminder. It only appears for parties who owe you and have a mobile number in Tally.
+- **Pending bills** lists unpaid bills with days overdue. Tap a bill to open its invoice.
+- The statement below is laid out like a ruled account book: each entry shows the other ledger, voucher type and number, amount (Dr or Cr) and the running balance. Tap an entry to open the voucher.
+
+The closing balance always matches Tally, because running balances are worked back from Tally's own closing figure.
+
+<br clear="right">
+
+## Vouchers
+
+<img src="images/vouchers.png" width="260" align="right" alt="Voucher search">
+
+- **Search** by party name, voucher number (e.g. `S/279`), exact amount (e.g. `66080`) or a word from the narration.
+- Filter by **voucher type** (Sales, Receipt, Payment and so on) and **period**. Use **All dates** to search everything synced.
+- The count at the top shows how many vouchers matched. **Load more** at the bottom shows the next 200.
+
+<br clear="right">
+
+### Opening a voucher
+
+<table><tr>
+<td><img src="images/voucher.png" width="260" alt="Voucher detail"></td>
+<td><img src="images/voucher-dark.png" width="260" alt="Voucher detail, dark mode"></td>
+</tr></table>
+
+A voucher shows:
+
+- the type, number, date and reference;
+- the party and their GSTIN;
+- the items with quantity and rate, plus taxable value and GST;
+- every account with its Dr or Cr amount;
+- bill references, such as which invoices a receipt settled (tap one to open that invoice);
+- the narration.
+
+**Share PDF** and **View PDF** produce the voucher in TallyPrime's print layout:
+
+<table><tr>
+<td><img src="images/pdf-invoice.png" width="380" alt="Tax Invoice PDF"></td>
+<td><img src="images/pdf-receipt.png" width="380" alt="Receipt Voucher PDF"></td>
+</tr>
+<tr><td>Sales, purchases, credit and debit notes: <b>Tax Invoice</b> with HSN, GST, amount in words, HSN tax summary, bank details and signatory</td>
+<td>Receipts, payments, contra and journals: <b>Voucher</b> with Account, Through, bills settled and amount in words</td></tr></table>
+
+## Dues
+
+<table><tr>
+<td><img src="images/dues.png" width="260" alt="Dues summary"></td>
+<td><img src="images/dues-bills.png" width="260" alt="Bills of one party"></td>
+</tr></table>
+
+- Switch between **To receive** and **To pay**.
+- The top shows the total, how much is **overdue**, and a bar splitting dues by age: 0-30, 31-60, 61-90 and over 90 days from the bill date.
+- Each party shows its balance, overdue amount and oldest bill. **Tap a party** to see each pending bill with its date, due date and days overdue.
+- **Tap a bill** to open the invoice. **Remind** sends a WhatsApp message listing the overdue bills.
+
+Bills come from Tally's own *Bills Receivable / Bills Payable* when available. Otherwise they're worked out from the bill references in your vouchers. Any amount not linked to a bill shows as *On account*.
+
+## Stock
+
+<table><tr>
+<td><img src="images/stock.png" width="260" alt="Stock summary"></td>
+<td><img src="images/stock-item.png" width="260" alt="Stock item"></td>
+</tr></table>
+
+The list shows every item's quantity, rate and value, with the total closing stock value at the top. Tap an item to see what came in and went out in the period, with each voucher. Tap a movement to open its voucher.
+
+## Reports
+
+<img src="images/reports.png" width="260" align="right" alt="Reports menu">
+
+| Report | What it shows |
+|---|---|
+| **Vouchers** | Search and open any voucher |
+| **Day Book** | All vouchers by date, filter by type |
+| **Profit & Loss** | Sales, purchases, stock, expenses, gross and net profit. Tap a line to see its ledgers. |
+| **GST summary** | Output tax, input credit and net GST payable, month by month |
+| **Group summary** | Balances by Tally group, like the Balance Sheet. Tap to drill down. |
+| **Outstanding** | Same as Dues |
+| **Stock summary** | Same as Stock |
+
+The **Sync** box shows the synced date range, the number of ledgers and vouchers, when data last changed, and the **app version**. This screen also has buttons to switch between light and dark mode and to log out.
+
+<br clear="right">
+
+<table><tr>
+<td><img src="images/gst.png" width="230" alt="GST summary"></td>
+<td><img src="images/pl.png" width="230" alt="Profit and Loss"></td>
+<td><img src="images/groups.png" width="230" alt="Group summary"></td>
+<td><img src="images/daybook.png" width="230" alt="Day Book"></td>
+</tr></table>
+
+> **GST summary** is a quick check worked out from your vouchers. GST payments to the government and set-off entries are left out. File your returns from Tally or the GST portal.
+
+## Ledger statement PDF
+
+<img src="images/pdf-ledger.png" width="420" alt="Ledger Account PDF">
+
+The PDF follows Tally's *Ledger Account* layout:
+
+- your company header, then the party's name and address;
+- **To** entries in the Debit column and **By** entries in the Credit column, with the narration under each entry;
+- the closing balance at the end, so that both columns total the same.
+
+## Good to know
+
+- Figures are as of the **last sync**. If the Tally PC is off, the app shows the last copy and says so at the top.
+- Without internet, the phone shows the screens you opened before, with a note saying it's a saved copy.
+- PDFs use a standard font, so names written in Hindi or other Indian scripts print as "?". The ₹ sign prints correctly.
