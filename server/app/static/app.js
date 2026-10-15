@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.4";
+const APP_VERSION = "2.4.1";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -997,14 +997,18 @@ async function vCollect() {
           ${p.note ? `<div class="meta notep">${h(p.note)}</div>` : ""}</div>
           <div class="end">${money(p.balance)}<div class="meta">balance</div></div><span class="chev down"></span></button>
         <div class="bills" id="cb${i}" hidden>
-          ${p.overdue_bills.map((b) => bill(b, `${b.late} days late`, true)).join("")}
-          ${p.soon_bills.map((b) => bill(b, b.in_days ? `due in ${b.in_days} days` : "due today")).join("")}
-          <form class="form fu" data-party="${h(p.name)}" style="padding:12px 14px 14px;border-top:1px solid var(--rule)">
+          <div class="actions" style="padding:12px 14px 4px">
+              ${ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
+              <a class="btn" href="#/ledger/${enc(p.name)}">Ledger</a></div>
+          <form class="form fu" data-party="${h(p.name)}" style="padding:8px 14px 14px">
+            <div class="block-title" style="padding:0">Note and promised date</div>
             <label>Note<input type="text" name="note" maxlength="300" value="${h(p.note)}" placeholder="e.g. Will pay half after Diwali"></label>
             <label>Promised to pay on<input type="date" name="promise" value="${h(p.promise)}"></label>
-            <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save note</button>${p.note || p.promise ? '<button class="btn" type="button" data-clear>Clear</button>' : ""}
-              ${ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
-              <a class="btn" href="#/ledger/${enc(p.name)}">Ledger</a></div></form>
+            <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save note</button>${p.note || p.promise ? '<button class="btn" type="button" data-clear>Clear</button>' : ""}</div></form>
+          ${(() => {
+            const all = [...p.overdue_bills.map((b) => bill(b, `${b.late} days late`, true)), ...p.soon_bills.map((b) => bill(b, b.in_days ? `due in ${b.in_days} days` : "due today"))];
+            return `<div style="border-top:1px solid var(--rule)">${all.slice(0, 5).join("")}${all.length > 5 ? `<div hidden data-more>${all.slice(5).join("")}</div><button class="btn" style="margin:10px 14px 12px" data-showmore>Show ${all.length - 5} more bills</button>` : ""}</div>`;
+          })()}
         </div></div>`;
     }).join("") || `<div class="empty">${S.cf === "all" ? "Nobody is overdue or due this week." : "Nobody in this list."}</div>`}</section>
     <p class="note" style="border:0">Bills without a credit period count as due on the bill date. Notes are kept on your server, not in Tally.</p>`;
@@ -1019,6 +1023,7 @@ async function vCollect() {
     if (!r.ok) { toast((await r.json().catch(() => ({}))).error || "Couldn't save."); return; }
     toast(note || promise ? "Note saved." : "Note cleared."); vCollect().catch(fail);
   };
+  view.querySelectorAll("[data-showmore]").forEach((b) => b.onclick = () => { b.previousElementSibling.hidden = false; b.remove(); });
   view.querySelectorAll("form.fu").forEach((f) => {
     f.onsubmit = (e) => { e.preventDefault(); save(f, f.note.value.trim(), f.promise.value); };
     const c = f.querySelector("[data-clear]"); if (c) c.onclick = () => save(f, "", "");
