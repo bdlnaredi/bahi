@@ -46,9 +46,10 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 |---|---|
 | `server/` | The Docker app. Python standard library only, no extra packages. |
 | `agent/` | Sync agent for the Windows PC that runs TallyPrime. |
-| `unraid/bahi.xml` | Unraid Docker template. |
 | `tests/mock_tally.py` | A simulated Tally server used for testing without real books. |
 | `docs/` | Guides and screenshots. |
+
+The Unraid template lives with the maintainer's other templates in [bdlnaredi/mediahub](https://github.com/bdlnaredi/mediahub/blob/main/unraid/bahi.xml).
 
 The Docker image is built automatically on every change and published as `ghcr.io/bdlnaredi/bahi:latest`.
 

@@ -56,9 +56,11 @@ Keep both secrets somewhere safe, such as a password manager.
 
 ### Option A: Unraid template (recommended, one-click updates)
 
+Once Bahi appears in **Community Apps**, search the **Apps** tab for **Bahi** and click **Install**, then continue from step 4. Until then:
+
 1. Open the Unraid terminal (`>_`) and run this to download the template:
    ```
-   wget -O /boot/config/plugins/dockerMan/templates-user/my-bahi.xml https://raw.githubusercontent.com/bdlnaredi/bahi/main/unraid/bahi.xml
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-bahi.xml https://raw.githubusercontent.com/bdlnaredi/mediahub/main/unraid/bahi.xml
    ```
 2. Go to the **Docker** tab and click **Add Container**.
 3. In the **Template** dropdown, choose **bahi** (under *User templates*).
