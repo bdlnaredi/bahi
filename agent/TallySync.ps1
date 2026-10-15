@@ -197,12 +197,18 @@ catch { Log ("Tally is not reachable on $Tally - is TallyPrime open? (" + $_.Exc
 
 if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yellow"; exit 3 }
 
-$fromIso = $FromDate.ToString("yyyy-MM-dd"); $toIso = $ToDate.ToString("yyyy-MM-dd")
+$BaseFrom = $FromDate
 $exitCode = 0
 
 foreach ($co in $companies) {
     try {
         $state = Server-Json "GET" ("/agent/state?company=" + [uri]::EscapeDataString($co.Name)) $null
+        # "Delete older vouchers" in the app sets keep_from: don't send anything before it
+        $FromDate = $BaseFrom
+        if ($state.keep_from -and $state.keep_from -gt $BaseFrom.ToString("yyyy-MM-dd")) {
+            $FromDate = [datetime]::ParseExact($state.keep_from, "yyyy-MM-dd", $null)
+        }
+        $fromIso = $FromDate.ToString("yyyy-MM-dd"); $toIso = $ToDate.ToString("yyyy-MM-dd")
         $unchanged = $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
                      ($state.alt_mst -eq $co.AltMst) -and ($state.from_date -eq $fromIso)
         if ($unchanged -and -not $Force) {

@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -75,13 +75,18 @@ function periodParams() { return S.period ? { from: S.period.from, to: S.period.
 async function loadCompanies() {
   const d = await api("/api/companies");
   S.companies = d.companies;
-  if (!S.companies.find((c) => c.id === S.cid)) S.cid = S.companies[0]?.id ?? null;
+  if (!S.companies.find((c) => c.id === S.cid)) {
+    // start with the company holding the most recent vouchers (usually the current year's)
+    const latest = S.companies.slice().sort((a, b) => (b.last_vch || "").localeCompare(a.last_vch || ""))[0];
+    S.cid = latest?.id ?? null;
+  }
   renderCover();
 }
 
 function renderCover() {
   const c = S.companies.find((x) => x.id === S.cid);
   $("#company").textContent = c ? c.name : "Bahi";
+  if (c && S.companies.length > 1) $("#company").insertAdjacentHTML("beforeend", ' <span class="caret" aria-hidden="true">▾</span>');
   const st = $("#status");
   if (!c) { st.innerHTML = ""; return; }
   const online = c.last_seen && Date.now() / 1000 - c.last_seen < 30 * 60;
@@ -131,7 +136,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", day: "sales", stock: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
 }
@@ -454,7 +459,9 @@ function vReports() {
     <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
     <div>App version ${APP_VERSION}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
-  <section class="page"><div class="actions" style="padding-top:14px">
+  <section class="page">
+    <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Change password, delete old data${S.companies.length > 1 ? ", companies" : ""}</div></div><span class="chev"></span></a>
+    <div class="actions" style="padding-top:12px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
   $("#theme").onclick = () => {
@@ -651,9 +658,75 @@ async function vCheck() {
       ${g.examples.map((v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
         <div class="meta">${fdate(v.date)}, No. ${h(v.number)}</div></div><div class="end"><span class="meta">off by</span> ${money(Math.abs(v.imbalance))}</div><span class="chev"></span></a>`).join("")}
       </section>`).join("")}
+    <section class="page"><div class="block-title"><span>Vouchers synced by month</span><span>All / Sales</span></div>
+      ${d.months.map((m) => { const [yy, mm] = m.m.split("-"); return `<a class="row" href="#/vouchers" data-month="${m.m}"><div class="main name">${MON[+mm - 1]} ${yy}</div><div class="end">${nf0.format(m.n)} / ${nf0.format(m.sales)}</div></a>`; }).join("") || '<div class="empty">No vouchers synced yet.</div>'}
+    </section>
     <section class="page"><div class="block-title"><span>Vouchers synced by type</span><span>Count</span></div>
       ${d.types.map((t) => `<div class="row" style="cursor:default"><div class="main name">${h(t.vtype)}</div><div class="end">${nf0.format(t.n)}</div></div>`).join("")}
     </section>`;
+}
+
+async function vSettings() {
+  setTitle(true);
+  await loadCompanies();
+  const range = (c) => c.first_vch ? `${fdate(c.first_vch)} to ${fdate(c.last_vch)}` : "no vouchers yet";
+  view.innerHTML = `<h1 class="title">Settings</h1>
+    <section class="page"><div class="block-title">Change app password</div>
+      <form id="pwf" class="form">
+        <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
+        <label>New password<input type="password" id="pw1" autocomplete="new-password" minlength="8" required></label>
+        <label>New password again<input type="password" id="pw2" autocomplete="new-password" minlength="8" required></label>
+        <button class="btn primary" type="submit">Change password</button>
+        <div class="msg" id="pwmsg" role="status"></div>
+        <p class="hint">Other phones will need to log in again with the new password. If you ever forget it, delete <code>app_password.json</code> from the Bahi data folder on Unraid; the password from the container settings then works again.</p>
+      </form></section>
+    ${S.companies.map((c) => `<section class="page" data-cid="${c.id}">
+      <div class="block-title"><span>${h(c.name)}</span>${c.id === S.cid ? "<span>showing now</span>" : `<button class="chip" data-use="${c.id}">Show this</button>`}</div>
+      <div class="info"><div>Vouchers: ${nf0.format(c.vouchers)}, ${range(c)}</div>
+        ${c.keep_from ? `<div>Keeping vouchers from ${fdate(c.keep_from)}</div>` : ""}</div>
+      <form class="form" data-purge="${c.id}">
+        <label>Delete vouchers before<input type="date" required value="${c.first_vch && c.first_vch > (c.keep_from || "") ? fyStart(c.last_vch) : ""}"></label>
+        <button class="btn" type="submit">Delete older vouchers</button>
+        <p class="hint">Removes them from Bahi only, never from Tally. Later syncs won't bring them back.</p>
+      </form>
+      <div class="actions"><button class="btn danger" data-del="${c.id}">Delete all of this company's data</button></div>
+      <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
+    </section>`).join("")}`;
+  $("#pwf").onsubmit = async (e) => {
+    e.preventDefault();
+    const msg = $("#pwmsg");
+    if ($("#pw1").value !== $("#pw2").value) { msg.textContent = "The two new passwords don't match."; return; }
+    const r = await fetch("/api/password", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current: $("#pw0").value, new: $("#pw1").value }) });
+    const j = await r.json().catch(() => ({}));
+    msg.textContent = r.ok ? "Password changed." : (j.error || "Couldn't change the password.");
+    if (r.ok) $("#pwf").reset();
+  };
+  view.querySelectorAll("[data-use]").forEach((b) => b.onclick = () => {
+    S.cid = Number(b.dataset.use); try { localStorage.setItem("cid", S.cid); } catch (e) {}
+    renderCover(); vSettings().catch(fail);
+  });
+  view.querySelectorAll("[data-purge]").forEach((f) => f.onsubmit = async (e) => {
+    e.preventDefault();
+    const day = f.querySelector("input").value;
+    if (!day || !confirm(`Delete every voucher before ${fdate(day)} from Bahi? Tally is not affected.`)) return;
+    const r = await fetch(`/api/c/${f.dataset.purge}/purge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ before: day }) });
+    const j = await r.json().catch(() => ({}));
+    toast(r.ok ? `Deleted ${nf0.format(j.deleted)} vouchers.` : (j.error || "Couldn't delete."));
+    vSettings().catch(fail);
+  });
+  view.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    const c = S.companies.find((x) => x.id === Number(b.dataset.del));
+    if (!confirm(`Delete everything Bahi has for ${c.name}? Tally is not affected.`)) return;
+    await fetch(`/api/c/${c.id}/delete`, { method: "POST" });
+    toast("Deleted."); S.cid = null; await loadCompanies(); location.hash = "#/reports";
+  });
+}
+
+function fyStart(day) {
+  const d = new Date((day || iso(new Date())) + "T00:00:00");
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${y}-04-01`;
 }
 
 async function vPL() {
@@ -735,6 +808,7 @@ async function route() {
       case "pl": await vPL(); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;
+      case "settings": await vSettings(); break;
       case "sales": await vSales(parts[1] === "purchase" ? "purchase" : "sales"); break;
       case "day": await vDay(parts[1], parts[2]); break;
       case "vouchers": await vVouchers(); break;

@@ -273,3 +273,14 @@ a.bill:active { background: var(--rule); }
 .note a { color: inherit; }
 .sortbar { align-items: center; }
 .sortlabel { font-size: 12.5px; color: var(--ink-3); flex: none; padding-right: 2px; }
+
+/* settings */
+.form { display: grid; gap: 10px; padding: 0 14px 14px; }
+.form label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.form input { border: 1px solid var(--rule); background: var(--paper); border-radius: 8px; padding: 10px; font-size: 16px; }
+.form .btn { justify-self: start; }
+.form .msg { font-size: 14px; min-height: 18px; }
+.hint { font-size: 12.5px; color: var(--ink-3); margin: 0; }
+.hint code { font-size: 12px; }
+.btn.danger { color: var(--cr); border-color: var(--cr); }
+.caret { font-size: 13px; opacity: .8; }

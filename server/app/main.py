@@ -37,13 +37,46 @@ MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
 
+PW_FILE = os.path.join(DATA_DIR, "app_password.json")
+
+
+def _stored_pw():
+    try:
+        with open(PW_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def check_password(pw):
+    """A password changed in the app (stored hashed in the data folder) replaces APP_PASSWORD."""
+    st = _stored_pw()
+    if st:
+        h = hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(st["salt"]), st["iter"]).hex()
+        return hmac.compare_digest(h, st["hash"])
+    return bool(APP_PASSWORD) and hmac.compare_digest(pw, APP_PASSWORD)
+
+
+def set_password(pw):
+    salt = secrets.token_bytes(16)
+    it = 200_000
+    data = {"salt": salt.hex(), "iter": it, "hash": hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, it).hex(),
+            "changed": time.time()}
+    tmp = PW_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, PW_FILE)
+
+
 def _secret():
     p = os.path.join(DATA_DIR, "secret.key")
     if not os.path.exists(p):
         with open(p, "w") as f:
             f.write(secrets.token_hex(32))
     with open(p) as f:
-        return (f.read().strip() + APP_PASSWORD).encode()
+        st = _stored_pw()
+        # changing the password signs every other phone out
+        return (f.read().strip() + (st["hash"] if st else APP_PASSWORD)).encode()
 
 
 def make_session():
@@ -237,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
     def api(self, method, path, q):
         if path == "/api/login" and method == "POST":
             data = json.loads(self.body(4096) or b"{}")
-            if APP_PASSWORD and hmac.compare_digest(str(data.get("password", "")), APP_PASSWORD):
+            if check_password(str(data.get("password", ""))):
                 secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
                 return self.send_json({"ok": True}, headers={
                     "Set-Cookie": f"tm_session={make_session()}; Path=/; HttpOnly; SameSite=Lax; "
@@ -248,6 +281,32 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": True}, headers={"Set-Cookie": "tm_session=; Path=/; Max-Age=0"})
         if not self.authed():
             return self.send_json({"error": "login required"}, 401)
+
+        if path == "/api/password" and method == "POST":
+            data = json.loads(self.body(4096) or b"{}")
+            cur, new = str(data.get("current", "")), str(data.get("new", ""))
+            if not check_password(cur):
+                time.sleep(1.5)
+                return self.send_json({"error": "Your current password isn't right."}, 400)
+            if len(new) < 8:
+                return self.send_json({"error": "Use at least 8 characters for the new password."}, 400)
+            set_password(new)
+            secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
+            return self.send_json({"ok": True}, headers={
+                "Set-Cookie": f"tm_session={make_session()}; Path=/; HttpOnly; SameSite=Lax; "
+                              f"Max-Age={SESSION_DAYS * 86400}{secure}"})
+
+        mp = re.match(r"^/api/c/(\d+)/(purge|delete)$", path)
+        if mp and method == "POST":
+            cid = int(mp.group(1))
+            if mp.group(2) == "delete":
+                store.delete_company(cid)
+                return self.send_json({"ok": True})
+            data = json.loads(self.body(4096) or b"{}")
+            day = str(data.get("before", ""))
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+                return self.send_json({"error": "Pick a date."}, 400)
+            return self.send_json({"ok": True, "deleted": store.purge_before(cid, day)})
 
         if path == "/api/companies":
             return self.send_json({"companies": store.companies(), "now": time.time()})

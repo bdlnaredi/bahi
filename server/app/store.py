@@ -85,6 +85,7 @@ def init():
             for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
                 c.execute(f'DROP TABLE IF EXISTS "{t}"')
         c.executescript(SCHEMA)
+        _migrate(c)
         c.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (SCHEMA_VERSION,))
 
 
@@ -127,10 +128,47 @@ def heartbeat(names):
             c.execute("UPDATE company SET last_seen=? WHERE id=?", (time.time(), cid))
 
 
+def _migrate(c):
+    cols = [r[1] for r in c.execute("PRAGMA table_info(company)")]
+    if "keep_from" not in cols:
+        c.execute("ALTER TABLE company ADD COLUMN keep_from TEXT DEFAULT ''")
+
+
 def get_alt(name):
     with conn() as c:
-        r = c.execute("SELECT alt_vch, alt_mst, from_date, last_sync FROM company WHERE name=?", (name,)).fetchone()
+        r = c.execute("SELECT alt_vch, alt_mst, from_date, last_sync, keep_from FROM company WHERE name=?", (name,)).fetchone()
         return dict(r) if r else {}
+
+
+def keep_from(c, cid):
+    r = c.execute("SELECT keep_from FROM company WHERE id=?", (cid,)).fetchone()
+    return (r["keep_from"] if r else "") or ""
+
+
+def purge_before(cid, day):
+    """Delete vouchers dated before `day` and stop accepting them in future syncs."""
+    with _lock, conn() as c:
+        old = "SELECT id FROM voucher WHERE company_id=? AND date < ?"
+        for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+            c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, day))
+        n = c.execute("DELETE FROM voucher WHERE company_id=? AND date < ?", (cid, day)).rowcount
+        c.execute("UPDATE company SET keep_from=?, from_date=MAX(COALESCE(from_date,''), ?) WHERE id=?", (day, day, cid))
+    with conn() as c:
+        c.execute("VACUUM")
+    return n
+
+
+def delete_company(cid):
+    """Remove everything synced for a company. If it is still open in Tally, the next sync brings it back."""
+    with _lock, conn() as c:
+        ids = "SELECT id FROM voucher WHERE company_id=?"
+        for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+            c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({ids})", (cid,))
+        for t in ("voucher", "grp", "vtype", "ledger", "stock", "bill"):
+            c.execute(f"DELETE FROM {t} WHERE company_id=?", (cid,))
+        c.execute("DELETE FROM company WHERE id=?", (cid,))
+    with conn() as c:
+        c.execute("VACUUM")
 
 
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
@@ -141,6 +179,10 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
     bases = _base_types(vtypes)
     with _lock, conn() as c:
         cid = company_id(c, company)
+        kf = keep_from(c, cid)
+        if kf and d_from < kf:
+            d_from = kf
+            vouchers = [v for v in vouchers if v["date"] >= kf]
         c.execute("DELETE FROM grp WHERE company_id=?", (cid,))
         c.executemany("INSERT OR REPLACE INTO grp VALUES(?,?,?,?)",
                       [(cid, g["name"], g["parent"], chains[g["name"]]) for g in groups])
@@ -220,17 +262,29 @@ def _rows(c, sql, args=()):
 
 def companies():
     with conn() as c:
-        return _rows(c, """SELECT id, name, last_sync, last_seen, from_date, to_date, unbalanced,
+        return _rows(c, """SELECT id, name, last_sync, last_seen, from_date, to_date, unbalanced, keep_from,
+            (SELECT MIN(date) FROM voucher v WHERE v.company_id=company.id) first_vch,
+            (SELECT MAX(date) FROM voucher v WHERE v.company_id=company.id) last_vch,
             (SELECT COUNT(*) FROM ledger l WHERE l.company_id=company.id) ledgers,
             (SELECT COUNT(*) FROM voucher v WHERE v.company_id=company.id) vouchers
             FROM company WHERE last_sync IS NOT NULL ORDER BY name""")
 
 
+def fy_bounds(day=None):
+    d = day or date.today()
+    y = d.year if d.month >= 4 else d.year - 1
+    return f"{y}-04-01", f"{y + 1}-03-31"
+
+
 def period(c, cid, d_from, d_to):
-    r = c.execute("SELECT from_date, to_date FROM company WHERE id=?", (cid,)).fetchone()
-    f = d_from or (r["from_date"] if r and r["from_date"] else "2000-01-01")
-    t = d_to or (r["to_date"] if r and r["to_date"] else date.today().isoformat())
-    return f, t
+    """Explicit dates win; otherwise the current financial year (April to March)."""
+    if d_from and d_to:
+        return d_from, d_to
+    fs, fe = fy_bounds()
+    r = c.execute("SELECT MAX(date) m FROM voucher WHERE company_id=?", (cid,)).fetchone()
+    if r and r["m"] and r["m"] < fs:          # company's books end before this year (an old year's company)
+        fs, fe = fy_bounds(date.fromisoformat(r["m"]))
+    return d_from or fs, d_to or fe
 
 
 def _sum_group(c, cid, group, f, t):
@@ -739,4 +793,7 @@ def sync_check(cid):
     out = sorted(groups.values(), key=lambda g: -g["count"])
     for g in out:
         g["of"] = total.get(g["vtype"], 0)
-    return {"unbalanced": len(rows), "groups": out, "types": counts}
+    with conn() as c:
+        months = _rows(c, """SELECT substr(date,1,7) m, COUNT(*) n, SUM(CASE WHEN base='Sales' THEN 1 ELSE 0 END) sales
+            FROM voucher WHERE company_id=? GROUP BY m ORDER BY m DESC""", (cid,))
+    return {"unbalanced": len(rows), "groups": out, "types": counts, "months": months}
