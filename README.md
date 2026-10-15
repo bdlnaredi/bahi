@@ -50,7 +50,7 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 | `tests/mock_tally.py` | A simulated Tally server used for testing without real books. |
 | `docs/` | Guides and screenshots. |
 
-The Unraid template lives with the maintainer's other templates in [bdlnaredi/mediahub](https://github.com/bdlnaredi/mediahub/blob/main/unraid/bahi.xml).
+`unraid/bahi.xml` is an Unraid Docker template you can add by hand (see the installation guide). Bahi is not listed in Community Apps.
 
 The Docker image is built automatically on every change and published as `ghcr.io/bdlnaredi/bahi:latest`.
 
