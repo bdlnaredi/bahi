@@ -1,0 +1,17 @@
+services:
+  bahi:
+    # Build this image first in the Unraid terminal:
+    #   docker build -t bahi:local /mnt/user/appdata/bahi/server
+    image: bahi:local
+    pull_policy: never
+    container_name: bahi
+    restart: unless-stopped
+    ports:
+      - "8780:8780"
+    environment:
+      # Password you type in the phone app. Make it long.
+      - APP_PASSWORD=change-this-app-password
+      # Secret shared with the Tally PC sync agent. Make it long and random.
+      - SYNC_TOKEN=change-this-sync-token
+    volumes:
+      - /mnt/user/appdata/bahi/data:/data

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bahi — Tally on your phone</title>
+<meta name="theme-color" content="#8f1d1d">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="cover">
+  <div class="cover-row">
+    <button id="back" class="icon-btn" aria-label="Back" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="company" class="company" aria-label="Switch company"></button>
+    <button id="refresh" class="icon-btn" aria-label="Refresh">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+  <div id="status" class="status"></div>
+</header>
+<div id="offline" class="offline" hidden>No connection to the server. Showing the copy saved on this phone.</div>
+<main id="view" tabindex="-1"></main>
+<nav id="tabs" aria-label="Sections">
+  <a href="#/" data-tab="home"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg>Home</a>
+  <a href="#/parties" data-tab="parties"><svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z M9 9h7 M9 13h7 M9 17h4"/></svg>Ledgers</a>
+  <a href="#/vouchers" data-tab="vouchers"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z M9 8h6 M9 12h6 M9 16h3"/></svg>Vouchers</a>
+  <a href="#/dues" data-tab="dues"><svg viewBox="0 0 24 24"><path d="M12 3v18 M16 7.5c0-1.9-1.8-3-4-3s-4 1.1-4 3 1.8 2.6 4 3 4 1.2 4 3.2-1.8 3.3-4 3.3-4-1.2-4-3"/></svg>Dues</a>
+  <a href="#/stock" data-tab="stock"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5-9 5z M3 8v8l9 5 9-5V8 M12 13v8"/></svg>Stock</a>
+  <a href="#/reports" data-tab="reports"><svg viewBox="0 0 24 24"><path d="M5 20V10 M10 20V4 M15 20v-7 M20 20V8"/></svg>Reports</a>
+</nav>
+<dialog id="sheet"></dialog>
+<script src="/app.js"></script>
+</body>
+</html>
