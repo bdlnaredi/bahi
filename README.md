@@ -16,7 +16,8 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 ## What you get
 
 - **Home dashboard:** what you will receive, what you owe, cash, bank, stock value, and monthly sales.
-- **Ledgers:** search any ledger and see the full statement with running balance. Call, WhatsApp, or share a PDF.
+- **Sales by day:** daily sales or purchases with bills, tax, returns and month totals. Tap a day to see its bills.
+- **Ledgers:** sort by name, balance or recent activity. Search any ledger and see the full statement with running balance. Call, WhatsApp, or share a PDF.
 - **Vouchers:** search by party, voucher number, amount or narration. Open any voucher as an invoice with items, GST, bill references and narration.
 - **Dues:** bill-wise receivables and payables with ageing (0-30, 31-60, 61-90 and 90+ days), overdue amounts, and WhatsApp payment reminders that list the overdue bills.
 - **Stock:** quantity, rate and value of every item, plus item movements.

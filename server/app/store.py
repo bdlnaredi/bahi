@@ -282,10 +282,47 @@ def dashboard(cid, d_from=None, d_to=None):
         }
 
 
-def ledgers(cid, q=""):
+LEDGER_SORTS = {"name": "name COLLATE NOCASE", "balance": "ABS(closing) DESC, name COLLATE NOCASE",
+                "recent": "last_txn IS NULL, last_txn DESC, name COLLATE NOCASE"}
+
+
+def ledgers(cid, q="", sort="name"):
+    order = LEDGER_SORTS.get(sort, LEDGER_SORTS["name"])
     with conn() as c:
-        return _rows(c, """SELECT name, parent, closing FROM ledger WHERE company_id=? AND name LIKE ?
-            ORDER BY name COLLATE NOCASE""", (cid, f"%{q}%"))
+        return _rows(c, f"""SELECT l.name, l.parent, l.closing,
+            (SELECT MAX(v.date) FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+              WHERE vl.ledger=l.name AND v.company_id=l.company_id) last_txn
+            FROM ledger l WHERE l.company_id=? AND l.name LIKE ? ORDER BY {order}""", (cid, f"%{q}%"))
+
+
+def daily(cid, kind="sales", d_from=None, d_to=None):
+    """Day-by-day sales (or purchases): bills, value with tax, value before tax, returns."""
+    base, ret, grp, sign = (("Sales", "Credit Note", "Sales Accounts", -1) if kind == "sales"
+                            else ("Purchase", "Debit Note", "Purchase Accounts", 1))
+    with conn() as c:
+        f, t = period(c, cid, d_from, d_to)
+        days = {}
+        for r in c.execute("""SELECT date, COUNT(*) n, SUM(amount) total FROM voucher
+                WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ? GROUP BY date""", (cid, base, f, t)):
+            days[r["date"]] = {"date": r["date"], "bills": r["n"], "total": round(r["total"] or 0, 2), "net": 0.0, "returns": 0.0}
+        for r in c.execute("""SELECT date, SUM(amount) total FROM voucher
+                WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ? GROUP BY date""", (cid, ret, f, t)):
+            d = days.setdefault(r["date"], {"date": r["date"], "bills": 0, "total": 0.0, "net": 0.0, "returns": 0.0})
+            d["returns"] = round(r["total"] or 0, 2)
+        for r in c.execute("""SELECT v.date, SUM(vl.amount) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+                JOIN ledger l ON l.company_id=v.company_id AND l.name=vl.ledger
+                WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND l.chain LIKE ? GROUP BY v.date""",
+                             (cid, f, t, f"%|{grp}|%")):
+            d = days.setdefault(r["date"], {"date": r["date"], "bills": 0, "total": 0.0, "net": 0.0, "returns": 0.0})
+            d["net"] = round(sign * (r["s"] or 0), 2)
+    rows = sorted(days.values(), key=lambda d: d["date"], reverse=True)
+    best = max(rows, key=lambda d: d["total"], default=None)
+    active = [d for d in rows if d["bills"]]
+    return {"kind": kind, "from": f, "to": t, "days": rows,
+            "total": round(sum(d["total"] for d in rows), 2), "net": round(sum(d["net"] for d in rows), 2),
+            "returns": round(sum(d["returns"] for d in rows), 2), "bills": sum(d["bills"] for d in rows),
+            "avg": round(sum(d["total"] for d in active) / len(active), 2) if active else 0,
+            "best": best}
 
 
 def ledger(cid, name, d_from=None, d_to=None):

@@ -261,3 +261,15 @@ a.bill:active { background: var(--rule); }
 .bill .chev { margin-left: 2px; }
 .count { font-size: 12.5px; color: var(--ink-3); padding: 10px 14px 0; }
 .row.more { justify-content: center; color: var(--cover); font-weight: 600; }
+
+/* sales by day */
+.tiles .tile { padding: 10px 14px 12px; border-right: 1px solid var(--rule); min-width: 0; }
+.tiles .tile:last-child { border-right: 0; }
+.month-head { border-top: 1px solid var(--rule); background: var(--sheet); }
+.month-head span:last-child { font-weight: 500; color: var(--ink-3); }
+.daybar { height: 4px; background: var(--rule); border-radius: 2px; margin-top: 6px; max-width: 220px; overflow: hidden; }
+.daybar span { display: block; height: 100%; background: var(--bar); border-radius: 2px; }
+.row.day .end .meta { font-size: 12px; color: var(--ink-3); }
+.note a { color: inherit; }
+.sortbar { align-items: center; }
+.sortlabel { font-size: 12.5px; color: var(--ink-3); flex: none; padding-right: 2px; }

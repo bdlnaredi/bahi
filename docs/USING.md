@@ -2,7 +2,7 @@
 
 All screenshots use made-up demo data.
 
-The bar at the bottom has six sections: **Home, Ledgers, Vouchers, Dues, Stock and Reports**. The red bar at the top shows your company name, plus a line telling you when data was last synced and whether Tally is connected right now.
+The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues and Reports**. Stock is under **Reports** and on the Home screen's Stock tile. The red bar at the top shows your company name, plus a line telling you when data was last synced and whether Tally is connected right now.
 
 - **Tap the company name** to switch company, if you sync more than one.
 - **Tap ↻** to reload the figures.
@@ -21,11 +21,23 @@ The bar at the bottom has six sections: **Home, Ledgers, Vouchers, Dues, Stock a
 
 <br clear="right">
 
+## Sales by day
+
+<table><tr>
+<td><img src="images/sales.png" width="260" alt="Sales by day"></td>
+<td><img src="images/sales-day.png" width="260" alt="Sales vouchers of one day"></td>
+</tr></table>
+
+- Switch between **Sales** and **Purchases**, and pick the period.
+- The top shows the total with tax and before tax, number of bills, average per day, returns (credit notes) and the best day.
+- Below, every day is listed newest first, grouped by month with month totals. The red bar shows how the day compares with the busiest day.
+- **Tap a day** to see that day's bills (and any returns). Tap a bill to open it.
+
 ## Ledgers
 
 <img src="images/ledgers.png" width="230" align="right" alt="Ledger list">
 
-Type in the search box to find any ledger. The chips below the search box jump straight to **Debtors**, **Creditors**, **Banks** or **All groups**.
+Type in the search box to find any ledger. The chips below the search box jump straight to **Debtors**, **Creditors**, **Banks** or **All groups**. **Sort** the list by name, by balance (largest first) or by most recent activity. The app remembers your choice.
 
 <br clear="right">
 
@@ -37,6 +49,7 @@ Type in the search box to find any ledger. The chips below the search box jump s
 - **Share PDF** sends a Tally-style *Ledger Account* PDF, e.g. to the party on WhatsApp. **View PDF** opens it on the phone.
 - **Remind** opens WhatsApp with a ready-made payment reminder. It only appears for parties who owe you and have a mobile number in Tally.
 - **Pending bills** lists unpaid bills with days overdue. Tap a bill to open its invoice.
+- **Sort** the statement oldest first, newest first or by largest amount.
 - The statement below is laid out like a ruled account book: each entry shows the other ledger, voucher type and number, amount (Dr or Cr) and the running balance. Tap an entry to open the voucher.
 
 The closing balance always matches Tally, because running balances are worked back from Tally's own closing figure.

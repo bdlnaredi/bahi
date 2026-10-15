@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "1.6";
+const APP_VERSION = "1.7";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -9,6 +9,12 @@ const S = {
   dueKind: "receivable", dayType: "", cache: {},
 };
 try { S.cid = Number(localStorage.getItem("cid")) || null; } catch (e) {}
+try { S.lsort = localStorage.getItem("lsort") || "name"; S.esort = localStorage.getItem("esort") || "old"; } catch (e) { S.lsort = "name"; S.esort = "old"; }
+function savePref(k, v) { S[k] = v; try { localStorage.setItem(k, v); } catch (e) {} }
+function sortChips(id, opts, cur) {
+  return `<div class="toolbar sortbar" id="${id}" role="group" aria-label="Sort"><span class="sortlabel">Sort</span>${opts.map(([k, l]) =>
+    `<button class="chip ${k === cur ? "on" : ""}" data-sort="${k}" aria-pressed="${k === cur}">${l}</button>`).join("")}</div>`;
+}
 try { const p = JSON.parse(localStorage.getItem("period") || "null"); if (p && p.key !== "custom") S.period = p; } catch (e) {}
 
 /* ---------------------------------------------------------------- formatting */
@@ -125,7 +131,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "stock", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
 }
@@ -149,7 +155,7 @@ async function vHome() {
   </section>
 
   <section class="page">
-    <div class="block-title">Sales <a href="#/daybook?type=Sales">Sales vouchers</a></div>
+    <div class="block-title">Sales <a href="#/sales">Sales by day</a></div>
     <div class="sales-head">
       <div><div class="val">${short(d.sales)}</div><div class="label">${S.period ? "in this period" : "this financial year"}</div></div>
       <div><div class="val">${short(d.sales_month)}</div><div class="label">this month</div></div>
@@ -220,19 +226,23 @@ function drawSales(el, rows, thisMonth) {
 }
 
 let searchTimer;
-async function vParties(q = "") {
+async function vParties(q) {
   setTitle(false);
-  const d = await api(cpath("ledgers", { q }));
-  const first = !$("#lsearch");
-  if (first) {
-    view.innerHTML = `<input class="search" id="lsearch" type="search" placeholder="Search ledgers" aria-label="Search ledgers" value="${h(q)}">
+  if (q !== undefined) S.lq = q;
+  const d = await api(cpath("ledgers", { q: S.lq || "", sort: S.lsort }));
+  if (!$("#lsearch")) {
+    view.innerHTML = `<input class="search" id="lsearch" type="search" placeholder="Search ledgers" aria-label="Search ledgers" value="${h(S.lq || "")}">
       <div class="toolbar"><a class="chip" href="#/group/${enc("Sundry Debtors")}">Debtors</a><a class="chip" href="#/group/${enc("Sundry Creditors")}">Creditors</a>
-      <a class="chip" href="#/group/${enc("Bank Accounts")}">Banks</a><a class="chip" href="#/groups">All groups</a></div><section class="page" id="llist"></section>`;
+      <a class="chip" href="#/group/${enc("Bank Accounts")}">Banks</a><a class="chip" href="#/groups">All groups</a></div>
+      <div id="lsortbar"></div><section class="page" id="llist"></section>`;
     $("#lsearch").oninput = (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => vParties(e.target.value).catch(fail), 200); };
   }
+  $("#lsortbar").innerHTML = sortChips("lsorts", [["name", "Name"], ["balance", "Balance"], ["recent", "Recent activity"]], S.lsort);
+  $("#lsortbar").querySelectorAll("[data-sort]").forEach((b) => b.onclick = () => { savePref("lsort", b.dataset.sort); vParties().catch(fail); });
   const list = d.ledgers;
   $("#llist").innerHTML = (list.length ? "" : '<div class="empty">No ledger matches that name.</div>') +
-    list.slice(0, 300).map((l) => `<a class="row" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div><div class="meta">${h(l.parent)}</div></div>
+    list.slice(0, 300).map((l) => `<a class="row" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div>
+      <div class="meta">${h(l.parent)}${l.last_txn ? `, last entry ${fdate(l.last_txn)}` : ""}</div></div>
       <div class="end">${drcr(l.closing)}</div></a>`).join("") +
     (list.length > 300 ? `<div class="note">Showing 300 of ${list.length}. Type to narrow down.</div>` : "");
 }
@@ -262,6 +272,13 @@ function billRows(bills, rec = true) {
       <div class="end">${money(b.amount, b.amount < 0 ? "cr" : "")}<div class="meta">${od}</div></div>${b.vid ? '<span class="chev"></span>' : ""}`;
     return b.vid ? `<a class="bill" href="#/voucher/${b.vid}">${inner}</a>` : `<div class="bill">${inner}</div>`;
   }).join("");
+}
+
+function sortEntries(list) {
+  const e = list.slice();
+  if (S.esort === "new") e.reverse();
+  else if (S.esort === "amount") e.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  return e;
 }
 
 async function vLedger(name) {
@@ -294,9 +311,10 @@ async function vLedger(name) {
     </section>
     ${pending.length ? `<section class="page"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}</span></div>${billRows(pending.slice(0, 5))}
       ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}
+    ${d.entries.length > 1 ? sortChips("esorts", [["old", "Oldest first"], ["new", "Newest first"], ["amount", "Largest amount"]], S.esort) : ""}
     <section class="page ruled">
       <div class="carry"><span>Opening balance</span>${drcr(d.opening)}</div>
-      ${d.entries.map((e) => `<a class="entry" href="#/voucher/${e.id}">
+      ${sortEntries(d.entries).map((e) => `<a class="entry" href="#/voucher/${e.id}">
           <span class="d">${fdate(e.date)}</span>
           <span class="p">${h(e.against || e.vtype)}</span>${drcr(e.amount)}
           <span class="v">${h(e.vtype)} ${h(e.number)}</span><span class="bal">Bal ${drcr(e.balance)}</span>
@@ -305,6 +323,9 @@ async function vLedger(name) {
     </section>`;
   wirePeriod(d.from, d.to);
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`);
+  view.querySelectorAll("#esorts [data-sort]").forEach((b) => b.onclick = () => {
+    const y = window.scrollY; savePref("esort", b.dataset.sort); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);
+  });
   const sb = $("#showbills");
   if (sb) sb.onclick = () => { $("#morebills").hidden = false; sb.remove(); };
 }
@@ -563,6 +584,64 @@ async function vVoucher(id) {
   $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`);
 }
 
+async function vSales(kind) {
+  setTitle(false);
+  S.skind = kind || S.skind || "sales";
+  const sales = S.skind === "sales";
+  const d = await api(cpath("daily", { kind: S.skind, ...periodParams() }));
+  const max = Math.max(1, ...d.days.map((x) => x.total));
+  let month = "", body = "";
+  const mtot = {};
+  d.days.forEach((x) => { const m = x.date.slice(0, 7); mtot[m] = mtot[m] || { t: 0, n: 0 }; mtot[m].t += x.total; mtot[m].n += x.bills; });
+  for (const x of d.days) {
+    const m = x.date.slice(0, 7);
+    if (m !== month) {
+      month = m; const [yy, mm] = m.split("-");
+      body += `<div class="block-title month-head"><span>${MON[+mm - 1]} ${yy}</span><span>${short(mtot[m].t)}, ${mtot[m].n} bills</span></div>`;
+    }
+    const dt = new Date(x.date + "T00:00:00");
+    body += `<a class="row day" href="#/day/${S.skind}/${x.date}"><div class="main">
+        <div class="name">${dt.toLocaleDateString("en-IN", { weekday: "short" })}, ${fdate(x.date)}</div>
+        <div class="meta">${x.bills} bill${x.bills === 1 ? "" : "s"}${x.returns ? `, returns ${rupees(x.returns, false)}` : ""}</div>
+        <div class="daybar"><span style="width:${Math.max(1, (x.total / max) * 100).toFixed(1)}%"></span></div></div>
+      <div class="end">${money(x.total)}<div class="meta">${rupees(x.net, false)} before tax</div></div><span class="chev"></span></a>`;
+  }
+  view.innerHTML = `
+    <div class="toolbar" role="group" aria-label="Sales or purchases">
+      <a class="chip ${sales ? "on" : ""}" href="#/sales" aria-pressed="${sales}">Sales</a>
+      <a class="chip ${!sales ? "on" : ""}" href="#/sales/purchase" aria-pressed="${!sales}">Purchases</a></div>
+    ${periodBar(d.from, d.to)}
+    <section class="page">
+      <div class="hero"><div><div class="label">${sales ? "Sales" : "Purchases"} with tax</div><div class="big">${short(d.total)}</div></div>
+        <div><div class="label">Before tax</div><div class="big" style="font-size:22px">${short(d.net)}</div></div></div>
+      <div class="tiles">
+        <div class="tile"><div class="label">Bills</div><div class="val">${nf0.format(d.bills)}</div></div>
+        <div class="tile"><div class="label">Average a day</div><div class="val">${short(d.avg)}</div></div>
+        <div class="tile"><div class="label">${sales ? "Returns" : "Returned"}</div><div class="val">${short(d.returns)}</div></div>
+      </div>
+      ${d.best && d.best.total ? `<div class="note">Best day: <a href="#/day/${S.skind}/${d.best.date}">${fdate(d.best.date)}</a>, ${rupees(d.best.total, false)}</div>` : ""}
+    </section>
+    <section class="page">${body || `<div class="empty">No ${sales ? "sales" : "purchases"} in this period.</div>`}</section>`;
+  wirePeriod(d.from, d.to);
+}
+
+async function vDay(kind, day) {
+  setTitle(true);
+  const sales = kind !== "purchase";
+  const base = sales ? "Sales" : "Purchase", ret = sales ? "Credit Note" : "Debit Note";
+  const p = { from: day, to: day };
+  const [a, r] = await Promise.all([api(cpath("vouchers", { ...p, type: base })), api(cpath("vouchers", { ...p, type: ret }))]);
+  const dt = new Date(day + "T00:00:00");
+  const tot = a.vouchers.reduce((s, v) => s + v.amount, 0);
+  view.innerHTML = `<div class="crumbs"><a href="#/sales${sales ? "" : "/purchase"}">${sales ? "Sales" : "Purchases"} by day</a></div>
+    <h1 class="title">${dt.toLocaleDateString("en-IN", { weekday: "long" })}, ${fdate(day)}</h1>
+    <p class="subtitle">${a.total} bill${a.total === 1 ? "" : "s"}${a.total <= 200 ? `, ${rupees(tot)}` : ""}</p>
+    <section class="page" id="dlist"></section>
+    ${r.total ? `<h2 class="title" style="font-size:18px">${sales ? "Returns (credit notes)" : "Returns (debit notes)"}</h2><section class="page" id="rlist"></section>` : ""}`;
+  pagedVouchers($("#dlist"), "vouchers", { ...p, type: base }, a, `No ${sales ? "sales" : "purchases"} on this day.`);
+  if (r.total) pagedVouchers($("#rlist"), "vouchers", { ...p, type: ret }, r, "");
+}
+
 async function vCheck() {
   setTitle(true);
   const d = await api(cpath("check"));
@@ -656,6 +735,8 @@ async function route() {
       case "pl": await vPL(); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;
+      case "sales": await vSales(parts[1] === "purchase" ? "purchase" : "sales"); break;
+      case "day": await vDay(parts[1], parts[2]); break;
       case "vouchers": await vVouchers(); break;
       default: await vHome();
     }

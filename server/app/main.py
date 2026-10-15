@@ -261,7 +261,9 @@ class Handler(BaseHTTPRequestHandler):
         if what == "dashboard":
             out = store.dashboard(cid, f, t)
         elif what == "ledgers":
-            out = {"ledgers": store.ledgers(cid, q.get("q", ""))}
+            out = {"ledgers": store.ledgers(cid, q.get("q", ""), q.get("sort", "name"))}
+        elif what == "daily":
+            out = store.daily(cid, q.get("kind", "sales"), f, t)
         elif what == "ledger":
             out = store.ledger(cid, name, f, t)
         elif what == "group":
