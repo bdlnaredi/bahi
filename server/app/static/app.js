@@ -1,5 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
+const APP_VERSION = "1.2";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -426,7 +427,8 @@ function vReports() {
   </section>
   ${c ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
-    <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div></div></section>` : ""}
+    <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
+    <div>App version ${APP_VERSION}</div></div></section>` : ""}
   <section class="page"><div class="actions" style="padding-top:14px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
@@ -646,5 +648,12 @@ $("#back").onclick = () => history.length > 1 ? history.back() : (location.hash 
 $("#refresh").onclick = async () => { try { await loadCompanies(); } catch (e) {} route(); };
 $("#company").onclick = pickCompany;
 document.addEventListener("visibilitychange", () => { if (!document.hidden) loadCompanies().then(renderCover).catch(() => {}); });
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register("/sw.js").then((r) => r.update()).catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); } // a new version took over
+  });
+}
 start();

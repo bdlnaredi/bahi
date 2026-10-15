@@ -1,5 +1,5 @@
-/* Bahi service worker: app shell offline, last-seen data when the server can't be reached */
-const SHELL = "bahi-shell-v2", DATA = "bahi-data-v1";
+/* Bahi service worker: always try the server first, fall back to the saved copy when offline */
+const SHELL = "bahi-shell-v3", DATA = "bahi-data-v1";
 const FILES = ["/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -10,11 +10,24 @@ self.addEventListener("activate", (e) => {
     .then(() => self.clients.claim()));
 });
 
+async function networkFirst(req, cacheName, key) {
+  const cache = await caches.open(cacheName);
+  try {
+    const res = await fetch(req, { cache: "no-store" });
+    if (res.ok || res.type === "opaque") cache.put(key || req, res.clone());
+    return res;
+  } catch (err) {
+    const hit = await cache.match(key || req);
+    if (!hit) throw err;
+    return hit;
+  }
+}
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   const url = new URL(req.url);
-  if (url.pathname.startsWith("/agent/") || url.pathname === "/api/logout") return;
+  if (url.pathname.startsWith("/agent/") || url.pathname === "/api/logout" || url.pathname.includes("_pdf")) return;
 
   if (url.origin === location.origin && url.pathname.startsWith("/api/")) {
     e.respondWith((async () => {
@@ -32,12 +45,16 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // app shell and fonts: serve saved copy at once, refresh it in the background
+  if (url.origin === location.origin) {
+    const key = !url.pathname.includes(".") ? "/index.html" : url.pathname;
+    e.respondWith(networkFirst(req, SHELL, key).catch(() => new Response("Offline", { status: 503 })));
+    return;
+  }
+  // fonts: saved copy first, refresh in background
   e.respondWith((async () => {
     const cache = await caches.open(SHELL);
-    const key = url.origin === location.origin && !url.pathname.includes(".") ? "/index.html" : req;
-    const hit = await cache.match(key);
-    const net = fetch(req).then((res) => { if (res.ok || res.type === "opaque") cache.put(key, res.clone()); return res; }).catch(() => null);
-    return hit || (await net) || new Response("Offline", { status: 503 });
+    const hit = await cache.match(req);
+    const net = fetch(req).then((res) => { if (res.ok || res.type === "opaque") cache.put(req, res.clone()); return res; }).catch(() => null);
+    return hit || (await net) || new Response("", { status: 503 });
   })());
 });
