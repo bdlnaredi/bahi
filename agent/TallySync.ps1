@@ -163,14 +163,24 @@ foreach ($co in $companies) {
             @("stock_x",  { Masters-Xml "Stock Items" $co.Name })
         )
         foreach ($x in $extras) {
-            try { Send-Part $run $x[0] (Tally-Raw (& $x[1])) }
+            $data = $null
+            try { $data = Tally-Raw (& $x[1]) }
             catch { Log ("Could not read " + $x[0] + " details from Tally: " + $_.Exception.Message) "Yellow" }
+            if ($data) {
+                try { Send-Part $run $x[0] $data }
+                catch { Log ("The server refused " + $x[0] + " details - update the Bahi server to the latest version. (" + $_.Exception.Message + ")") "Yellow" }
+            }
         }
 
         # Bill-wise outstanding as Tally calculates it (skipped quietly if this Tally can't export it)
         foreach ($r in @(@("bills_rec", "Bills Receivable"), @("bills_pay", "Bills Payable"))) {
-            try { Send-Part $run $r[0] (Tally-Raw (Report-Xml $r[1] $co.Name $FromDate $today.Date)) }
+            $data = $null
+            try { $data = Tally-Raw (Report-Xml $r[1] $co.Name $FromDate $today.Date) }
             catch { Log ("Could not read " + $r[1] + " from Tally: " + $_.Exception.Message) "Yellow" }
+            if ($data) {
+                try { Send-Part $run $r[0] $data }
+                catch { Log ("The server refused " + $r[1] + " - update the Bahi server to the latest version. (" + $_.Exception.Message + ")") "Yellow" }
+            }
         }
 
         # Vouchers, one month at a time to keep each request small
