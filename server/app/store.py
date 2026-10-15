@@ -365,6 +365,17 @@ def _iso_add(d, days):
     return (date.fromisoformat(d) + timedelta(days=days)).isoformat()
 
 
+def _bill_links(c, cid):
+    """(party, bill name) -> id of the voucher that created the bill; also (party, voucher no.)."""
+    links = {}
+    for r in c.execute("""SELECT b.ledger, b.name, v.id FROM vbill b JOIN voucher v ON v.id=b.voucher_id
+            WHERE v.company_id=? AND b.btype='New Ref' ORDER BY v.date DESC""", (cid,)):
+        links[(r["ledger"], r["name"])] = r["id"]
+    for r in c.execute("SELECT party, number, id FROM voucher WHERE company_id=? AND number<>''", (cid,)):
+        links.setdefault((r["party"], r["number"]), r["id"])
+    return links
+
+
 def _bills_from_vouchers(c, party, sign):
     """Rebuild pending bills of one party from bill allocations in synced vouchers."""
     rows = c.execute("""SELECT b.name, b.btype, b.amount, b.days, v.date FROM vbill b
@@ -396,6 +407,7 @@ def _party_bills(c, cid, kind, source):
             tally.setdefault(r["party"], []).append(
                 {"ref": r["ref"], "date": r["date"] or None, "due": r["due"] or None, "amount": r["amount"]})
     today = date.today()
+    links = _bill_links(c, cid)
     for p in parties:
         bills = tally.get(p["name"], []) if source == "tally" else _bills_from_vouchers(c, p["name"], sign)
         diff = round(p["amount"] - sum(b["amount"] for b in bills), 2)
@@ -408,6 +420,7 @@ def _party_bills(c, cid, kind, source):
             if b["overdue"] is not None and b["overdue"] <= 0:
                 b["overdue"] = 0
             b["bucket"] = _bucket(b["age"])
+            b["vid"] = links.get((p["name"], b["ref"]))
             b["amount"] = round(b["amount"], 2)
         bills.sort(key=lambda b: (b["date"] is None, b["date"] or ""))
         p["bills"] = bills
@@ -446,7 +459,10 @@ def ledger_bills(c, cid, name):
     return kind, []
 
 
-def daybook(cid, d_from=None, d_to=None, base=""):
+PAGE = 200
+
+
+def daybook(cid, d_from=None, d_to=None, base="", offset=0):
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
         args = [cid, f, t]
@@ -455,13 +471,15 @@ def daybook(cid, d_from=None, d_to=None, base=""):
             extra = " AND base=?"
             args.append(base)
         rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount FROM voucher
-            WHERE company_id=? AND date BETWEEN ? AND ?{extra} ORDER BY date DESC, id DESC LIMIT 1000""", args)
+            WHERE company_id=? AND date BETWEEN ? AND ?{extra} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?""",
+                     args + [PAGE, int(offset)])
+        total = c.execute(f"SELECT COUNT(*) n FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?{extra}", args).fetchone()["n"]
         types = [r["base"] for r in c.execute(
             "SELECT DISTINCT base FROM voucher WHERE company_id=? ORDER BY base", (cid,))]
-        return {"from": f, "to": t, "vouchers": rows, "types": types}
+        return {"from": f, "to": t, "vouchers": rows, "types": types, "total": total, "offset": int(offset)}
 
 
-def vouchers(cid, q="", d_from=None, d_to=None, base=""):
+def vouchers(cid, q="", d_from=None, d_to=None, base="", offset=0):
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
         where, args = ["company_id=?", "date BETWEEN ? AND ?"], [cid, f, t]
@@ -481,10 +499,12 @@ def vouchers(cid, q="", d_from=None, d_to=None, base=""):
                 pass
             where.append(cond + ")")
         rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount, narration FROM voucher
-            WHERE {' AND '.join(where)} ORDER BY (number = ?) DESC, date DESC, id DESC LIMIT 500""", args + [q])
+            WHERE {' AND '.join(where)} ORDER BY (number = ?) DESC, date DESC, id DESC LIMIT ? OFFSET ?""",
+                     args + [q, PAGE, int(offset)])
+        total = c.execute(f"SELECT COUNT(*) n FROM voucher WHERE {' AND '.join(where)}", args).fetchone()["n"]
         types = [r["base"] for r in c.execute(
             "SELECT DISTINCT base FROM voucher WHERE company_id=? ORDER BY base", (cid,))]
-        return {"from": f, "to": t, "vouchers": rows, "types": types, "q": q}
+        return {"from": f, "to": t, "vouchers": rows, "types": types, "q": q, "total": total, "offset": int(offset)}
 
 
 def _is_tax(l):
@@ -515,7 +535,10 @@ def voucher(cid, vid):
         comp = c.execute("SELECT name FROM company WHERE id=?", (cid,)).fetchone()["name"]
         return {"company": comp, "voucher": v, "lines": lines,
                 "items": _rows(c, "SELECT item, qty, unit, rate, amount FROM vitem WHERE voucher_id=?", (vid,)),
-                "bills": _rows(c, "SELECT ledger, name, btype, amount, days FROM vbill WHERE voucher_id=?", (vid,)),
+                "bills": [dict(b, vid=(c.execute("""SELECT v.id FROM vbill x JOIN voucher v ON v.id=x.voucher_id
+                    WHERE v.company_id=? AND x.ledger=? AND x.name=? AND x.btype='New Ref' AND v.id<>? LIMIT 1""",
+                    (cid, b["ledger"], b["name"], vid)).fetchone() or {"id": None})["id"])
+                    for b in _rows(c, "SELECT ledger, name, btype, amount, days FROM vbill WHERE voucher_id=?", (vid,))],
                 "party": {k: party[k] for k in ("name", "gstin", "mobile", "phone")} if party else None}
 
 

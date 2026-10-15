@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.3";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -93,10 +93,11 @@ const ICON = {
 };
 
 const PERIODS = [
-  ["year", "This year"], ["month", "This month"], ["last", "Last month"], ["quarter", "This quarter"], ["custom", "Custom"],
+  ["year", "This year"], ["month", "This month"], ["last", "Last month"], ["quarter", "This quarter"], ["all", "All dates"], ["custom", "Custom"],
 ];
 function periodFor(key) {
   const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
+  if (key === "all") return { key, from: "2000-01-01", to: "2099-12-31" };
   if (key === "month") return { key, from: iso(new Date(Date.UTC(y, m, 1))), to: iso(new Date(Date.UTC(y, m + 1, 0))) };
   if (key === "last") return { key, from: iso(new Date(Date.UTC(y, m - 1, 1))), to: iso(new Date(Date.UTC(y, m, 0))) };
   if (key === "quarter") { const q0 = m - ((m - 3 + 12) % 3); return { key, from: iso(new Date(Date.UTC(y, q0, 1))), to: iso(new Date(Date.UTC(y, q0 + 3, 0))) }; }
@@ -107,12 +108,12 @@ function periodBar(from, to) {
   return `<div class="toolbar" role="group" aria-label="Period">${PERIODS.map(([k, l]) =>
     `<button class="chip ${k === key ? "on" : ""}" data-period="${k}" aria-pressed="${k === key}">${l}</button>`).join("")}</div>
     ${key === "custom" ? `<div class="dates"><input type="date" id="pf" value="${from}" aria-label="From date"> to <input type="date" id="pt" value="${to}" aria-label="To date"> <button class="chip" id="papply">Show</button></div>` :
-      `<p class="subtitle">${fdate(from)} to ${fdate(to)}</p>`}`;
+      `<p class="subtitle">${key === "all" ? "All synced dates" : `${fdate(from)} to ${fdate(to)}`}</p>`}`;
 }
 function wirePeriod(from, to) {
   view.querySelectorAll("[data-period]").forEach((b) => b.onclick = () => {
     const k = b.dataset.period;
-    S.period = k === "year" ? null : k === "custom" ? { key: "custom", from, to } : periodFor(k);
+    S.period = k === "year" ? null : k === "custom" ? { key: "custom", from: from < "2001" ? iso(new Date(Date.now() - 30 * 864e5)) : from, to: to > "2098" ? iso(new Date()) : to } : periodFor(k);
     try { localStorage.setItem("period", JSON.stringify(S.period)); } catch (e) {}
     route();
   });
@@ -177,7 +178,7 @@ async function vHome() {
 
 function vrow(v) {
   return `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
-    <div class="meta">${fdate(v.date)}, ${h(v.vtype)} ${h(v.number)}</div></div><div class="end">${money(v.amount)}</div></a>`;
+    <div class="meta">${fdate(v.date)}, ${h(v.vtype)} ${h(v.number)}</div></div><div class="end">${money(v.amount)}</div><span class="chev"></span></a>`;
 }
 
 /* monthly sales — single series, so no legend; tap a bar for the figure */
@@ -257,8 +258,9 @@ function billRows(bills, rec = true) {
   return bills.map((b) => {
     const od = b.overdue > 0 ? `<span class="od">${b.overdue} days overdue</span>` :
       b.age !== null && b.age !== undefined ? `${b.age} days old` : "";
-    return `<div class="bill"><div><div class="ref">${h(b.ref)}</div><div class="meta">${b.date ? fdate(b.date) : "No bill date"}${b.due ? `, due ${fdate(b.due)}` : ""}</div></div>
-      <div class="end">${money(b.amount, b.amount < 0 ? "cr" : "")}<div class="meta">${od}</div></div></div>`;
+    const inner = `<div><div class="ref">${h(b.ref)}</div><div class="meta">${b.date ? fdate(b.date) : "No bill date"}${b.due ? `, due ${fdate(b.due)}` : ""}</div></div>
+      <div class="end">${money(b.amount, b.amount < 0 ? "cr" : "")}<div class="meta">${od}</div></div>${b.vid ? '<span class="chev"></span>' : ""}`;
+    return b.vid ? `<a class="bill" href="#/voucher/${b.vid}">${inner}</a>` : `<div class="bill">${inner}</div>`;
   }).join("");
 }
 
@@ -461,20 +463,45 @@ async function vGST() {
   wirePeriod(d.from, d.to);
 }
 
+function voucherRows(rows, narr) {
+  let last = "";
+  return rows.map((v) => {
+    const head = v.date !== last ? `<div class="block-title" style="border-top:1px solid var(--rule)">${fdate(v.date)}</div>` : "";
+    last = v.date;
+    return head + `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
+      <div class="meta">${h(v.vtype)} ${h(v.number)}${narr && v.narration ? `, ${h(v.narration.replace(/\s+/g, " ").slice(0, 60))}` : ""}</div></div>
+      <div class="end">${money(v.amount)}</div><span class="chev"></span></a>`;
+  }).join("");
+}
+
+/* fills `el` with a voucher list from `what`, 200 at a time, with a Load more button */
+async function pagedVouchers(el, what, params, first, emptyMsg) {
+  let rows = first.vouchers.slice(), total = first.total;
+  const draw = () => {
+    el.innerHTML = (rows.length ? `<div class="count">${total === rows.length ? `${total} voucher${total === 1 ? "" : "s"}` : `Showing ${rows.length} of ${total} vouchers`}</div>` : "") +
+      (voucherRows(rows, what === "vouchers") || `<div class="empty">${emptyMsg}</div>`) +
+      (rows.length < total ? `<button class="row more" id="more">Load ${Math.min(200, total - rows.length)} more</button>` : "");
+    const mb = $("#more", el);
+    if (mb) mb.onclick = async () => {
+      mb.disabled = true; mb.textContent = "Loading";
+      try {
+        const d = await api(cpath(what, { ...params, offset: rows.length }));
+        rows = rows.concat(d.vouchers); total = d.total; draw();
+      } catch (e) { mb.disabled = false; mb.textContent = "Couldn't load. Tap to try again"; }
+    };
+  };
+  draw();
+}
+
 async function vDaybook(type) {
   setTitle(true);
   if (type !== undefined) S.dayType = type;
-  const d = await api(cpath("daybook", { ...periodParams(), type: S.dayType }));
-  let last = "";
-  const rows = d.vouchers.map((v) => {
-    const head = v.date !== last ? `<div class="block-title" style="border-top:1px solid var(--rule)">${fdate(v.date)}</div>` : "";
-    last = v.date;
-    return head + `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || "—")}</div><div class="meta">${h(v.vtype)} ${h(v.number)}</div></div><div class="end">${money(v.amount)}</div></a>`;
-  }).join("");
+  const params = { ...periodParams(), type: S.dayType };
+  const d = await api(cpath("daybook", params));
   view.innerHTML = `<h1 class="title">Day Book</h1>${periodBar(d.from, d.to)}
     <div class="toolbar"><button class="chip ${!S.dayType ? "on" : ""}" data-t="">All</button>${d.types.map((t) => `<button class="chip ${t === S.dayType ? "on" : ""}" data-t="${h(t)}">${h(t)}</button>`).join("")}</div>
-    <section class="page">${rows || '<div class="empty">No vouchers in this period.</div>'}
-    ${d.vouchers.length >= 1000 ? '<div class="note">Showing the latest 1,000. Pick a shorter period to see older ones.</div>' : ""}</section>`;
+    <section class="page" id="dblist"></section>`;
+  pagedVouchers($("#dblist"), "daybook", params, d, "No vouchers in this period.");
   wirePeriod(d.from, d.to);
   view.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => vDaybook(b.dataset.t).catch(fail));
 }
@@ -483,7 +510,8 @@ let vSearchT;
 async function vVouchers() {
   setTitle(false);
   if (S.vq === undefined) S.vq = "";
-  const d = await api(cpath("vouchers", { q: S.vq, type: S.vtype || "", ...periodParams() }));
+  const params = { q: S.vq, type: S.vtype || "", ...periodParams() };
+  const d = await api(cpath("vouchers", params));
   if (!$("#vsearch")) {
     view.innerHTML = `<input class="search" id="vsearch" type="search" inputmode="search" placeholder="Party, voucher no., amount or narration" aria-label="Search vouchers" value="${h(S.vq)}">
       <div id="vperiod"></div><div class="toolbar" id="vtypes"></div><section class="page" id="vlist"></section>`;
@@ -491,14 +519,8 @@ async function vVouchers() {
   }
   $("#vperiod").innerHTML = periodBar(d.from, d.to);
   $("#vtypes").innerHTML = `<button class="chip ${!S.vtype ? "on" : ""}" data-t="">All</button>` + d.types.map((t) => `<button class="chip ${t === S.vtype ? "on" : ""}" data-t="${h(t)}">${h(t)}</button>`).join("");
-  let last = "";
-  $("#vlist").innerHTML = d.vouchers.map((v) => {
-    const head = v.date !== last ? `<div class="block-title" style="border-top:1px solid var(--rule)">${fdate(v.date)}</div>` : "";
-    last = v.date;
-    return head + `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>
-      <div class="meta">${h(v.vtype)} ${h(v.number)}${v.narration ? `, ${h(v.narration.replace(/\s+/g, " ").slice(0, 60))}` : ""}</div></div><div class="end">${money(v.amount)}</div></a>`;
-  }).join("") || `<div class="empty">${S.vq ? "No voucher matches that search in this period." : "No vouchers in this period."}</div>` +
-    (d.vouchers.length >= 500 ? '<div class="note">Showing the latest 500. Search or pick a shorter period to narrow down.</div>' : "");
+  pagedVouchers($("#vlist"), "vouchers", params, d,
+    S.vq ? "No voucher matches that search in this period. Try All dates." : "No vouchers in this period.");
   wirePeriod(d.from, d.to);
   $("#vtypes").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { S.vtype = b.dataset.t; vVouchers().catch(fail); });
 }
@@ -531,7 +553,8 @@ async function vVoucher(id) {
       ${lines.map((l) => `<a class="row" href="#/ledger/${enc(l.ledger)}"><div class="main"><div class="name">${h(l.ledger)}</div>${l.kind === "tax" ? '<div class="meta">GST</div>' : ""}</div><div class="end">${drcr(l.amount)}</div></a>`).join("")}
     </section>
     ${d.bills.length ? `<section class="page"><div class="block-title">Bill references</div>
-      ${d.bills.map((b) => `<div class="row" style="cursor:default"><div class="main"><div class="name">${h(b.name || b.btype)}</div><div class="meta">${h(b.btype)}${b.days ? `, ${b.days} days credit` : ""}</div></div><div class="end">${drcr(b.amount)}</div></div>`).join("")}</section>` : ""}
+      ${d.bills.map((b) => { const inner = `<div class="main"><div class="name">${h(b.name || b.btype)}</div><div class="meta">${h(b.btype)}${b.days ? `, ${b.days} days credit` : ""}${b.vid ? ", tap to open the bill" : ""}</div></div><div class="end">${drcr(b.amount)}</div>${b.vid ? '<span class="chev"></span>' : ""}`;
+        return b.vid ? `<a class="row" href="#/voucher/${b.vid}">${inner}</a>` : `<div class="row" style="cursor:default">${inner}</div>`; }).join("")}</section>` : ""}
     ${V.narration ? `<section class="page"><div class="block-title">Narration</div><div class="info" style="white-space:pre-line">${h(V.narration)}</div></section>` : ""}
     ${!V.balanced ? '<p class="note warn">This voucher\'s debits and credits did not match when it was synced.</p>' : ""}`;
   $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`);

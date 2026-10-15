@@ -255,3 +255,9 @@ dialog h3 { margin: 0; padding: 14px; font: 600 17px/1.2 var(--serif); }
 .gst-grid { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 18px; padding: 10px 14px 12px; border-top: 1px solid var(--rule); align-items: baseline; }
 .gst-grid > .amt, .gst-grid > b { text-align: right; }
 .gst-grid .label { font-size: 12px; color: var(--ink-3); text-align: right; }
+
+a.bill { text-decoration: none; color: inherit; align-items: center; }
+a.bill:active { background: var(--rule); }
+.bill .chev { margin-left: 2px; }
+.count { font-size: 12.5px; color: var(--ink-3); padding: 10px 14px 0; }
+.row.more { justify-content: center; color: var(--cover); font-weight: 600; }

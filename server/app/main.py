@@ -263,7 +263,7 @@ class Handler(BaseHTTPRequestHandler):
         elif what == "outstanding":
             out = store.outstanding(cid, q.get("kind", "receivable"))
         elif what == "vouchers":
-            out = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""))
+            out = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), q.get("offset", 0))
         elif what == "gst":
             out = store.gst(cid, f, t)
         elif what == "ledger_pdf":
@@ -279,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_pdf(pdf.voucher_pdf(d), f"{v['vtype']} {v['number']}")
             out = None
         elif what == "daybook":
-            out = store.daybook(cid, f, t, q.get("type", ""))
+            out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0))
         elif what == "voucher" and arg:
             out = store.voucher(cid, int(arg))
         elif what == "pl":
