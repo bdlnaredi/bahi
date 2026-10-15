@@ -244,8 +244,8 @@ def parse_vouchers(root):
     for v in root.iter("VOUCHER"):
         if yes(v, "ISCANCELLED") or yes(v, "ISOPTIONAL") or yes(v, "ISDELETED"):
             continue
-        date = txt(v, "DATE")
-        if len(date) != 8:
+        date = tdate(txt(v, "DATE"))
+        if not date:
             continue
         all_le = v.findall("ALLLEDGERENTRIES.LIST")
         le = v.findall("LEDGERENTRIES.LIST")
@@ -301,7 +301,7 @@ def parse_vouchers(root):
             "reference": txt(v, "REFERENCE"),
             "party_gstin": txt(v, "PARTYGSTIN"),
             "bills": bills,
-            "date": f"{date[:4]}-{date[4:6]}-{date[6:]}",
+            "date": date,
             "vtype": txt(v, "VOUCHERTYPENAME") or v.get("VCHTYPE") or "",
             "number": txt(v, "VOUCHERNUMBER"),
             "party": txt(v, "PARTYLEDGERNAME"),

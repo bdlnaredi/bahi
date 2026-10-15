@@ -33,7 +33,8 @@ $ToDate   = Get-Date -Year ($fyStartYear + 1) -Month 3 -Day 31
 $FromDate = $FromDate.Date; $ToDate = $ToDate.Date
 
 function Esc([string]$s) { return [System.Security.SecurityElement]::Escape($s) }
-function TDate([datetime]$d) { return $d.ToString("yyyyMMdd") }
+# Tally's own date style (1-Apr-2026) - understood by every TallyPrime release
+function TDate([datetime]$d) { return $d.ToString("d-MMM-yyyy", [System.Globalization.CultureInfo]::InvariantCulture) }
 
 function Tally-Raw([string]$xml) {
     $wc = New-Object System.Net.WebClient
@@ -73,6 +74,69 @@ function Masters-Xml([string]$accountType, [string]$company) {
     $sv = Static-Vars $company $FromDate $ToDate
     return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Data</TYPE><ID>List of Accounts</ID></HEADER>" +
            "<BODY><DESC><STATICVARIABLES>$sv<ACCOUNTTYPE>$accountType</ACCOUNTTYPE></STATICVARIABLES></DESC></BODY></ENVELOPE>"
+}
+
+$VchFields = @(
+    "Date", "GUID", "VoucherTypeName", "VoucherNumber", "PartyLedgerName", "PartyGSTIN", "Narration", "Reference",
+    "ReferenceDate", "IsCancelled", "IsOptional", "IsDeleted", "PlaceOfSupply", "StateName", "BasicBuyerName",
+    "BasicDueDateOfPymt", "BasicShipDocumentNo", "BasicShippedBy", "BasicFinalDestination", "BasicOrderRef",
+    "AllLedgerEntries.LedgerName", "AllLedgerEntries.Amount", "AllLedgerEntries.IsDeemedPositive",
+    "AllLedgerEntries.BillAllocations.Name", "AllLedgerEntries.BillAllocations.BillType",
+    "AllLedgerEntries.BillAllocations.Amount", "AllLedgerEntries.BillAllocations.BillCreditPeriod",
+    "LedgerEntries.LedgerName", "LedgerEntries.Amount", "LedgerEntries.IsDeemedPositive",
+    "LedgerEntries.BillAllocations.Name", "LedgerEntries.BillAllocations.BillType",
+    "LedgerEntries.BillAllocations.Amount", "LedgerEntries.BillAllocations.BillCreditPeriod",
+    "AllInventoryEntries.StockItemName", "AllInventoryEntries.ActualQty", "AllInventoryEntries.BilledQty",
+    "AllInventoryEntries.Rate", "AllInventoryEntries.Amount", "AllInventoryEntries.IsDeemedPositive",
+    "AllInventoryEntries.Discount", "AllInventoryEntries.AccountingAllocations.LedgerName",
+    "AllInventoryEntries.AccountingAllocations.Amount",
+    "InventoryEntriesIn.StockItemName", "InventoryEntriesIn.ActualQty", "InventoryEntriesIn.Rate", "InventoryEntriesIn.Amount",
+    "InventoryEntriesOut.StockItemName", "InventoryEntriesOut.ActualQty", "InventoryEntriesOut.Rate", "InventoryEntriesOut.Amount"
+) -join ", "
+
+# Vouchers as a collection, limited to the period with an explicit date filter
+function VchCollection-Xml([string]$company, [datetime]$from, [datetime]$to, [string]$fetch) {
+    $sv = Static-Vars $company $from $to
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMVouchers</ID></HEADER>" +
+           "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES><TDL><TDLMESSAGE>" +
+           "<COLLECTION NAME=`"TMVouchers`" ISMODIFY=`"No`"><TYPE>Voucher</TYPE><FETCH>$fetch</FETCH><FILTER>TMInPeriod</FILTER></COLLECTION>" +
+           "<SYSTEM TYPE=`"Formulae`" NAME=`"TMInPeriod`">`$Date &gt;= ##SVFromDate AND `$Date &lt;= ##SVToDate</SYSTEM>" +
+           "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
+}
+
+function Parse-Xml([byte[]]$raw) {
+    try {
+        $text = [System.Text.Encoding]::UTF8.GetString($raw)
+        $eval = [System.Text.RegularExpressions.MatchEvaluator]{ param($m) if ([int]$m.Groups[1].Value -lt 32) { "" } else { $m.Value } }
+        $text = [regex]::Replace($text, '&#([0-9]+);', $eval)
+        $text = [regex]::Replace($text, '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')
+        return [xml]$text
+    } catch { return $null }
+}
+
+function Iso-Date([string]$s) {
+    $s = $s.Trim()
+    if ($s -match '^\d{8}$') { return $s.Substring(0,4) + "-" + $s.Substring(4,2) + "-" + $s.Substring(6,2) }
+    $fmts = [string[]]@("d-MMM-yyyy", "d-MMM-yy", "dd-MMM-yyyy", "dd-MMM-yy")
+    $d = [datetime]::MinValue
+    if ([datetime]::TryParseExact($s, $fmts, [System.Globalization.CultureInfo]::InvariantCulture, 0, [ref]$d)) { return $d.ToString("yyyy-MM-dd") }
+    return ""
+}
+
+# Checks a voucher response: how many vouchers fall inside [from, to], how many outside, and whether entries came along
+function Check-Vouchers([byte[]]$raw, [datetime]$from, [datetime]$to) {
+    $x = Parse-Xml $raw
+    $r = [pscustomobject]@{ Ok = $false; In = 0; Out = 0; Entries = $false }
+    if (-not $x) { return $r }
+    $f = $from.ToString("yyyy-MM-dd"); $t = $to.ToString("yyyy-MM-dd")
+    foreach ($v in $x.SelectNodes("//VOUCHER")) {
+        $dn = $v.SelectSingleNode("DATE")
+        $d = if ($dn) { Iso-Date $dn.InnerText } else { "" }
+        if ($d -and $d -ge $f -and $d -le $t) { $r.In++ } else { $r.Out++ }
+    }
+    $r.Entries = [bool]($x.SelectSingleNode("//ALLLEDGERENTRIES.LIST|//LEDGERENTRIES.LIST"))
+    $r.Ok = $true
+    return $r
 }
 
 function Gzip([byte[]]$data) {
@@ -183,15 +247,54 @@ foreach ($co in $companies) {
             }
         }
 
-        # Vouchers, one month at a time to keep each request small
+        # How many vouchers does Tally hold per month? (a light list of dates, used to verify what we receive)
+        $expected = $null
+        try {
+            $lx = Parse-Xml (Tally-Raw (VchCollection-Xml $co.Name $FromDate $ToDate "Date, IsCancelled, IsOptional"))
+            if ($lx) {
+                $expected = @{}
+                foreach ($v in $lx.SelectNodes("//VOUCHER")) {
+                    $opt = $v.SelectSingleNode("ISOPTIONAL"); $can = $v.SelectSingleNode("ISCANCELLED")
+                    if (($opt -and $opt.InnerText -eq "Yes") -or ($can -and $can.InnerText -eq "Yes")) { continue }
+                    $dn = $v.SelectSingleNode("DATE")
+                    $d = if ($dn) { Iso-Date $dn.InnerText } else { "" }
+                    if ($d) { $k = $d.Substring(0, 7); $expected[$k] = 1 + [int]$expected[$k] }
+                }
+            }
+        } catch { $expected = $null }
+
+        # Vouchers, one month at a time. Day Book first; if Tally ignores the dates or sends too few,
+        # use a date-filtered voucher collection instead (and keep using it for the remaining months).
+        $method = "daybook"; $sentTotal = 0; $expTotal = 0; $short = @()
         $m = Get-Date -Year $FromDate.Year -Month $FromDate.Month -Day 1
         while ($m -le $ToDate) {
             $mEnd = $m.AddMonths(1).AddDays(-1)
             $a = if ($m -lt $FromDate) { $FromDate } else { $m }
             $b = if ($mEnd -gt $ToDate) { $ToDate } else { $mEnd }
-            Send-Part $run "daybook" (Tally-Raw (DayBook-Xml $co.Name $a $b))
+            $key = $m.ToString("yyyy-MM")
+            $want = if ($expected) { [int]$expected[$key] } else { -1 }
+            if ($want -gt 0) { $expTotal += $want }
+
+            $best = $null; $bestIn = -1
+            foreach ($how in @($method, $(if ($method -eq "daybook") { "collection" } else { "daybook" }))) {
+                try {
+                    $raw = if ($how -eq "daybook") { Tally-Raw (DayBook-Xml $co.Name $a $b) } else { Tally-Raw (VchCollection-Xml $co.Name $a $b $VchFields) }
+                } catch { continue }
+                $c = Check-Vouchers $raw $a $b
+                $good = $c.Ok -and $c.Out -eq 0 -and ($c.In -eq 0 -or $c.Entries) -and ($want -lt 0 -or $c.In -ge $want)
+                if ($c.Ok -and $c.Entries -and $c.In -gt $bestIn) { $best = $raw; $bestIn = $c.In }
+                if ($good) {
+                    $best = $raw; $bestIn = $c.In
+                    if ($how -ne $method) { Log ("This Tally's Day Book export ignores dates - using the voucher collection method instead") "Gray"; $method = $how }
+                    break
+                }
+            }
+            if ($best) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn) }
+            if ($want -ge 0 -and $bestIn -lt $want) { $short += ("{0}: {1} of {2}" -f $key, [math]::Max(0, $bestIn), $want) }
             $m = $m.AddMonths(1)
         }
+        if ($expected -and $short.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in this period received") }
+        if ($short.Count -gt 0) { Log ("Warning: some months came back incomplete - " + ($short -join "; ") + ". Please report this.") "Yellow" }
 
         $res = Server-Json "POST" "/agent/commit" @{
             run = $run; company = $co.Name; from = $fromIso; to = $toIso; alt_vch = $co.AltVch; alt_mst = $co.AltMst

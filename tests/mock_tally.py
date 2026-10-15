@@ -261,8 +261,18 @@ def xml_voucher(v):
     return head + body + "</VOUCHER></TALLYMESSAGE>"
 
 
+import os
+from datetime import datetime
+DAYBOOK_BUG = os.environ.get("DAYBOOK_BUG") == "1"   # behave like a Tally that ignores the Day Book dates
+
+
 def tdate(s):
-    return date(int(s[:4]), int(s[4:6]), int(s[6:8])) if s else None
+    if not s:
+        return None
+    s = s.strip()
+    if s.isdigit():
+        return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+    return datetime.strptime(s, "%d-%b-%Y").date()
 
 
 class H(BaseHTTPRequestHandler):
@@ -314,12 +324,24 @@ class H(BaseHTTPRequestHandler):
                             f'<HSNCODE>{HSN[name]}</HSNCODE></{tag}></STOCKITEM></TALLYMESSAGE>')
             out += "</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>"
         elif typ == "Data" and rid == "Day Book":
+            if DAYBOOK_BUG:
+                f = t = m_today = max(v["date"] for v in VOUCHERS)
             vs = "".join(xml_voucher(v) for v in VOUCHERS if f <= v["date"] <= t)
             out = f"<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA>{vs}</DATA></BODY></ENVELOPE>"
         else:
             ctype = re.search(r"<COLLECTION[^>]*>.*?<TYPE>(.*?)</TYPE>", req, re.S).group(1)
             out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA><COLLECTION>"
-            if ctype == "Company":
+            if ctype == "Voucher":
+                light = "AllLedgerEntries" not in req
+                for v in VOUCHERS:
+                    if f <= v["date"] <= t:
+                        if light:
+                            out += (f'<VOUCHER><DATE TYPE="Date">{v["date"].strftime("%Y%m%d")}</DATE>'
+                                    f'<ISCANCELLED>{"Yes" if v.get("cancelled") else "No"}</ISCANCELLED>'
+                                    f'<ISOPTIONAL>{"Yes" if v.get("optional") else "No"}</ISOPTIONAL></VOUCHER>')
+                        else:
+                            out += xml_voucher(v).replace('<TALLYMESSAGE xmlns:UDF="TallyUDF">', "").replace("</TALLYMESSAGE>", "")
+            elif ctype == "Company":
                 out += (f'<COMPANY NAME="{escape(COMPANY)}"><NAME>{escape(COMPANY)}</NAME>'
                         f'<ADDRESS.LIST><ADDRESS>Plot 21, Wardhaman Nagar</ADDRESS><ADDRESS>Central Avenue, Nagpur 440008</ADDRESS></ADDRESS.LIST>'
                         f'<STATENAME>Maharashtra</STATENAME><EMAIL>accounts@demotraders.in</EMAIL><INCOMETAXNUMBER>AABCD1234E</INCOMETAXNUMBER>'
