@@ -51,3 +51,7 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 | `docs/` | Guides and screenshots. |
 
 The Docker image is built automatically on every change and published as `ghcr.io/bdlnaredi/bahi:latest`.
+
+## License
+
+[MIT](LICENSE). Bahi is not affiliated with or endorsed by Tally Solutions. TallyPrime is a trademark of its owner.
