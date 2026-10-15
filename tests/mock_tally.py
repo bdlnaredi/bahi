@@ -361,7 +361,11 @@ class H(BaseHTTPRequestHandler):
                                     f'<ISCANCELLED>{"Yes" if v.get("cancelled") else "No"}</ISCANCELLED>'
                                     f'<ISOPTIONAL>{"Yes" if v.get("optional") else "No"}</ISOPTIONAL></VOUCHER>')
                         else:
-                            out += xml_voucher(v).replace('<TALLYMESSAGE xmlns:UDF="TallyUDF">', "").replace("</TALLYMESSAGE>", "")
+                            x = xml_voucher(v).replace('<TALLYMESSAGE xmlns:UDF="TallyUDF">', "").replace("</TALLYMESSAGE>", "")
+                            # user-defined fields from a Tally add-on, without the namespace declaration
+                            x = x.replace("</NARRATION>", '</NARRATION><UDF:TRANSPORTER.LIST DESC="`Transporter`" ISLIST="YES" TYPE="String" INDEX="30">'
+                                          '<UDF:TRANSPORTER DESC="`Transporter`">VRL</UDF:TRANSPORTER></UDF:TRANSPORTER.LIST>', 1)
+                            out += x
             elif ctype == "Company":
                 out += (f'<COMPANY NAME="{escape(COMPANY)}"><NAME>{escape(COMPANY)}</NAME>'
                         f'<ADDRESS.LIST><ADDRESS>Plot 21, Wardhaman Nagar</ADDRESS><ADDRESS>Central Avenue, Nagpur 440008</ADDRESS></ADDRESS.LIST>'

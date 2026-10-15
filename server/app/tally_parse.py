@@ -43,8 +43,23 @@ def decode(raw: bytes) -> str:
     return _BAD_RAW.sub("", text)
 
 
+_PREFIX_TAG = re.compile(r"<(/?)([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)")
+_PREFIX_ATTR = re.compile(r"(\s)([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)(\s*=)")
+_TAG = re.compile(r"<[^<>]+>")
+_XMLNS = re.compile(r"\sxmlns(:[\w.-]+)?\s*=\s*(\"[^\"]*\"|'[^']*')")
+
+
+def strip_prefixes(text):
+    """Tally add-ons write <UDF:FIELD ...> without always declaring UDF; plain names parse everywhere."""
+    def fix_tag(m):
+        t = _XMLNS.sub("", m.group(0))
+        t = _PREFIX_TAG.sub(r"<\1\2_\3", t)
+        return _PREFIX_ATTR.sub(r"\1\2_\3\4", t)
+    return _TAG.sub(fix_tag, text)   # only inside tags; text like "Mode:Cash = x" is left alone
+
+
 def parse_xml(raw: bytes) -> ET.Element:
-    text = decode(raw)
+    text = strip_prefixes(decode(raw))
     # ElementTree refuses an encoding declaration on an already-decoded str
     text = re.sub(r"^\s*<\?xml[^>]*\?>", "", text)
     try:

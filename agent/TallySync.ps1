@@ -115,6 +115,13 @@ function Parse-Xml([byte[]]$raw) {
         }
         $text = [regex]::Replace($text, '&#(x[0-9a-fA-F]+|[0-9]+);', $eval)
         $text = [regex]::Replace($text, '[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]', '')
+        # add-on fields like <UDF:FIELD> arrive without their namespace declaration; use plain names
+        $tagFix = [System.Text.RegularExpressions.MatchEvaluator]{ param($m)
+            $t = [regex]::Replace($m.Value, '\sxmlns(:[\w.-]+)?\s*=\s*("[^"]*"|''[^'']*'')', '')
+            $t = [regex]::Replace($t, '<(/?)([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)', '<$1$2_$3')
+            [regex]::Replace($t, '(\s)([A-Za-z_][\w.-]*):([A-Za-z_][\w.-]*)(\s*=)', '$1$2_$3$4')
+        }
+        $text = [regex]::Replace($text, '<[^<>]+>', $tagFix)
         return [xml]$text
     } catch { return $null }
 }
