@@ -54,4 +54,10 @@ The Docker image is built automatically on every change and published as `ghcr.i
 
 ## License
 
-[MIT](LICENSE). Bahi is not affiliated with or endorsed by Tally Solutions. TallyPrime is a trademark of its owner.
+Copyright (C) 2026 bdlnaredi
+
+Bahi is free software: you can redistribute it and/or modify it under the terms of the
+[GNU General Public License version 3](LICENSE) or any later version. If you share a changed
+version, you must share its source code under the same license. Bahi comes with no warranty.
+
+Bahi is not affiliated with or endorsed by Tally Solutions. TallyPrime is a trademark of its owner.
