@@ -3,7 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.1"
+$AgentVersion = "3.2"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -80,7 +80,30 @@ function Esc([string]$s) { return [System.Security.SecurityElement]::Escape($s) 
 # Tally's own date style (1-Apr-2026) - understood by every TallyPrime release
 function TDate([datetime]$d) { return $d.ToString("d-MMM-yyyy", [System.Globalization.CultureInfo]::InvariantCulture) }
 
+function Assert-Safe([string]$xml) {
+    # Bahi must never delete or change anything already in Tally. Every request is checked here, just before
+    # it goes to Tally; anything that isn't a plain read, or the creation of new vouchers, is refused.
+    $u = $xml.ToUpperInvariant()
+    $req = [regex]::Match($u, '<TALLYREQUEST>\s*([A-Z ]+?)\s*</TALLYREQUEST>').Groups[1].Value
+    if ($req -eq "EXPORT") {
+        if ($u -match 'ACTION\s*=|<ACTION[\s>]|IMPORT|<DELETE|<ALTER|<CANCEL|EXECUTE') { throw "Blocked: a read request that tries to act on Tally" }
+        return
+    }
+    if ($req -eq "IMPORT DATA") {
+        if ([regex]::Match($u, '<REPORTNAME>\s*(.*?)\s*</REPORTNAME>').Groups[1].Value -ne "VOUCHERS") { throw "Blocked: only vouchers may be added to Tally" }
+        $actions = @([regex]::Matches($u, 'ACTION\s*=\s*"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
+        $objects = @([regex]::Matches($u, '<TALLYMESSAGE[^>]*>\s*<([A-Z.]+)') | ForEach-Object { $_.Groups[1].Value })
+        if (-not $actions.Count -or ($actions | Where-Object { $_ -ne "CREATE" })) { throw "Blocked: an entry that would change or delete something in Tally" }
+        if ($objects | Where-Object { $_ -ne "VOUCHER" }) { throw "Blocked: only new vouchers may be added to Tally" }
+        if ($u -match '<(GUID|REMOTEID|MASTERID|ALTERID|VOUCHERKEY|VCHKEY|ISDELETED|ISCANCELLED|IMPORTDUPS)[\s>]|REMOTEID\s*=|VCHKEY\s*=|TAGNAME|TAGVALUE|<TDL|<DELETE|<ALTER|<CANCEL') {
+            throw "Blocked: an entry that points at something already in Tally" }
+        return
+    }
+    throw "Blocked: unknown request to Tally"
+}
+
 function Tally-Raw([string]$xml) {
+    Assert-Safe $xml
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("Content-Type", "text/xml;charset=utf-8")
     return $wc.UploadData($Tally, "POST", [System.Text.Encoding]::UTF8.GetBytes($xml))

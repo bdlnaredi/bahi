@@ -9,6 +9,8 @@ try {
     if ($cfg.FromDate) { $From = ([datetime]::ParseExact($cfg.FromDate, "yyyy-MM-dd", $null)).ToString("d-MMM-yyyy", [Globalization.CultureInfo]::InvariantCulture) }
 } catch {}
 function Tally-Text([string]$xml) {
+    # read only: this tool never changes anything in Tally
+    if ($xml -notmatch '<TALLYREQUEST>Export</TALLYREQUEST>' -or $xml -match '(?i)ACTION\s*=|<ACTION[\s>]|IMPORT|<DELETE|<ALTER|<CANCEL') { throw "Blocked: not a read request" }
     $wc = New-Object System.Net.WebClient
     $wc.Headers.Add("Content-Type", "text/xml;charset=utf-8")
     return [System.Text.Encoding]::UTF8.GetString($wc.UploadData($Tally, "POST", [System.Text.Encoding]::UTF8.GetBytes($xml)))

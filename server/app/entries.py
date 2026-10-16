@@ -1,12 +1,17 @@
 """Receipts, payments and sales orders made on the phone. They wait here until the Tally PC agent
 puts them into Tally (on its next run). Staff entries wait for the owner's approval first."""
+import re
 import json
 import os
 import sqlite3
 import time
 import uuid
 from datetime import date
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape as _esc
+
+
+def escape(t):
+    return _esc(str(t), {'"': "&quot;", "'": "&apos;"})
 
 import store
 
@@ -251,6 +256,18 @@ def build_xml(e):
             + head + body + "</VOUCHER></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>")
 
 
+_UNSAFE = re.compile(r'<(GUID|REMOTEID|MASTERID|ALTERID|VOUCHERKEY|VCHKEY|ISDELETED|ISCANCELLED|IMPORTDUPS)[\s>]|REMOTEID\s*=|VCHKEY\s*='
+                     r'|TAGNAME|TAGVALUE|<TDL|<DELETE|<ALTER|<CANCEL', re.I)
+
+
+def safe_for_tally(xml):
+    """Only new vouchers, never a change to or deletion of anything already in Tally (the Tally PC checks again)."""
+    actions = re.findall(r'ACTION\s*=\s*"([^"]*)"', xml, re.I)
+    objs = re.findall(r'<TALLYMESSAGE[^>]*>\s*<([A-Za-z.]+)', xml)
+    return (bool(actions) and all(a.lower() == "create" for a in actions) and objs and all(o.upper() == "VOUCHER" for o in objs)
+            and "<REPORTNAME>Vouchers</REPORTNAME>" in xml and not _UNSAFE.search(xml))
+
+
 def outbox(company):
     """Entries ready for Tally. Marked as being sent, so two agent runs never both send one."""
     now = time.time()
@@ -260,8 +277,13 @@ def outbox(company):
         out = []
         for r in rows:
             e = _row(r)
+            xml = build_xml(e)
+            if not safe_for_tally(xml):
+                c.execute("UPDATE entry SET status='failed', error=? WHERE id=?",
+                          ("Not sent: it would have changed something already in Tally.", e["id"]))
+                continue
             c.execute("UPDATE entry SET status='sending', sent=?, tries=tries+1 WHERE id=?", (now, e["id"]))
-            out.append({"id": e["id"], "uid": e["uid"], "kind": e["kind"], "label": label(e), "xml": build_xml(e)})
+            out.append({"id": e["id"], "uid": e["uid"], "kind": e["kind"], "label": label(e), "xml": xml})
         return out
 
 

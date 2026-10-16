@@ -39,6 +39,7 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **Interest on overdue bills**, **stock alerts** on Telegram, **e-invoice QR and e-way bill** on invoice PDFs, and **Hindi** in PDFs.
 - **Nightly backups** on your server, the last 7 kept.
 - **Works offline:** your phone keeps the last data you opened.
+- **Never deletes or changes anything in Tally:** syncing only reads, and phone entries are only ever added as new vouchers. Every request is checked on the Tally PC before it reaches Tally.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.
 
 ## How it works
