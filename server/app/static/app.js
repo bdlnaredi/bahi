@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.6.2";
+const APP_VERSION = "2.6.3";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -142,23 +142,33 @@ function periodFor(key) {
   if (key === "quarter") { const q0 = m - ((m - 3 + 12) % 3); return { key, from: iso(new Date(Date.UTC(y, q0, 1))), to: iso(new Date(Date.UTC(y, q0 + 3, 0))) }; }
   return null;
 }
-function periodBar(from, to) {
-  const key = S.period ? S.period.key : "year";
+function periodBar(from, to, slot = "period") {
+  const P = slot === "period" ? S.period : ledgerPeriod();
+  const key = P ? P.key : "year";
   return `<div class="toolbar" role="group" aria-label="Period">${PERIODS.map(([k, l]) =>
     `<button class="chip ${k === key ? "on" : ""}" data-period="${k}" aria-pressed="${k === key}">${l}</button>`).join("")}</div>
     ${key === "custom" ? `<div class="dates"><input type="date" id="pf" value="${from}" aria-label="From date"> to <input type="date" id="pt" value="${to}" aria-label="To date"> <button class="chip" id="papply">Show</button></div>` :
       `<p class="subtitle">${key === "all" ? "All synced dates" : `${fdate(from)} to ${fdate(to)}`}</p>`}`;
 }
-function wirePeriod(from, to) {
+function wirePeriod(from, to, slot = "period") {
+  const set = (v) => {
+    if (slot === "period") { S.period = v; try { localStorage.setItem("period", JSON.stringify(S.period)); } catch (e) {} }
+    else S.lperiod = v || { key: "year" };     // a ledger's period lasts until the app is closed
+  };
   view.querySelectorAll("[data-period]").forEach((b) => b.onclick = () => {
     const k = b.dataset.period;
-    S.period = k === "year" ? null : k === "custom" ? { key: "custom", from: from < "2001" ? iso(new Date(Date.now() - 30 * 864e5)) : from, to: to > "2098" ? iso(new Date()) : to } : periodFor(k);
-    try { localStorage.setItem("period", JSON.stringify(S.period)); } catch (e) {}
+    set(k === "year" ? null : k === "custom" ? { key: "custom", from: from < "2001" ? iso(new Date(Date.now() - 30 * 864e5)) : from, to: to > "2098" ? iso(new Date()) : to } : periodFor(k));
     route();
   });
   const ap = $("#papply");
-  if (ap) ap.onclick = () => { S.period = { key: "custom", from: $("#pf").value, to: $("#pt").value }; route(); };
+  if (ap) ap.onclick = () => { set({ key: "custom", from: $("#pf").value, to: $("#pt").value }); route(); };
 }
+/* Ledgers open on this month unless another period was picked on a ledger */
+function ledgerPeriod() {
+  const p = S.lperiod || periodFor("month");
+  return p.key === "year" ? null : p;
+}
+function ledgerParams() { const p = ledgerPeriod(); return p ? { from: p.from, to: p.to } : {}; }
 
 function loading() { view.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>'; }
 function setTitle(back) {
@@ -319,24 +329,24 @@ function sortEntries(list) {
 
 async function vLedger(name) {
   setTitle(true);
-  const d = await api(cpath("ledger", { name, ...periodParams() }));
+  const d = await api(cpath("ledger", { name, ...ledgerParams() }));
   const L = d.ledger, phone = digits(L.mobile || L.phone);
   const co = S.companies.find((c) => c.id === S.cid)?.name || "";
   const isDebtor = d.closing > 0.5 && d.bill_kind === "receivable";
   const overdue = (d.bills || []).filter((b) => b.overdue > 0 && b.amount > 0);
   const waText = isDebtor ? reminderText(L.name, co, d.closing, overdue) : `Dear ${L.name}, greetings from ${co}.`;
-  const pdfUrl = cpath("ledger_pdf", { name, ...periodParams() });
+  const pdfUrl = cpath("ledger_pdf", { name, ...ledgerParams() });
   const pending = (d.bills || []).filter((b) => Math.abs(b.amount) > 0.5);
   view.innerHTML = `
     <div class="crumbs"><a href="#/group/${enc(L.parent)}">${h(L.parent)}</a></div>
     <h1 class="title">${h(L.name)}</h1>
-    ${periodBar(d.from, d.to)}
+    ${periodBar(d.from, d.to, "ledger")}
     <section class="page">
       ${L.gstin || L.mobile || L.phone || L.email ? `<div class="info" style="padding-top:12px">${L.gstin ? `<div>GSTIN ${h(L.gstin)}</div>` : ""}${L.mobile || L.phone ? `<div>${h(L.mobile || L.phone)}</div>` : ""}${L.email ? `<div>${h(L.email)}</div>` : ""}</div>` : ""}
       <div class="actions" style="${L.gstin || L.mobile || L.phone || L.email ? "" : "padding-top:12px"}">
         <button class="btn primary" id="sharepdf">${ICON.share}Share PDF</button>
         <a class="btn" href="${pdfUrl}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
-        ${excelBtn("ledger", { name, ...periodParams() })}
+        ${excelBtn("ledger", { name, ...ledgerParams() })}
         ${phone ? `<a class="btn wa" href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}">${ICON.call}Call</a>` : ""}
       </div>
       <div class="totals">
@@ -358,7 +368,7 @@ async function vLedger(name) {
     </section>
     ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}</span></div>${billRows(pending.slice(0, 5))}
       ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}`;
-  wirePeriod(d.from, d.to);
+  wirePeriod(d.from, d.to, "ledger");
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`);
   view.querySelectorAll("#esorts [data-sort]").forEach((b) => b.onclick = () => {
     const y = window.scrollY; savePref("esort", b.dataset.sort); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);

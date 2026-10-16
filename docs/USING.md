@@ -52,6 +52,8 @@ Type in the search box to find any ledger. The chips below the search box jump s
 
 <img src="images/ledger.png" width="260" align="right" alt="Party ledger">
 
+A ledger opens on **this month**, starting from the opening balance on the 1st. Tap another period (This year, Last month, Custom…) to see more. Your choice stays while you go from ledger to ledger, and goes back to this month the next time you open the app. The PDF and Excel follow the period on screen.
+
 - The top shows phone, GSTIN, and **Opening, Closing, Debits and Credits** for the selected period.
 - **Share PDF** sends a Tally-style *Ledger Account* PDF, e.g. to the party on WhatsApp. **View PDF** opens it on the phone.
 - **Remind** opens WhatsApp with a ready-made payment reminder. It only appears for parties who owe you and have a mobile number in Tally.
