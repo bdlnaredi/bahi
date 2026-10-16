@@ -322,7 +322,7 @@ foreach ($co in $companies) {
         $state = Server-Json "GET" ("/agent/state?company=" + [uri]::EscapeDataString($co.Name)) $null
         if ($state.paused) {
             # switched off in the app (Reports, Settings): send nothing for this company
-            if ($Force -or $Verbose) { Log ("Syncing is paused in the app for " + $co.Name + " - nothing sent. Resume it in Reports, Settings.") "Yellow" }
+            if ($Force -or $Verbose -or $script:Asked) { Log ("Syncing is paused in the app for " + $co.Name + " - nothing sent. Resume it in Reports, Settings.") "Yellow" }
             continue
         }
         $madeEntries = Push-Entries $co
@@ -332,11 +332,24 @@ foreach ($co in $companies) {
             $FromDate = [datetime]::ParseExact($state.keep_from, "yyyy-MM-dd", $null)
         }
         $fromIso = $FromDate.ToString("yyyy-MM-dd"); $toIso = $ToDate.ToString("yyyy-MM-dd")
-        $unchanged = ($madeEntries -eq 0) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
+        # Tally's company change counter says whether anything changed. "Sync now" doesn't trust it alone:
+        # it always compares voucher by voucher, so entries are found even if the counter didn't move.
+        $unchanged = ($madeEntries -eq 0) -and (-not $script:Asked) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
                      ($state.alt_mst -eq $co.AltMst) -and ($state.from_date -eq $fromIso)
+        # Some Tally setups don't move that counter for every entry, so even when it says "unchanged"
+        # the vouchers are compared one by one every 30 minutes.
+        $deepKey = "deep_" + ($co.Name -replace '[^A-Za-z0-9]', '_')
+        $deepFile = Join-Path $Here "TallySync.deep"
+        $deep = @{}
+        try { if (Test-Path $deepFile) { (Get-Content $deepFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $deep[$_.Name] = $_.Value } } } catch {}
+        $deepCheck = $false
         if ($unchanged -and -not $Force) {
-            if ($Verbose -or $script:Asked) { Log ("No changes in " + $co.Name + " since the last sync - nothing to send.") "Green" }
-            continue
+            $last = 0; try { $last = [double]$deep[$deepKey] } catch {}
+            $now = [double](Get-Date -UFormat %s)
+            if ($now - $last -lt 1800) { continue }
+            $deepCheck = $true
+            $deep[$deepKey] = $now
+            try { $deep | ConvertTo-Json | Set-Content $deepFile } catch {}
         }
         $t0 = Get-Date
         $run = [guid]::NewGuid().ToString("N")
@@ -373,9 +386,11 @@ foreach ($co in $companies) {
                 $months = @($plan.months)
             } catch { $full = $true }
         }
+        if ($deepCheck -and -not $full -and $months.Count -eq 0) { continue }   # the 30-minute check found nothing new
+        if ($deepCheck) { Log ("Found changes in " + $co.Name + " that Tally's change counter didn't show.") }
         $mastersChanged = $full -or ($state.alt_mst -ne $co.AltMst)
         if ($full) { Log ("Syncing " + $co.Name + " (" + $fromIso + " to " + $toIso + ") - full ...") "Cyan" }
-        else { Log ("Syncing " + $co.Name + " - " + $(if ($months.Count) { "changed months: " + ($months -join ", ") } else { "balances only" }) + " ...") "Cyan" }
+        else { Log ("Syncing " + $co.Name + " - " + $(if ($months.Count) { "changed months: " + ($months -join ", ") } else { "no voucher changes found, refreshing balances" }) + " ...") "Cyan" }
 
         # 3. Masters: ledgers and stock every time (their balances move with every entry), the rest only when changed
         if ($mastersChanged) {

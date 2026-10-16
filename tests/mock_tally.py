@@ -470,7 +470,7 @@ class H(BaseHTTPRequestHandler):
                         f'<ADDRESS.LIST><ADDRESS>Plot 21, Wardhaman Nagar</ADDRESS><ADDRESS>Central Avenue, Nagpur 440008</ADDRESS></ADDRESS.LIST>'
                         f'<STATENAME>Maharashtra</STATENAME><EMAIL>accounts@demotraders.in</EMAIL><INCOMETAXNUMBER>AABCD1234E</INCOMETAXNUMBER>'
                         f'<GSTREGISTRATIONNUMBER>27AABCD1234E1Z9</GSTREGISTRATIONNUMBER>'
-                        f'<ALTVCHID TYPE="Number"> {max(v["alterid"] for v in VOUCHERS) + EDITS[0]}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID></COMPANY>')
+                        f'<ALTVCHID TYPE="Number"> {431 if os.environ.get("STUCK_ALTVCH") == "1" else max(v["alterid"] for v in VOUCHERS) + EDITS[0]}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID></COMPANY>')
             elif ctype == "Group":
                 for n, p in GROUPS:
                     par = escape(p) if p else "&#4; Primary"
