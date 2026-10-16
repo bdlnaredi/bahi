@@ -105,6 +105,15 @@ function VchCollection-Xml([string]$company, [datetime]$from, [datetime]$to, [st
            "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
 }
 
+# Every stock item's quantity and value as Tally has it at the end of one day
+function StockAt-Xml([string]$company, [datetime]$day) {
+    $sv = Static-Vars $company $BaseFrom $day
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMStockAt</ID></HEADER>" +
+           "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES><TDL><TDLMESSAGE>" +
+           "<COLLECTION NAME=`"TMStockAt`" ISMODIFY=`"No`"><TYPE>StockItem</TYPE><FETCH>Name, ClosingBalance, ClosingValue</FETCH></COLLECTION>" +
+           "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
+}
+
 # Only the vouchers with these GUIDs (what was created or changed since the last sync)
 function VchGuid-Xml([string]$company, [string[]]$guids, [string]$fetch) {
     $sv = Static-Vars $company $FromDate $ToDate
@@ -346,7 +355,7 @@ foreach ($co in $companies) {
         $fromIso = $FromDate.ToString("yyyy-MM-dd"); $toIso = $ToDate.ToString("yyyy-MM-dd")
         # Tally's company change counter says whether anything changed. "Sync now" doesn't trust it alone:
         # it always compares voucher by voucher, so entries are found even if the counter didn't move.
-        $unchanged = ($madeEntries -eq 0) -and (-not $script:Asked) -and (-not $state.need_groups) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
+        $unchanged = ($madeEntries -eq 0) -and (-not $script:Asked) -and (-not $state.need_groups) -and (-not $state.need_stock) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
                      ($state.alt_mst -eq $co.AltMst) -and ($state.from_date -eq $fromIso)
         # Some Tally setups don't move that counter for every entry, so even when it says "unchanged"
         # the vouchers are compared one by one every 30 minutes.
@@ -387,7 +396,7 @@ foreach ($co in $companies) {
         } catch { $light = $null; $expected = $null }
 
         # 2. Ask the server which months need resending
-        $full = $true; $months = @(); $byVch = $false; $changed = @(); $deleted = @()
+        $full = $true; $months = @(); $byVch = $false; $changed = @(); $deleted = @(); $since = ""
         if ($light -and -not $Force) {
             try {
                 $wc = Server-Client
@@ -399,6 +408,7 @@ foreach ($co in $companies) {
                 $byVch = (-not $full) -and [bool]$plan.by_voucher
                 $changed = @($plan.changed | Where-Object { $_ })
                 $deleted = @($plan.deleted | Where-Object { $_ })
+                $since = [string]$plan.since
             } catch { $full = $true }
         }
         if ($deepCheck -and -not $full -and $months.Count -eq 0) { continue }   # the 30-minute check found nothing new
@@ -514,6 +524,29 @@ foreach ($co in $companies) {
         $script:VchMethod = $method
         if ($expected -and $todo.Count -and $short.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in the " + $todo.Count + " month(s) sent were received") }
         if ($short.Count -gt 0) { Log ("Warning: some months came back incomplete - " + ($short -join "; ") + ". Please report this.") "Yellow" }
+
+        # 5. Stock as Tally has it at each month-end, so opening stock for any month or year is Tally's own figure.
+        #    All months on a full sync; otherwise only from the month of the earliest change.
+        $snapFrom = $null
+        if ($full -or $mastersChanged -or $state.need_stock) { $snapFrom = $FromDate.AddDays(-1) }
+        elseif ($since) { try { $snapFrom = [datetime]::ParseExact($since, "yyyy-MM-dd", $null) } catch {} }
+        if ($snapFrom) {
+            $days = @()
+            $d = (Get-Date -Year $snapFrom.Year -Month $snapFrom.Month -Day 1).AddMonths(1).AddDays(-1)   # end of that month
+            if ($snapFrom -eq $FromDate.AddDays(-1)) { $days += $snapFrom }
+            while ($d -lt $today.Date -and $d -le $ToDate) { if ($days -notcontains $d) { $days += $d }; $d = $d.AddDays(1).AddMonths(1).AddDays(-1) }
+            $snapOk = 0
+            foreach ($day in $days) {
+                try {
+                    $raw = Tally-Raw (StockAt-Xml $co.Name $day)
+                    $wc = Server-Client
+                    $wc.Headers.Add("Content-Type", "application/octet-stream"); $wc.Headers.Add("X-Gzip", "1")
+                    [void]$wc.UploadData("$Server/agent/part?run=$run&kind=stockat&date=" + $day.ToString("yyyy-MM-dd"), "POST", (Gzip $raw))
+                    $snapOk++
+                } catch { Log ("Could not read stock as at " + $day.ToString("d-MMM-yyyy") + ": " + (Error-Detail $_)) "Yellow"; break }
+            }
+            if ($snapOk -and $Verbose) { Log ("Stock read at $snapOk month-end(s)") }
+        }
 
         $meta = @{ run = $run; company = $co.Name; from = $fromIso; to = $toIso; alt_vch = $co.AltVch; alt_mst = $co.AltMst }
         if ($sentByVch) { $meta.guids = @($changed + $deleted) }

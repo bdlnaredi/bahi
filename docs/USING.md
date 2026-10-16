@@ -129,7 +129,7 @@ Pick a period at the top. For each item you see:
 
 Stock is the **total of all your godowns**, as in Tally's own item balance: a godown showing negative because a transfer was entered late simply nets off against the others. A transfer between godowns doesn't count as stock in or out, and an invoice made against a delivery note doesn't take the stock off a second time. On an item's page these show as *moved between godowns* and *counted on the delivery note*.
 
-Quantities match Tally. Values marked ≈ are worked out at the item's average rate, so they can differ a little from Tally's Stock Summary. When the period runs to today, the closing value is Tally's own figure. **Excel** downloads the same table. Tap an item to see each voucher that moved it.
+Opening and closing stock, quantity and value, are **Tally's own figures** for whole months, quarters and years: the Tally PC reads each item's stock from Tally at every month-end. For a period that starts or ends in the middle of a month, Bahi starts from the nearest month-end and adds the vouchers after it, and marks the value ≈. **Excel** downloads the same table. Tap an item to see each voucher that moved it.
 
 ## Reports
 
@@ -177,7 +177,7 @@ On a computer the two sides are side by side. On a phone they are one under the 
 
 Each group goes where Tally puts it, using the group's own settings in Tally (revenue or not, gross profit or not, debit or credit), so groups you made yourself land in the right place too.
 
-Opening and closing stock are Tally's own figures where Bahi has them. For other dates they are worked out at average rates and marked ≈.
+Opening and closing stock are Tally's own figures for whole months, quarters and years. For other dates they are worked out from the nearest month-end and marked ≈.
 
 ## Cash and bank book
 

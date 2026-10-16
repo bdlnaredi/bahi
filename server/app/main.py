@@ -39,7 +39,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.8"
+APP_VERSION = "2.8.1"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -320,8 +320,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/agent/part" and method == "POST":
             run, kind = q.get("run", ""), q.get("kind", "")
             if not RUN_RE.match(run) or kind not in ("groups", "vtypes", "ledgers", "stock", "daybook", "bills_rec", "bills_pay",
-                                                             "company", "ledger_x", "stock_x"):
+                                                             "company", "ledger_x", "stock_x", "stockat"):
                 return self.send_json({"error": "bad part"}, 400)
+            if kind == "stockat":
+                day = q.get("date", "")
+                if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+                    return self.send_json({"error": "bad date"}, 400)
+                kind = "stockat@" + day
             d = os.path.join(STAGING, run)
             os.makedirs(d, exist_ok=True)
             n = len(os.listdir(d))
@@ -347,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def commit(self, d, meta):
         parts = {"groups": [], "vtypes": [], "ledgers": [], "stock": [], "daybook": [],
-                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}}
+                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}, "stock_at": {}}
         skipped = []
         extra_fns = {"company": tp.parse_company_info, "ledger_x": tp.parse_ledger_extra, "stock_x": tp.parse_stock_extra}
         fns = {"groups": tp.parse_groups, "vtypes": tp.parse_vtypes, "ledgers": tp.parse_ledgers,
@@ -356,6 +361,12 @@ class Handler(BaseHTTPRequestHandler):
             kind = fn.split("_", 1)[1].rsplit(".", 1)[0]
             with open(os.path.join(d, fn), "rb") as f:
                 raw = f.read()
+            if kind.startswith("stockat@"):
+                try:
+                    parts["stock_at"][kind.split("@", 1)[1]] = tp.parse_stock(tp.parse_xml(raw))
+                except Exception as e:  # month-end stock is a refinement; the sync goes on without it
+                    print("stock as at a date not usable:", e, file=sys.stderr)
+                continue
             if kind in extra_fns:
                 try:
                     parts[kind].update(extra_fns[kind](tp.parse_xml(raw)))
@@ -392,7 +403,8 @@ class Handler(BaseHTTPRequestHandler):
                             parts["company"].get(meta["company"]) or next(iter(parts["company"].values()), {}),
                             parts["ledger_x"], parts["stock_x"],
                             meta.get("months") if isinstance(meta.get("months"), list) else None,
-                            [str(g) for g in meta["guids"]] if isinstance(meta.get("guids"), list) else None)
+                            [str(g) for g in meta["guids"]] if isinstance(meta.get("guids"), list) else None,
+                            parts["stock_at"])
 
     # ------------------------------------------------------------ app endpoints
     def api(self, method, path, q):

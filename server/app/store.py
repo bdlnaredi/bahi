@@ -50,6 +50,7 @@ CREATE INDEX IF NOT EXISTS ix_vinp_v ON vitem_np(voucher_id);
 CREATE TABLE IF NOT EXISTS vbill(voucher_id INT, ledger TEXT, name TEXT, btype TEXT, amount REAL, days INT);
 CREATE INDEX IF NOT EXISTS ix_vb_v ON vbill(voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vb_l ON vbill(ledger);
+CREATE TABLE IF NOT EXISTS stock_at(company_id INT, day TEXT, item TEXT, qty REAL, value REAL, PRIMARY KEY(company_id, day, item));
 CREATE TABLE IF NOT EXISTS bill(company_id INT, kind TEXT, party TEXT, ref TEXT, date TEXT, due TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_b ON bill(company_id, kind, party);
 """
@@ -210,6 +211,10 @@ def get_alt(name):
         r = c.execute("""SELECT COUNT(*) n FROM grp g JOIN company co ON co.id=g.company_id
                          WHERE co.name=? AND g.parent='' AND g.revenue IS NULL""", (name,)).fetchone()
         out["need_groups"] = bool(r and r["n"])
+        r = c.execute("""SELECT (SELECT COUNT(*) FROM stock s WHERE s.company_id=co.id) items,
+                                (SELECT COUNT(*) FROM stock_at a WHERE a.company_id=co.id) snaps FROM company co WHERE co.name=?""",
+                      (name,)).fetchone()
+        out["need_stock"] = bool(r and r["items"] and not r["snaps"])     # stock synced before month-end stock existed
     return out
 
 
@@ -291,12 +296,14 @@ def plan(company, d_from, d_to, tally_list):
         counts_a[d[:7]] = counts_a.get(d[:7], 0) + 1
     by_voucher = (all(g for g, a, d in in_range) and len(changed) + len(deleted) <= 100
                   and all(counts_a.get(m, 0) == counts_t.get(m, 0) for m in set(counts_a) | set(counts_t)))
-    return {"full": False, "months": sorted(months), "by_voucher": by_voucher,
+    since = min([d for g, a, d in in_range if g in set(changed)] + [stored[g][1] for g in changed if g in stored]
+                + [stored[g][1] for g in deleted] + [m + "-01" for m in months] or [""])
+    return {"full": False, "months": sorted(months), "by_voucher": by_voucher, "since": since,
             "changed": changed if by_voucher else [], "deleted": deleted if by_voucher else []}
 
 
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
-           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None):
+           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None, stock_at=None):
     """Store a sync. Masters are replaced when sent (groups/types/details are kept if a partial sync left them out).
     Vouchers are replaced for the whole [d_from, d_to] range, or only for `months` (YYYY-MM) on a partial sync."""
     with _lock, conn() as c:
@@ -407,6 +414,14 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             c.execute("UPDATE company SET bills_source=? WHERE id=?", (source, cid))
         if info or not partial:
             c.execute("UPDATE company SET info=? WHERE id=?", (json.dumps(info or {}), cid))
+        if not partial:
+            c.execute("DELETE FROM stock_at WHERE company_id=?", (cid,))
+        for day, rows in (stock_at or {}).items():
+            # Tally's stock at the end of `day`; a change on an earlier date also replaces every later month-end
+            c.execute("DELETE FROM stock_at WHERE company_id=? AND day=?", (cid, day))
+            c.executemany("INSERT OR REPLACE INTO stock_at VALUES(?,?,?,?,?)",
+                          [(cid, day, r["name"], r["closing_qty"], r["closing_value"] * (1 if r["closing_qty"] >= 0 else -1))
+                           for r in rows])
         unbalanced = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=? AND balanced=0", (cid,)).fetchone()["n"]
         now = time.time()
         c.execute("UPDATE company SET last_sync=?, last_seen=?, from_date=?, to_date=?, alt_vch=?, alt_mst=?,"
@@ -655,16 +670,54 @@ def _stock_row(i, m, t, today):
             "close_exact": exact_close}
 
 
+def _stock_at(c, cid, day):
+    """Each item's stock at the end of `day`: Tally's own month-end figure when `day` is a month-end Bahi has,
+    otherwise the nearest earlier month-end plus the vouchers after it (marked as worked out)."""
+    r = c.execute("SELECT MAX(day) d FROM stock_at WHERE company_id=? AND day<=?", (cid, day)).fetchone()
+    base = r["d"] if r else None
+    if not base:
+        return {}
+    snap = {x["item"]: (x["qty"], x["value"]) for x in c.execute(
+        "SELECT item, qty, value FROM stock_at WHERE company_id=? AND day=?", (cid, base))}
+    if base == day:
+        return {k: (q, v, True) for k, (q, v) in snap.items()}
+    nxt = (date.fromisoformat(base) + timedelta(days=1)).isoformat()
+    mv = _stock_moves(c, cid, nxt, day)
+    rate = {x["name"]: x["closing_rate"] for x in c.execute("SELECT name, closing_rate FROM stock WHERE company_id=?", (cid,))}
+    out = {}
+    for k, (q, v) in snap.items():
+        m = mv.get(k)
+        dq = (m["in_q"] - m["out_q"]) if m else 0
+        r_ = (v / q) if q else (rate.get(k) or 0)
+        out[k] = (q + dq, v + dq * r_, abs(dq) < 1e-9)
+    return out
+
+
+def _apply_tally_stock(row, before_f, at_t):
+    """Replace worked-out figures with Tally's own month-end stock where Bahi has it."""
+    row["open_exact"] = False
+    if row["name"] in before_f:
+        q, v, ex = before_f[row["name"]]
+        row["open_qty"], row["open_value"], row["open_exact"] = round(q, 3), round(v, 2), ex
+    if not row["close_exact"] and row["name"] in at_t:
+        q, v, ex = at_t[row["name"]]
+        row["close_qty"], row["close_value"], row["close_exact"] = round(q, 3), round(v, 2), ex
+    return row
+
+
 def stock(cid, q="", d_from=None, d_to=None):
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
         items = _rows(c, """SELECT name, parent, unit, opening_qty, opening_value, closing_qty, closing_value, closing_rate FROM stock
             WHERE company_id=? AND name LIKE ? ORDER BY name COLLATE NOCASE""", (cid, f"%{q}%"))
         moves = _stock_moves(c, cid, f, t)
+        before_f = _stock_at(c, cid, (date.fromisoformat(f) - timedelta(days=1)).isoformat())
+        at_t = _stock_at(c, cid, t) if t < date.today().isoformat() else {}
     today = date.today().isoformat()
-    rows = [_stock_row(i, moves.get(i["name"]), t, today) for i in items]
+    rows = [_apply_tally_stock(_stock_row(i, moves.get(i["name"]), t, today), before_f, at_t) for i in items]
     return {"from": f, "to": t, "items": rows, "total": round(sum(i["close_value"] for i in rows), 2),
-            "open_total": round(sum(i["open_value"] for i in rows), 2), "close_exact": all(i["close_exact"] for i in rows)}
+            "open_total": round(sum(i["open_value"] for i in rows), 2), "close_exact": all(i["close_exact"] for i in rows),
+            "open_exact": all(i["open_exact"] for i in rows)}
 
 
 def stock_item(cid, name, d_from=None, d_to=None):
@@ -684,7 +737,9 @@ def stock_item(cid, name, d_from=None, d_to=None):
         inward = sum(r["qty"] for r in moving if r["qty"] > 0)
         outward = -sum(r["qty"] for r in moving if r["qty"] < 0)
         m = _stock_moves(c, cid, f, t, name).get(name)
-    row = _stock_row(dict(info), m, t, date.today().isoformat())
+        before_f = _stock_at(c, cid, (date.fromisoformat(f) - timedelta(days=1)).isoformat())
+        at_t = _stock_at(c, cid, t) if t < date.today().isoformat() else {}
+    row = _apply_tally_stock(_stock_row(dict(info), m, t, date.today().isoformat()), before_f, at_t)
     return {"item": dict(info), "period": row, "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
 
 
@@ -1446,6 +1501,8 @@ def _period_stock(cid, f, t):
     st = stock(cid, "", f, t)
     with conn() as c:
         master = {r["name"]: r for r in c.execute("SELECT name, opening_qty, opening_value FROM stock WHERE company_id=?", (cid,))}
+    if st["open_exact"]:
+        return st["open_total"], True, st["total"], st["close_exact"]
     same = st["items"] and all(abs(i["open_qty"] - (master.get(i["name"]) or {"opening_qty": 0})["opening_qty"]) < 0.001 for i in st["items"])
     if same:     # nothing moved before f: Tally's own opening value applies
         return round(sum(m["opening_value"] for m in master.values()), 2), True, st["total"], st["close_exact"]
