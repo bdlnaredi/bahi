@@ -1,9 +1,65 @@
 """PDF output laid out like TallyPrime's printed Tax Invoice, voucher and Ledger Account.
 
-Standard library only. Uses the built-in Helvetica fonts (text outside Western scripts
-prints as '?'); the rupee sign is drawn as a small vector glyph.
+Uses the built-in Helvetica fonts for English text; the rupee sign is drawn as a small vector glyph.
+Text with Hindi (Devanagari) in it is laid out with Noto Sans Devanagari (letters joined properly by
+Pillow's text layout) and placed as a sharp high-resolution stencil, so it prints like normal text.
 """
+import os
+import zlib
 from datetime import date
+from functools import lru_cache
+
+FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+SCALE = 8          # stencil pixels per point (576 dpi)
+
+
+def _cp1252_ok(s):
+    try:
+        str(s).encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+@lru_cache(maxsize=32)
+def _ufont(bold, px):
+    try:
+        from PIL import ImageFont
+        path = os.path.join(FONT_DIR, "NotoSansDevanagari-%s.ttf" % ("Bold" if bold else "Regular"))
+        try:
+            return ImageFont.truetype(path, px, layout_engine=ImageFont.Layout.RAQM)
+        except Exception:
+            return ImageFont.truetype(path, px)
+    except Exception:
+        return None
+
+
+def _is_dev(ch):
+    o = ord(ch)
+    return 0x0900 <= o <= 0x097F or 0xA8E0 <= o <= 0xA8FF or 0x1CD0 <= o <= 0x1CFF or o in (0x200C, 0x200D)
+
+
+def _runs(s):
+    """Splits text into (is_hindi, part). Hindi parts use Noto Sans Devanagari, the rest Helvetica.
+    Characters neither font has (emoji and other scripts) are left out."""
+    out = []
+    for ch in str(s):
+        if _is_dev(ch):
+            kind = True
+        elif _cp1252_ok(ch):
+            kind = False
+        else:
+            continue
+        if out and (out[-1][0] == kind or (ch == " " and out[-1][0])):
+            out[-1][1].append(ch)
+        else:
+            out.append((kind, [ch]))
+    return [(k, "".join(c)) for k, c in out]
+
+
+def _unicode_text(s):
+    """True when the text needs the Unicode font (Hindi etc.) and it is available."""
+    return not _cp1252_ok(s) and _ufont(False, 80) is not None
 
 _W = {32: 278, 33: 278, 34: 355, 35: 556, 36: 556, 37: 889, 38: 667, 39: 191, 40: 333, 41: 333, 42: 389,
       43: 584, 44: 278, 45: 333, 46: 278, 47: 278, 58: 278, 59: 278, 60: 584, 61: 584, 62: 584, 63: 556,
@@ -22,7 +78,10 @@ STATE_CODES = {}
 
 
 def width(s, size, bold=False):
-    return sum(_W.get(ord(ch), 556) for ch in str(s)) * size / 1000 * (1.07 if bold else 1)
+    s = str(s)
+    if _unicode_text(s):
+        return sum(_ufont(bold, int(size * SCALE)).getlength(t) / SCALE if dev else width(t, size, bold) for dev, t in _runs(s))
+    return sum(_W.get(ord(ch), 556) for ch in s) * size / 1000 * (1.07 if bold else 1)
 
 
 def fit(s, size, maxw, bold=False):
@@ -112,11 +171,28 @@ class PDF:
 
     def __init__(self):
         self.pages = []
+        self.images = []          # (width px, height px, 1-bit stencil bytes)
+        self.page_imgs = []
         self.new_page()
 
     def new_page(self):
         self.cur = []
         self.pages.append(self.cur)
+        self.page_imgs.append([])
+
+    def _stencil(self, x, y, s, size, bold, color):
+        """Draws Unicode text (e.g. Hindi) with its baseline at y, as an image mask painted in `color`."""
+        from PIL import Image, ImageDraw
+        f = _ufont(bold, int(size * SCALE))
+        x0, y0, x1, y1 = f.getbbox(s, anchor="ls")
+        w, h = max(1, x1 - x0 + 2), max(1, y1 - y0 + 2)
+        im = Image.new("1", (w, h), 1)
+        ImageDraw.Draw(im).text((1 - x0, 1 - y0), s, font=f, fill=0, anchor="ls")
+        n = len(self.images)
+        self.images.append((w, h, im.tobytes()))
+        self.page_imgs[-1].append(n)
+        self.cur.append(b"q %.3f %.3f %.3f rg %.3f 0 0 %.3f %.3f %.3f cm /Im%d Do Q" % (
+            *color, w / SCALE, h / SCALE, x + (x0 - 1) / SCALE, y - (y1 + 1) / SCALE, n))
 
     @staticmethod
     def _esc(s):
@@ -130,6 +206,14 @@ class PDF:
             x -= width(s, size, bold)
         elif align == "center":
             x -= width(s, size, bold) / 2
+        if _unicode_text(s):
+            for dev, t in _runs(s):      # Hindi parts as stencils, English parts as normal text
+                if dev:
+                    self._stencil(x, y, t, size, bold, color)
+                else:
+                    self.text(x, y, t, size, font, "left", color)
+                x += width(t, size, bold)
+            return
         f = {"R": b"F1", "B": b"F2", "I": b"F3", "BI": b"F4"}[font]
         self.cur.append(b"BT %.3f %.3f %.3f rg /%s %.2f Tf %.2f %.2f Td (" % (*color, f, size, x, y)
                         + self._esc(s) + b") Tj ET")
@@ -154,6 +238,35 @@ class PDF:
                         P(90, 450) + b" l " + P(400, 0) + b" l S Q")
         return 560 * k
 
+    def qr(self, x, y, size, data):
+        """A QR code with its bottom-left corner at (x, y), `size` points square. Returns False if it can't be made."""
+        try:
+            import segno
+            q = segno.make(data, error="m", micro=False)
+        except Exception:
+            try:
+                import segno
+                q = segno.make(data, error="l", micro=False)
+            except Exception:
+                return False
+        rows = list(q.matrix_iter(border=0))
+        n = len(rows)
+        m = size / n
+        ops = [b"q 0 0 0 rg"]
+        for r, row in enumerate(rows):
+            c = 0
+            while c < n:
+                if row[c]:
+                    start = c
+                    while c < n and row[c]:
+                        c += 1
+                    ops.append(b"%.3f %.3f %.3f %.3f re" % (x + start * m, y + (n - r - 1) * m, (c - start) * m + 0.02, m + 0.02))
+                else:
+                    c += 1
+        ops.append(b"f Q")
+        self.cur.append(b" ".join(ops))
+        return True
+
     def money(self, x, y, n, size=8, bold=False, sign=True):
         """Right-aligned amount at x, optionally with the rupee sign in front."""
         s = inr(n)
@@ -171,6 +284,9 @@ class PDF:
         cat, pages_id = add(None), add(None)
         fonts = [add(b"<< /Type /Font /Subtype /Type1 /BaseFont /%s /Encoding /WinAnsiEncoding >>" % n)
                  for n in (b"Helvetica", b"Helvetica-Bold", b"Helvetica-Oblique", b"Helvetica-BoldOblique")]
+        imgs = [add(b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ImageMask true /Decode [0 1] "
+                    b"/Filter /FlateDecode /Length %d >>\nstream\n" % (w, h, len(z)) + z + b"\nendstream")
+                for w, h, z in ((w, h, zlib.compress(data, 9)) for w, h, data in self.images)]
         kids, total = [], len(self.pages)
         for i, ops in enumerate(self.pages, 1):
             extra = []
@@ -182,9 +298,10 @@ class PDF:
                 extra.append(b"BT 0 0 0 rg /F1 7.5 Tf %.2f 18 Td (" % (self.W - 28 - width(pg, 7.5)) + self._esc(pg) + b") Tj ET")
             stream = b"\n".join(ops + extra)
             cid = add(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+            xo = b"".join(b"/Im%d %d 0 R " % (n, imgs[n]) for n in self.page_imgs[i - 1])
             kids.append(add(b"<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.2f %.2f] /Contents %d 0 R "
-                            b"/Resources << /Font << /F1 %d 0 R /F2 %d 0 R /F3 %d 0 R /F4 %d 0 R >> >> >>"
-                            % (pages_id, self.W, self.H, cid, *fonts)))
+                            b"/Resources << /Font << /F1 %d 0 R /F2 %d 0 R /F3 %d 0 R /F4 %d 0 R >> /XObject << %s>> >> >>"
+                            % (pages_id, self.W, self.H, cid, *fonts, xo)))
         objs[cat - 1] = b"<< /Type /Catalog /Pages %d 0 R >>" % pages_id
         objs[pages_id - 1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
             b" ".join(b"%d 0 R" % k for k in kids), len(kids))
@@ -233,10 +350,29 @@ def invoice_pdf(d):
     p = PDF()
     L, R = 28, PDF.W - 28
     y = PDF.H - 34
-    p.text(PDF.W / 2, y, title, 12, "B", "center")
-    if X.get("irn"):
-        y -= 12
-        p.text(L, y, fit(f"IRN : {X['irn']}", 7.5, R - L), 7.5)
+    einv = bool(X.get("irn") or X.get("ack_no"))
+    if einv:
+        # like Tally's e-invoice print: title, IRN / Ack No. / Ack Date on the left, signed QR code on the right
+        qs = 118
+        p.text(L + (R - L - qs) / 2, y, title, 12, "B", "center")
+        p.text(R - qs / 2, y, "e-Invoice", 8.5, "B", "center")
+        qr_ok = bool(X.get("qr")) and p.qr(R - qs, y - 8 - qs, qs, X["qr"])
+        yy = y - 8 - qs + 52
+        irn = X.get("irn", "")
+        for lab, val in (("IRN", irn), ("Ack No.", X.get("ack_no", "")), ("Ack Date", tdate(X.get("ack_date", "")) if X.get("ack_date") else "")):
+            if not val:
+                continue
+            p.text(L, yy, lab, 8.5)
+            p.text(L + 50, yy, ":", 8.5)
+            for i, ln in enumerate(wrap(val, 8.5, R - qs - L - 70, True) if lab != "IRN" else [val[:len(val) // 2 + 1] + "-", val[len(val) // 2 + 1:]] if len(val) > 40 else [val]):
+                p.text(L + 58, yy, ln, 8.5, "B")
+                yy -= 11
+            yy -= 1
+        if not qr_ok and X.get("qr") is None:
+            pass
+        y = y - 8 - qs - 6
+    else:
+        p.text(PDF.W / 2, y, title, 12, "B", "center")
     top = y - 8
 
     # left column: seller, consignee, buyer
@@ -310,7 +446,13 @@ def invoice_pdf(d):
         x0 = mid + ccol * cw
         y0 = top - r * row_h
         p.text(x0 + 3, y0 - 8, lab, 7)
-        if val:
+        if i == 0 and X.get("ewb_no"):        # Tally prints the e-Way Bill No. beside the invoice number
+            half_w = cw * 0.52
+            p.text(x0 + half_w, y0 - 8, "e-Way Bill No.", 7)
+            p.text(x0 + half_w, y0 - 18, fit(X["ewb_no"], 8, cw - half_w - 3, True), 8, "B")
+            if val:
+                p.text(x0 + 3, y0 - 18, fit(val, 8, half_w - 6, True), 8, "B")
+        elif val:
             p.text(x0 + 3, y0 - 18, fit(val, 8, cw - 6, True), 8, "B")
         p.line(mid, y0 - row_h, R, y0 - row_h)
     for r in range(6):
@@ -560,7 +702,137 @@ def invoice_pdf(d):
     p.line(L, top2, L, bottom_y, 0.6)
     p.line(R, top2, R, bottom_y, 0.6)
     p.line(L, bottom_y, R, bottom_y, 0.6)
+    if X.get("ewb_no"):
+        _eway_page(p, d, X, pname, pgst, pstate, X.get("consignee_address") or paddr)
     return p.output("This is a Computer Generated Invoice")
+
+
+def _eway_page(p, d, X, pname, pgst, pstate, ship_addr):
+    """A second page laid out like the e-Way Bill Tally prints with the invoice."""
+    V, C = d["voucher"], d.get("company_info") or {}
+    L, R = 40, PDF.W - 40
+    p.new_page()
+    y = PDF.H - 48
+    p.text(PDF.W / 2, y, "e-Way Bill", 13, "B", "center")
+    p.line(PDF.W / 2 - 36, y - 3, PDF.W / 2 + 36, y - 3, 0.8)
+    y -= 26
+    doc = {"Sales": "Tax Invoice", "Credit Note": "Credit Note", "Debit Note": "Debit Note", "Purchase": "Bill of Supply"}.get(V.get("base"), V.get("vtype") or "Tax Invoice")
+    head = [("Doc No.", f"{doc} - {V['number']}"), ("Date", tdate(V["date"]))]
+    if X.get("irn"):
+        head += [("IRN", X["irn"]), ("Ack No.", X.get("ack_no", "")), ("Ack Date", tdate(X["ack_date"]) if X.get("ack_date") else "")]
+    for lab, val in head:
+        if not val:
+            continue
+        p.text(L, y, lab, 8.5)
+        p.text(L + 44, y, ":", 8.5)
+        p.text(L + 52, y, fit(val, 8.5, R - L - 52, True), 8.5, "B")
+        y -= 13
+    y -= 8
+
+    def section(y, title):
+        p.line(L, y, R, y, 0.6)
+        y -= 13
+        p.text(L, y, title, 9, "B")
+        return y - 15
+
+    def kv(x, y, lab, val, lw=80):
+        p.text(x, y, lab, 8.5)
+        p.text(x + lw, y, ":", 8.5)
+        p.text(x + lw + 8, y, fit(val or "", 8.5, 160, True), 8.5, "B")
+
+    y = section(y, "1. e-Way Bill Details")
+    c2, c3 = L + 180, L + 350
+    kv(L, y, "e-Way Bill No.", X.get("ewb_no", ""))
+    kv(c2, y, "Mode", X.get("ewb_mode", ""), 78)
+    kv(c3, y, "Generated Date", tdate(X["ewb_date"]) if X.get("ewb_date") else "", 72)
+    y -= 13
+    kv(L, y, "Generated By", C.get("gstin", ""))
+    kv(c2, y, "Approx Distance", (str(X["ewb_distance"]).strip() + " KM") if X.get("ewb_distance") else "", 78)
+    kv(c3, y, "Valid Upto", X.get("ewb_valid", ""), 72)
+    y -= 13
+    kv(L, y, "Supply Type", "Inward-Supply" if (V.get("base") in ("Purchase", "Credit Note")) else "Outward-Supply")
+    kv(c2, y, "Transaction Type", X.get("ewb_sub_type", "") or "Regular", 78)
+    y -= 18
+
+    y = section(y, "2. Address Details")
+    h2 = (R - L) / 2
+    p.text(L, y, "From", 8.5, "B")
+    p.text(L + h2, y, "To", 8.5, "B")
+    y -= 14
+    frm = [d["company"], f"GSTIN : {C.get('gstin', '')}" if C.get("gstin") else "", C.get("state", "")]
+    to = [pname, f"GSTIN : {pgst}" if pgst else "", pstate]
+    for a, b in zip(frm, to):
+        if a:
+            p.text(L, y, fit(a, 8.5, h2 - 10), 8.5)
+        if b:
+            p.text(L + h2, y, fit(b, 8.5, h2 - 10), 8.5)
+        y -= 11
+    y -= 6
+    p.text(L, y, "Dispatch From", 8.5, "B")
+    p.text(L + h2, y, "Ship To", 8.5, "B")
+    y -= 13
+    fa = wrap(", ".join(C.get("address", [])) + (" " + X["ewb_from_place"] if X.get("ewb_from_place") else ""), 8.5, h2 - 10)[:3]
+    ta = wrap(", ".join(ship_addr or []) + (" " + X["ewb_to_place"] if X.get("ewb_to_place") else ""), 8.5, h2 - 10)[:3]
+    for i in range(max(len(fa), len(ta))):
+        if i < len(fa):
+            p.text(L, y, fa[i], 8.5)
+        if i < len(ta):
+            p.text(L + h2, y, ta[i], 8.5)
+        y -= 11
+    y -= 8
+
+    y = section(y, "3. Goods Details")
+    cx = [L, L + 52, R - 190, R - 90, R]
+    for x, lab, al in ((cx[0], "HSN Code", "left"), (cx[1], "Product Name & Desc", "left"), (cx[2] + 40, "Quantity", "right"),
+                       (cx[3] + 20, "Taxable Amt", "right"), (cx[4], "Tax Rate", "right")):
+        p.text(x, y, lab, 8.5, "B", al)
+    y -= 15
+    taxes = [l for l in d["lines"] if l["kind"] == "tax"]
+    taxable = sum(abs(i["amount"]) for i in d["items"]) or 0.0
+    tax_total = sum(abs(l["amount"]) for l in taxes)
+    rate = ""
+    if taxable:
+        parts = [round(abs(l["amount"]) / taxable * 100, 2) for l in taxes]
+        rate = "+".join(f"{x:g}" for x in parts if x)
+    for it in d["items"][:18]:
+        p.text(cx[0], y, it.get("hsn", ""), 8, "B")
+        p.text(cx[1], y, fit(it["item"], 8.5, cx[2] - cx[1] - 50), 8.5)
+        p.text(cx[2] + 40, y, f"{abs(it['qty']):g} {it.get('unit', '')}", 8.5, "R", "right")
+        p.text(cx[3] + 20, y, inr(abs(it["amount"])), 8.5, "B", "right")
+        p.text(cx[4], y, rate, 8.5, "R", "right")
+        y -= 12
+    y = min(y, 300) - 10
+    p.line(L, y, R, y, 0.6)
+    y -= 14
+    heads = {}
+    for l in taxes:
+        n = l["ledger"].upper()
+        k = "IGST" if "IGST" in n or "INTEGRATED" in n else "CGST" if "CGST" in n or "CENTRAL" in n else "SGST" if "SGST" in n or "STATE" in n or "UTGST" in n else "CESS"
+        heads[k] = heads.get(k, 0) + abs(l["amount"])
+    total = abs(V.get("amount") or 0)
+    other = round(total - taxable - tax_total, 2)
+    kv(L, y, "Tot.Taxable Amt", inr(taxable), 80)
+    kv(L + 190, y, "Other Amt", inr(other), 58)
+    kv(L + 345, y, "Total Inv Amt", inr(total), 72)
+    y -= 13
+    xs = [L, L + 190, L + 345]
+    for i, (k, v) in enumerate(heads.items()):
+        kv(xs[i % 3], y, f"{k} Amt", inr(v), 80 if i % 3 == 0 else 58 if i % 3 == 1 else 72)
+        if i % 3 == 2:
+            y -= 13
+    y -= 18
+    y = section(y, "4. Transportation Details")
+    kv(L, y, "Transporter ID", X.get("ewb_transporter_id", ""))
+    kv(c3, y, "Doc No.", X.get("ewb_doc_no", ""), 50)
+    y -= 13
+    kv(L, y, "Name", X.get("ewb_transporter", ""))
+    kv(c3, y, "Date", tdate(X["ewb_doc_date"]) if X.get("ewb_doc_date") else "", 50)
+    y -= 18
+    y = section(y, "5. Vehicle Details")
+    kv(L, y, "Vehicle No.", X.get("ewb_vehicle", ""), 50)
+    kv(c2, y, "From", X.get("ewb_from_place", "") or (C.get("address") or [""])[-1], 30)
+    y -= 10
+    p.line(L, y, R, y, 0.6)
 
 
 # ---------------------------------------------------------------- Receipt / Payment / Journal
@@ -763,4 +1035,41 @@ def ledger_pdf(d):
     y -= 5
     p.line(cx["dr"] - 70, y, R, y, 0.5)
     p.line(cx["dr"] - 70, y - 2, R, y - 2, 0.5)
+    late = [b for b in d.get("bills") or [] if b.get("interest")]
+    if late:
+        y -= 26
+        if y < 140:
+            p.new_page()
+            y = PDF.H - 60
+        p.text(L, y, f"Interest on overdue bills @ {d['interest_rate']:g}% p.a., up to {tdate(date.today().isoformat())}", 9, "B")
+        y -= 6
+        p.line(L, y, R, y, 0.5)
+        y -= 11
+        ic = [(L, "Bill", "left"), (L + 120, "Bill date", "left"), (L + 190, "Due date", "left"), (L + 300, "Days", "right"),
+              (L + 400, "Pending", "right"), (R, "Interest", "right")]
+
+        def ihead(y):
+            for x, lab, al in ic:
+                p.text(x, y, lab, 8, "I", al)
+            y -= 5
+            p.line(L, y, R, y, 0.5)
+            return y - 11
+        y = ihead(y)
+        for b in late:
+            if y < 60:
+                p.text(R, y - 4, "Continued...", 7.5, "I", "right")
+                p.new_page()
+                y = ihead(PDF.H - 50)
+            p.text(L, y, fit(b["ref"], 8, 115), 8)
+            p.text(L + 120, y, tdate(b["date"]) if b.get("date") else "", 8)
+            p.text(L + 190, y, tdate(b["due"]) if b.get("due") else "", 8)
+            p.text(L + 300, y, str(b["interest_days"]), 8, "R", "right")
+            p.text(L + 400, y, inr(b["amount"]), 8, "R", "right")
+            p.text(R, y, inr(b["interest"]), 8, "R", "right")
+            y -= 11
+        y += 4
+        p.line(L + 330, y, R, y, 0.5)
+        y -= 11
+        p.text(L + 330, y, "Total interest", 8.5, "B")
+        p.money(R, y, d["interest"], 8.5, True)
     return p.output()

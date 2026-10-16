@@ -137,6 +137,7 @@ To update: **Compose Pull**, then **Compose Up**.
 | `TallySync.log` | What each sync did, and any warnings |
 | `Setup.bat` | Change the server address, token or from-date |
 | `Diagnose.bat` | Writes a short report of voucher counts, for checking a sync problem |
+| `Save-Voucher.bat` | Saves everything Tally has for one voucher into `voucher-sample.xml`, if asked for it to check a problem |
 
 ## 5. Reach the app from your phone
 

@@ -30,6 +30,7 @@ import notify  # noqa: E402
 import backup  # noqa: E402
 import users  # noqa: E402
 import entries  # noqa: E402
+import gstr2b  # noqa: E402
 import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -39,7 +40,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.8.1"
+APP_VERSION = "2.9"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -159,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
                 for k in ("chat_id", "time"):
                     if k in data:
                         s[k] = str(data[k]).strip()
-                for k in ("daily", "alerts"):
+                for k in ("daily", "alerts", "stock_alerts"):
                     if k in data:
                         s[k] = bool(data[k])
                 if "alert_min" in data:
@@ -225,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
-                    "ledger": "ledger"}.get(w, "a_items" if w.startswith("a_") else "")
+                    "ledger": "ledger", "gstr2b": "gst"}.get(w, "a_items" if w.startswith("a_") else "")
             if not what:
                 return False
         if what in need:
@@ -320,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/agent/part" and method == "POST":
             run, kind = q.get("run", ""), q.get("kind", "")
             if not RUN_RE.match(run) or kind not in ("groups", "vtypes", "ledgers", "stock", "daybook", "bills_rec", "bills_pay",
-                                                             "company", "ledger_x", "stock_x", "stockat"):
+                                                             "company", "ledger_x", "stock_x", "stockat", "einv"):
                 return self.send_json({"error": "bad part"}, 400)
             if kind == "stockat":
                 day = q.get("date", "")
@@ -347,12 +348,13 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 shutil.rmtree(d, ignore_errors=True)
             threading.Thread(target=notify.alert_new_receipts, daemon=True).start()
+            threading.Thread(target=notify.alert_stock, daemon=True).start()
             return self.send_json(res)
         self.send_json({"error": "not found"}, 404)
 
     def commit(self, d, meta):
         parts = {"groups": [], "vtypes": [], "ledgers": [], "stock": [], "daybook": [],
-                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}, "stock_at": {}}
+                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}, "stock_at": {}, "einv": {}}
         skipped = []
         extra_fns = {"company": tp.parse_company_info, "ledger_x": tp.parse_ledger_extra, "stock_x": tp.parse_stock_extra}
         fns = {"groups": tp.parse_groups, "vtypes": tp.parse_vtypes, "ledgers": tp.parse_ledgers,
@@ -361,6 +363,16 @@ class Handler(BaseHTTPRequestHandler):
             kind = fn.split("_", 1)[1].rsplit(".", 1)[0]
             with open(os.path.join(d, fn), "rb") as f:
                 raw = f.read()
+            if kind == "einv":
+                try:
+                    for v in tp.parse_xml(raw).iter("VOUCHER"):
+                        g = (v.findtext("GUID") or "").strip()
+                        f_ = tp.einvoice_fields(v)
+                        if g and f_:
+                            parts["einv"].setdefault(g, {}).update(f_)
+                except Exception as e:   # optional details; the sync goes on without them
+                    print("e-invoice details not usable:", e, file=sys.stderr)
+                continue
             if kind.startswith("stockat@"):
                 try:
                     parts["stock_at"][kind.split("@", 1)[1]] = tp.parse_stock(tp.parse_xml(raw))
@@ -390,6 +402,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("No ledgers received - is the right company open in Tally?")
         seen, vouchers = set(), []
         for v in parts["daybook"]:
+            if v.get("guid") in parts["einv"]:
+                v["extra"] = {**(v.get("extra") or {}), **parts["einv"][v["guid"]]}
             key = v["guid"] or id(v)
             if key in seen:
                 continue
@@ -448,6 +462,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Syncing is paused. Resume it in Settings first."}, 400)
             store.update_sync(request=True)
             return self.send_json({"ok": True})
+
+        if path == "/api/interest":
+            if method == "POST":
+                if not u["owner"]:
+                    return self.send_json({"error": "Only the owner can do that."}, 403)
+                data = json.loads(self.body(4096) or b"{}")
+                try:
+                    return self.send_json(store.set_interest(data.get("on"), data.get("rate"), data.get("grace")))
+                except (TypeError, ValueError):
+                    return self.send_json({"error": "Enter a rate and a number of days."}, 400)
+            return self.send_json(store.interest_settings())
 
         if path == "/api/companies":
             return self.send_json({"companies": [c for c in store.companies() if users.can_company(u, c["name"])],
@@ -534,6 +559,50 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"entry": entries.create(cid, kind, data, u)})
             except ValueError as e:
                 return self.send_json({"error": str(e)}, 400)
+
+        mp = re.match(r"^/api/c/(\d+)/gstr2b$", path)
+        if mp:
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "gst", q, None):
+                return self.send_json({"error": "You don't have access to this. Ask the owner."}, 403)
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            if not co:
+                return self.send_json({"error": "not found"}, 404)
+            if method == "POST":
+                raw = self.body(40 * 1024 * 1024)
+                fname = unquote(self.headers.get("X-Filename") or "")
+                try:
+                    period, gstin, docs = gstr2b.parse(raw, fname)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+                except Exception as e:
+                    return self.send_json({"error": f"Couldn't read that file ({type(e).__name__}). Download GSTR-2B from the portal as JSON or Excel."}, 400)
+                if not re.match(r"^\d{6}$", period or ""):
+                    period = (q.get("period") or "").strip()
+                    if not re.match(r"^\d{6}$", period):
+                        return self.send_json({"error": "Which month is this GSTR-2B for?", "need_period": True}, 400)
+                if not docs:
+                    return self.send_json({"error": "No supplier invoices found in that file."}, 400)
+                gstr2b.save(co["name"], period, gstin, docs, fname)
+                return self.send_json({"period": period, **gstr2b.check(cid, period, docs)})
+            period = q.get("period", "")
+            if period:
+                saved = gstr2b.load(co["name"], period)
+                if not saved:
+                    return self.send_json({"error": "not found"}, 404)
+                return self.send_json({**gstr2b.check(cid, period, saved["docs"]), "uploaded": saved.get("uploaded"), "file": saved.get("file")})
+            return self.send_json({"checks": gstr2b.listing(co["name"])})
+
+        mp = re.match(r"^/api/c/(\d+)/stockmin$", path)
+        if mp and method == "POST":
+            if not self.allowed(int(mp.group(1)), "stock", q, None):
+                return self.send_json({"error": "not allowed"}, 403)
+            data = json.loads(self.body(4096) or b"{}")
+            try:
+                ok = store.set_stock_min(int(mp.group(1)), str(data.get("item", "")), data.get("min"))
+            except (TypeError, ValueError):
+                return self.send_json({"error": "Enter a quantity."}, 400)
+            return self.send_json({"ok": ok})
 
         mp = re.match(r"^/api/c/(\d+)/followup$", path)
         if mp and method == "POST":
@@ -664,6 +733,11 @@ def main():
     notify.start()
     backup.start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    try:
+        from PIL import features
+        print("Hindi in PDFs:", "ready" if features.check("raqm") else "letters may not join (text layout library missing)", flush=True)
+    except Exception:
+        print("Hindi in PDFs: not available (Pillow missing)", flush=True)
     print(f"Tally Mobile listening on :{PORT}", flush=True)
     srv.serve_forever()
 

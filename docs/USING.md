@@ -310,6 +310,41 @@ The Tally PC checks with the app every 2 minutes, so **Sync now** starts within 
 
 On the Tally PC itself, `Pause-Sync.bat` stops the automatic task completely and `Resume-Sync.bat` starts it again. `Sync-Now.bat` still works when the PC is paused this way.
 
+## Interest on overdue bills
+
+Turn it on in **Reports → Settings → Interest on overdue bills** and set the rate (e.g. 18% a year) and any grace days. Bahi then works out simple interest on each overdue customer bill, from its due date (or its bill date when it has no credit period). It shows:
+
+- on **Dues**, each **ledger** and the **Follow-up list**, per bill and per customer;
+- in **WhatsApp reminders** ("Interest at 18% p.a. on the overdue bills comes to ₹… up to today");
+- as a table at the end of the **ledger PDF**.
+
+Nothing is posted in Tally. Raise an interest voucher in Tally yourself if you charge it.
+
+## Stock alerts
+
+On an item's page, set **Alert me on Telegram when stock falls below …**. After each sync, Telegram tells you once when an item goes below its minimum, and once when any item goes negative (all godowns together), which usually means an entry is missing. The Stock list marks these items, and **"… need attention"** at the top shows just them. The morning summary counts them too. Turn the alerts off in the Telegram settings.
+
+## GSTR-2B check
+
+**Reports → GSTR-2B check** (also from the GST summary). On the GST portal go to **Returns → GSTR-2B**, pick the month and download the **JSON** (or Excel) file, then choose it here. Bahi matches every supplier invoice and note with your purchases by supplier GSTIN and invoice number (Tally's *Supplier Invoice No.*, or the voucher number) and shows:
+
+| Tab | Meaning |
+|---|---|
+| **Not in Tally** | On the portal but not booked (or booked with a different number or GSTIN). Book them to claim the credit. |
+| **Amount differs** | Found in both, but the taxable value or a tax head differs by more than ₹1. |
+| **Not in GSTR-2B** | Purchases with GST booked in Tally for that month that the supplier hasn't reported. That credit is at risk. |
+| **Matched** | Same in both. |
+
+Uploaded months are kept; opening one again checks it against your latest books. **Excel** downloads the whole result.
+
+## e-Invoice and e-Way Bill on invoices
+
+When an invoice in Tally has an e-invoice (IRN) or an e-way bill, the invoice PDF prints them like Tally does: the **e-Invoice** block with IRN, Ack No., Ack Date and the signed **QR code** at the top, the **e-Way Bill No.** beside the invoice number, and the **e-Way Bill** as page 2 (number, dates, validity, distance, vehicle, addresses and goods). The voucher screen in the app lists the same details.
+
+## Hindi in PDFs
+
+Party names, item names, addresses and narrations written in Hindi print correctly in invoice, voucher and ledger PDFs.
+
 ## Backups
 
 The server makes a backup every night at 02:30 and keeps the last 7. **Reports → Settings → Backups** shows when the last one ran, lets you download any of them, and has a **Back up now** button.
@@ -331,4 +366,4 @@ The PDF follows Tally's *Ledger Account* layout:
 - The Tally PC sends only the vouchers that were created, changed or deleted since the last sync, so a normal sync takes a few seconds. After a big change (more than 100 vouchers at once) it sends the affected months instead. After a server update that changes how data is stored, the next sync sends everything again.
 - Figures are as of the **last sync**. If the Tally PC is off, the app shows the last copy and says so at the top.
 - Without internet, the phone shows the screens you opened before, with a note saying it's a saved copy.
-- PDFs use a standard font, so names written in Hindi or other Indian scripts print as "?". The ₹ sign prints correctly.
+- PDFs print Hindi (Devanagari). Other Indian scripts such as Gujarati still print as "?". The ₹ sign prints correctly.

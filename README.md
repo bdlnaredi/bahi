@@ -35,6 +35,8 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **Enter receipts, payments and sales orders on the phone.** They go into Tally at the next sync.
 - **Staff logins** that show each person only what you allow, with your approval for their entries.
 - **Sync your way:** automatic every few minutes, manual with a **Sync now** button, or paused.
+- **GSTR-2B check:** upload the portal file and see which supplier bills are missing, differ, or are at risk.
+- **Interest on overdue bills**, **stock alerts** on Telegram, **e-invoice QR and e-way bill** on invoice PDFs, and **Hindi** in PDFs.
 - **Nightly backups** on your server, the last 7 kept.
 - **Works offline:** your phone keeps the last data you opened.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.

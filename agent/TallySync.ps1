@@ -105,6 +105,24 @@ function VchCollection-Xml([string]$company, [datetime]$from, [datetime]$to, [st
            "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
 }
 
+# e-invoice (IRN, Ack, signed QR) and e-way bill details of the vouchers being sent. Kept separate so a
+# Tally release that doesn't know one of these names can't stop the sync.
+$EinvFields = "GUID, IRN, IRNAckNo, IRNAckDate, IRNQRCode, EWayBillDetails"
+function Einv-Xml([string]$company, [datetime]$from, [datetime]$to, [string[]]$guids) {
+    $sv = Static-Vars $company $from $to
+    $cond = "`$Date &gt;= ##SVFromDate AND `$Date &lt;= ##SVToDate"
+    if ($guids) { $cond = ($guids | ForEach-Object { "`$GUID = `"" + ($_ -replace '[^A-Za-z0-9\-]', '') + "`"" }) -join " OR " }
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMEinv</ID></HEADER>" +
+           "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES><TDL><TDLMESSAGE>" +
+           "<COLLECTION NAME=`"TMEinv`" ISMODIFY=`"No`"><TYPE>Voucher</TYPE><FETCH>$EinvFields</FETCH><FILTER>TMEinvF</FILTER></COLLECTION>" +
+           "<SYSTEM TYPE=`"Formulae`" NAME=`"TMEinvF`">$cond</SYSTEM>" +
+           "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
+}
+function Send-Einv($run, [string]$company, [datetime]$from, [datetime]$to, [string[]]$guids) {
+    try { Send-Part $run "einv" (Tally-Raw (Einv-Xml $company $from $to $guids)) }
+    catch { if ($Verbose) { Log ("e-invoice details not read: " + $_.Exception.Message) "Gray" } }
+}
+
 # Every stock item's quantity and value as Tally has it at the end of one day
 function StockAt-Xml([string]$company, [datetime]$day) {
     $sv = Static-Vars $company $BaseFrom $day
@@ -474,6 +492,9 @@ foreach ($co in $companies) {
             } catch { $got = -1 }
             if ($got -eq $changed.Count) {
                 foreach ($p in $parts) { Send-Part $run "daybook" $p }
+                for ($i = 0; $i -lt $changed.Count; $i += 25) {
+                    Send-Einv $run $co.Name $FromDate $ToDate @($changed[$i..([math]::Min($i + 24, $changed.Count - 1))])
+                }
                 Log ("Vouchers checked: all " + $changed.Count + " changed voucher(s) received")
                 $sentByVch = $true
             } else {
@@ -517,7 +538,7 @@ foreach ($co in $companies) {
                     break
                 }
             }
-            if ($best) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn) }
+            if ($best) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn); Send-Einv $run $co.Name $a $b $null }
             if ($want -ge 0 -and $bestIn -lt $want) { $short += ("{0}: {1} of {2}" -f $key, [math]::Max(0, $bestIn), $want) }
         }
         if ($method -ne $script:VchMethod) { try { Set-Content $MethodFile $method } catch {} }

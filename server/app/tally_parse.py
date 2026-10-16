@@ -405,9 +405,69 @@ def voucher_extra(v):
         "destination": txt(v, "BASICFINALDESTINATION"),
         "terms_delivery": " ".join(_lines(v, "BASICORDERTERMS.LIST/BASICORDERTERMS")),
         "vehicle_no": txt(v, "BASICSHIPVESSELNO"),
-        "irn": txt(v, "IRN") or txt(v, "IRNACKNO"),
     }
+    x.update(einvoice_fields(v))
     return {k: val for k, val in x.items() if val}
+
+
+# e-invoice (IRN) and e-way bill details. TallyPrime releases name these slightly differently, so every
+# likely tag is tried, anywhere inside the voucher.
+EINV_TAGS = {
+    "irn": ("IRN", "IRNNUMBER", "IRNNO"),
+    "ack_no": ("IRNACKNO", "ACKNO", "IRNACKNUMBER", "ACKNUMBER"),
+    "ack_date": ("IRNACKDATE", "ACKDATE", "IRNACKDT"),
+    "qr": ("IRNQRCODE", "SIGNEDQRCODE", "IRNSIGNEDQRCODE", "QRCODE", "EINVQRCODE"),
+    "ewb_no": ("EWAYBILLNO", "EWAYBILLNUMBER", "EWBNO", "BILLNUMBER"),
+    "ewb_date": ("EWAYBILLDATE", "EWBDATE", "BILLDATE"),
+    "ewb_valid": ("VALIDUPTO", "EWAYBILLVALIDUPTO", "BILLVALIDUPTO", "EWBVALIDUPTO", "VALIDTILL"),
+    "ewb_mode": ("TRANSPORTMODE", "MODEOFTRANSPORT", "MODE"),
+    "ewb_distance": ("DISTANCE", "APPROXDISTANCE", "TRANSPORTDISTANCE"),
+    "ewb_vehicle": ("VEHICLENUMBER", "VEHICLENO"),
+    "ewb_vehicle_type": ("VEHICLETYPE",),
+    "ewb_transporter": ("TRANSPORTERNAME",),
+    "ewb_transporter_id": ("TRANSPORTERID",),
+    "ewb_doc_no": ("TRANSPORTDOCNO", "DOCUMENTNUMBER", "TRANSPORTERDOCNO"),
+    "ewb_doc_date": ("TRANSPORTDOCDATE", "DOCUMENTDATE", "TRANSPORTERDOCDATE"),
+    "ewb_from_place": ("CONSIGNORPLACE", "DISPATCHFROMPLACE", "FROMPLACE"),
+    "ewb_to_place": ("CONSIGNEEPLACE", "SHIPTOPLACE", "TOPLACE"),
+    "ewb_from_pin": ("CONSIGNORPINCODE", "DISPATCHFROMPINCODE"),
+    "ewb_to_pin": ("CONSIGNEEPINCODE", "SHIPTOPINCODE"),
+    "ewb_sub_type": ("SUBTYPE", "EWAYBILLSUBTYPE"),
+    "ewb_doc_type": ("DOCUMENTTYPE", "EWAYBILLDOCTYPE"),
+    "ewb_status": ("EWAYBILLSTATUS", "EWBSTATUS"),
+    "irn_status": ("IRNSTATUS", "IRNCANCELLED"),
+}
+EWB_LISTS = ("EWAYBILLDETAILS.LIST", "EWAYBILLDETAIL.LIST", "EWAYBILL.LIST")
+
+
+def einvoice_fields(v):
+    flat = {}
+    def walk(el, inside_ewb):
+        for ch in el:
+            tag = ch.tag.upper()
+            ewb = inside_ewb or tag in EWB_LISTS
+            if len(ch):
+                walk(ch, ewb)
+            else:
+                t = (ch.text or "").strip()
+                if t and not t.startswith("\x04"):
+                    # plain BILLNUMBER/BILLDATE/MODE etc. only count inside the e-way bill block
+                    flat.setdefault((tag, ewb), t)
+    walk(v, False)
+    out = {}
+    for key, tags in EINV_TAGS.items():
+        generic = key.startswith("ewb_") and key not in ("ewb_no", "ewb_valid", "ewb_vehicle", "ewb_transporter", "ewb_transporter_id")
+        for t in tags:
+            val = flat.get((t, True)) or (None if (generic or t in ("BILLNUMBER", "BILLDATE")) else flat.get((t, False)))
+            if val:
+                out[key] = val
+                break
+    for k in ("ack_date", "ewb_date", "ewb_doc_date"):
+        if out.get(k):
+            out[k] = tdate(out[k].split(" ")[0]) or out[k]
+    if out.get("irn") and not re.match(r"^[0-9a-fA-F]{64}$", out["irn"].strip()):
+        out.pop("irn")          # not an IRN (64 hex characters)
+    return out
 
 
 def _mailing(el):

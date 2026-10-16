@@ -15,7 +15,7 @@ API = os.environ.get("TELEGRAM_API", "https://api.telegram.org")
 _lock = threading.Lock()
 
 DEFAULTS = {"token": "", "chat_id": "", "daily": True, "time": "09:00", "alert_min": 50000,
-            "alerts": True, "last_daily": "", "alerted": []}
+            "alerts": True, "last_daily": "", "alerted": [], "stock_alerts": True, "stock_state": {}}
 
 
 def load():
@@ -37,7 +37,7 @@ def public(s):
     """Settings for the app screen - the bot token is never sent back, only whether one is set."""
     return {"configured": bool(s["token"] and s["chat_id"]), "has_token": bool(s["token"]),
             "chat_id": s["chat_id"], "daily": s["daily"], "time": s["time"],
-            "alert_min": s["alert_min"], "alerts": s["alerts"]}
+            "alert_min": s["alert_min"], "alerts": s["alerts"], "stock_alerts": s["stock_alerts"]}
 
 
 def _call(token, method, params):
@@ -126,6 +126,12 @@ def summary_text(cid, day=None):
     missed = [p["name"] for p in col["parties"] if p["promise_missed"]]
     if missed:
         lines += ["Promise date passed, still unpaid: " + ", ".join(_esc(x) for x in missed[:8])]
+    probs = store.stock_problems(cid)
+    if probs:
+        neg = [p for p in probs if p["state"] == "negative"]
+        low = [p for p in probs if p["state"] == "low"]
+        lines += ["", "Stock: " + ", ".join(x for x in [f"{len(low)} below minimum" if low else "", f"{len(neg)} negative" if neg else ""] if x)
+                  + " - " + ", ".join(_esc(p["name"]) for p in probs[:6]) + (" ..." if len(probs) > 6 else "")]
     if worst:
         lines += ["", "Biggest overdue:"]
         lines += [f"  {_esc(p['name'])}: {_inr(p['overdue_amount'])}" for p in worst]
@@ -160,6 +166,42 @@ def alert_new_receipts():
     with _lock:
         s2 = load()
         s2["alerted"] = list(sent)[-500:]
+        save(s2)
+
+
+def _qty(q, unit):
+    return (f"{q:,.3f}".rstrip("0").rstrip(".") + f" {unit}").strip()
+
+
+def alert_stock():
+    """After a sync: one message listing items that have newly gone below their minimum or below zero."""
+    s = load()
+    if not (s["token"] and s["chat_id"] and s.get("stock_alerts", True)):
+        return
+    state = dict(s.get("stock_state") or {})
+    new_state, msgs = {}, []
+    for co in store.companies():
+        for p in store.stock_problems(co["id"]):
+            key = f"{co['name']}|{p['name']}"
+            new_state[key] = p["state"]
+            if state.get(key) != p["state"]:
+                if p["state"] == "negative":
+                    msgs.append((co["name"], f"{_esc(p['name'])}: <b>{_qty(p['qty'], p['unit'])}</b> (negative - an entry may be missing)"))
+                else:
+                    msgs.append((co["name"], f"{_esc(p['name'])}: <b>{_qty(p['qty'], p['unit'])}</b> left, minimum {_qty(p['min'], p['unit'])}"))
+    if msgs:
+        by_co = {}
+        for cname, m in msgs:
+            by_co.setdefault(cname, []).append(m)
+        text = "\n\n".join(f"<b>Stock alert</b> - {_esc(cn)}\n" + "\n".join(ms[:25]) for cn, ms in by_co.items())
+        try:
+            send(text, s)
+        except Exception as e:
+            print("telegram stock alert failed:", e)
+            return
+    with _lock:
+        s2 = load()
+        s2["stock_state"] = new_state      # an item that recovers can alert again next time
         save(s2)
 
 

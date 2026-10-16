@@ -605,7 +605,8 @@ def ledger(cid, name, d_from=None, d_to=None):
         kind, bills = ledger_bills(c, cid, name)
         return {"ledger": info, "from": f, "to": t, "opening": round(opening, 2),
                 "debit": round(dr, 2), "credit": round(cr, 2), "closing": round(bal, 2), "entries": rows,
-                "bill_kind": kind, "bills": bills,
+                "bill_kind": kind, "bills": bills, "interest": round(sum(b.get("interest", 0) for b in bills), 2),
+                "interest_rate": interest_settings()["rate"] if interest_settings()["on"] else 0,
                 "company": comp["name"], "company_info": json.loads(comp["info"] or "{}")}
 
 
@@ -705,6 +706,51 @@ def _apply_tally_stock(row, before_f, at_t):
     return row
 
 
+STOCKMIN_FILE = os.path.join(os.path.dirname(DB_PATH), "stock_min.json")
+
+
+def stock_mins(company=None):
+    try:
+        with open(STOCKMIN_FILE) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    return d.get(company, {}) if company is not None else d
+
+
+def set_stock_min(cid, item, minimum):
+    co = next((x for x in companies() if x["id"] == cid), None)
+    if not co:
+        return False
+    with _lock:
+        d = stock_mins()
+        per = d.setdefault(co["name"], {})
+        if minimum is None or minimum == "" or float(minimum) <= 0:
+            per.pop(item, None)
+        else:
+            per[item] = float(minimum)
+        tmp = STOCKMIN_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, STOCKMIN_FILE)
+    return True
+
+
+def stock_problems(cid):
+    """Items below the minimum you set, or below zero (all godowns together), as Tally has them now."""
+    co = next((x for x in companies() if x["id"] == cid), None)
+    mins = stock_mins(co["name"]) if co else {}
+    out = []
+    with conn() as c:
+        for r in c.execute("SELECT name, unit, closing_qty FROM stock WHERE company_id=? ORDER BY name", (cid,)):
+            m = mins.get(r["name"])
+            if r["closing_qty"] < -1e-9:
+                out.append({"name": r["name"], "unit": r["unit"], "qty": r["closing_qty"], "min": m, "state": "negative"})
+            elif m is not None and r["closing_qty"] < m:
+                out.append({"name": r["name"], "unit": r["unit"], "qty": r["closing_qty"], "min": m, "state": "low"})
+    return out
+
+
 def stock(cid, q="", d_from=None, d_to=None):
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
@@ -715,6 +761,11 @@ def stock(cid, q="", d_from=None, d_to=None):
         at_t = _stock_at(c, cid, t) if t < date.today().isoformat() else {}
     today = date.today().isoformat()
     rows = [_apply_tally_stock(_stock_row(i, moves.get(i["name"]), t, today), before_f, at_t) for i in items]
+    co = next((x for x in companies() if x["id"] == cid), None)
+    mins = stock_mins(co["name"]) if co else {}
+    for r in rows:      # flags are about stock now, whatever period is shown
+        r["min"] = mins.get(r["name"])
+        r["flag"] = "negative" if r["closing_qty"] < -1e-9 else "low" if r["min"] is not None and r["closing_qty"] < r["min"] else ""
     return {"from": f, "to": t, "items": rows, "total": round(sum(i["close_value"] for i in rows), 2),
             "open_total": round(sum(i["open_value"] for i in rows), 2), "close_exact": all(i["close_exact"] for i in rows),
             "open_exact": all(i["open_exact"] for i in rows)}
@@ -740,6 +791,8 @@ def stock_item(cid, name, d_from=None, d_to=None):
         before_f = _stock_at(c, cid, (date.fromisoformat(f) - timedelta(days=1)).isoformat())
         at_t = _stock_at(c, cid, t) if t < date.today().isoformat() else {}
     row = _apply_tally_stock(_stock_row(dict(info), m, t, date.today().isoformat()), before_f, at_t)
+    co = next((x for x in companies() if x["id"] == cid), None)
+    row["min"] = stock_mins(co["name"]).get(name) if co else None
     return {"item": dict(info), "period": row, "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
 
 
@@ -784,6 +837,33 @@ def _bills_from_vouchers(c, party, sign):
     return [b for b in bills.values() if b["amount"] > 0.5]
 
 
+INTEREST_FILE = os.path.join(os.path.dirname(DB_PATH), "interest.json")
+INTEREST_DEFAULT = {"on": False, "rate": 18.0, "grace": 0}
+
+
+def interest_settings():
+    try:
+        with open(INTEREST_FILE) as f:
+            return {**INTEREST_DEFAULT, **json.load(f)}
+    except (OSError, ValueError):
+        return dict(INTEREST_DEFAULT)
+
+
+def set_interest(on=None, rate=None, grace=None):
+    d = interest_settings()
+    if on is not None:
+        d["on"] = bool(on)
+    if rate is not None:
+        d["rate"] = max(0.0, min(60.0, float(rate)))
+    if grace is not None:
+        d["grace"] = max(0, min(365, int(grace)))
+    tmp = INTEREST_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, INTEREST_FILE)
+    return d
+
+
 def _party_bills(c, cid, kind, source):
     grp_name, sign = ("Sundry Debtors", 1) if kind == "receivable" else ("Sundry Creditors", -1)
     parties = _rows(c, """SELECT l.name, l.closing * ? amount, l.mobile, l.phone,
@@ -814,6 +894,14 @@ def _party_bills(c, cid, kind, source):
             b["vid"] = links.get((p["name"], b["ref"]))
             b["amount"] = round(b["amount"], 2)
         bills.sort(key=lambda b: (b["date"] is None, b["date"] or ""))
+        ist = interest_settings()
+        for b in bills:
+            # simple interest from the due date (or the bill date when the bill has no credit period), after grace days
+            late = b["overdue"] if b["due"] else b["age"]
+            days = (late or 0) - ist["grace"]
+            b["interest_days"] = days if ist["on"] and b["amount"] > 0 and days > 0 else 0
+            b["interest"] = round(b["amount"] * ist["rate"] / 100 * b["interest_days"] / 365, 2) if b["interest_days"] else 0.0
+        p["interest"] = round(sum(b["interest"] for b in bills), 2)
         p["bills"] = bills
         ages = [b["age"] for b in bills if b["age"] is not None and b["amount"] > 0]
         p["oldest_days"] = max(ages) if ages else None
@@ -830,7 +918,9 @@ def outstanding(cid, kind):
         for b in p["bills"]:
             buckets[b["bucket"]] += b["amount"]
     parties.sort(key=lambda p: -p["amount"])
+    ist = interest_settings()
     return {"kind": kind, "source": source, "total": round(sum(p["amount"] for p in parties), 2),
+            "interest": round(sum(p["interest"] for p in parties), 2), "interest_rate": ist["rate"] if ist["on"] else 0,
             "overdue": round(sum(p["overdue_amount"] for p in parties), 2),
             "buckets": [{"label": k, "amount": round(v, 2)} for k, v in buckets.items() if abs(v) > 0.005],
             "parties": parties}
@@ -1412,6 +1502,7 @@ def collections(cid, days=7):
         od.sort(key=lambda b: -b["late"])
         due_soon.sort(key=lambda b: b["in_days"])
         out.append({"name": p["name"], "mobile": p["mobile"], "phone": p["phone"], "balance": p["amount"],
+                    "interest": p.get("interest", 0),
                     "overdue": round(sum(b["amount"] for b in od), 2), "due_soon": round(sum(b["amount"] for b in due_soon), 2),
                     "late": od[0]["late"] if od else 0, "overdue_bills": od, "soon_bills": due_soon,
                     "note": n.get("note", "") if n else "", "promise": n.get("promise", "") if n else "",

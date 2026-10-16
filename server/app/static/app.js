@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.8.1";
+const APP_VERSION = "2.9";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -174,7 +174,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", gstr2b: "reports", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
   document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
@@ -312,7 +312,7 @@ async function sharePdf(url, name) {
 
 function billRows(bills, rec = true) {
   return bills.map((b) => {
-    const od = b.overdue > 0 ? `<span class="od">${b.overdue} days overdue</span>` :
+    const od = b.overdue > 0 ? `<span class="od">${b.overdue} days overdue${b.interest > 0.5 ? `, interest ${rupees(b.interest, false)}` : ""}</span>` :
       b.age !== null && b.age !== undefined ? `${b.age} days old` : "";
     const inner = `<div><div class="ref">${h(b.ref)}</div><div class="meta">${b.date ? fdate(b.date) : "No bill date"}${b.due ? `, due ${fdate(b.due)}` : ""}</div></div>
       <div class="end">${money(b.amount, b.amount < 0 ? "cr" : "")}<div class="meta">${od}</div></div>${b.vid ? '<span class="chev"></span>' : ""}`;
@@ -334,7 +334,7 @@ async function vLedger(name) {
   const co = S.companies.find((c) => c.id === S.cid)?.name || "";
   const isDebtor = d.closing > 0.5 && d.bill_kind === "receivable";
   const overdue = (d.bills || []).filter((b) => b.overdue > 0 && b.amount > 0);
-  const waText = isDebtor ? reminderText(L.name, co, d.closing, overdue) : `Dear ${L.name}, greetings from ${co}.`;
+  const waText = isDebtor ? reminderText(L.name, co, d.closing, overdue, d.interest, d.interest_rate) : `Dear ${L.name}, greetings from ${co}.`;
   const pdfUrl = cpath("ledger_pdf", { name, ...ledgerParams() });
   const pending = (d.bills || []).filter((b) => Math.abs(b.amount) > 0.5);
   view.innerHTML = `
@@ -366,7 +366,7 @@ async function vLedger(name) {
         </a>`).join("") || '<div class="empty">No entries in this period.</div>'}
       <div class="closing"><span>Closing balance</span>${drcr(d.closing)}</div>
     </section>
-    ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}</span></div>${billRows(pending.slice(0, 5))}
+    ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}${d.interest > 0.5 ? `, interest ${rupees(d.interest, false)}` : ""}</span></div>${billRows(pending.slice(0, 5))}
       ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}`;
   wirePeriod(d.from, d.to, "ledger");
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`);
@@ -377,13 +377,14 @@ async function vLedger(name) {
   if (sb) sb.onclick = () => { $("#morebills").hidden = false; sb.remove(); };
 }
 
-function reminderText(name, co, total, overdue) {
+function reminderText(name, co, total, overdue, interest = 0, rate = 0) {
   let t = `Dear ${name}, your balance with ${co} is ${rupees(total)}.`;
   if (overdue && overdue.length) {
     const top = overdue.slice().sort((a, b) => b.overdue - a.overdue).slice(0, 5);
     t += ` Overdue bills: ` + top.map((b) => `${b.ref} dated ${fdate(b.date)} for ${rupees(b.amount)} (${b.overdue} days overdue)`).join("; ") +
       (overdue.length > 5 ? ` and ${overdue.length - 5} more` : "") + ".";
   }
+  if (interest > 0.5 && rate) t += ` Interest at ${rate}% p.a. on the overdue bills comes to ${rupees(interest)} up to today.`;
   return t + " Kindly arrange the payment. Thank you.";
 }
 
@@ -434,11 +435,11 @@ async function vDues(kind) {
         const od = p.bills.filter((b) => b.overdue > 0 && b.amount > 0);
         return `<div class="party">
           <button class="row" aria-expanded="false" data-p="${i}"><div class="main"><div class="name">${h(p.name)}</div>
-            <div class="meta">${p.overdue_amount > 0.5 ? `<span class="od">${rupees(p.overdue_amount, false)} overdue</span>, ` : ""}${p.oldest_days !== null ? `oldest bill ${p.oldest_days} days` : "no bill dates"}</div></div>
+            <div class="meta">${p.overdue_amount > 0.5 ? `<span class="od">${rupees(p.overdue_amount, false)} overdue</span>, ` : ""}${p.oldest_days !== null ? `oldest bill ${p.oldest_days} days` : "no bill dates"}${p.interest > 0.5 ? `, interest ${rupees(p.interest, false)}` : ""}</div></div>
             <div class="end">${money(p.amount)}</div><span class="chev down"></span></button>
           <div class="bills" id="pb${i}" hidden>${billRows(p.bills)}
             <div class="actions" style="padding-top:10px"><a class="btn" href="#/ledger/${enc(p.name)}">Open ledger</a>
-            ${rec && ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.amount, od))}" target="_blank" rel="noopener">${ICON.wa}Remind</a>` : ""}</div></div>
+            ${rec && ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.amount, od, p.interest, d.interest_rate))}" target="_blank" rel="noopener">${ICON.wa}Remind</a>` : ""}</div></div>
         </div>`;
       }).join("") || `<div class="empty">${rec ? "Nobody owes you money right now." : "You don't owe anyone right now."}</div>`}
     </section>
@@ -460,20 +461,24 @@ async function vStock(q = "") {
   }
   $("#speriod").innerHTML = periodBar(d.from, d.to);
   wirePeriod(d.from, d.to);
+  const flagged = d.items.filter((i) => i.flag);
+  const shown = S.sflag ? flagged : d.items;
   $("#slist").innerHTML = `<section class="page"><div class="hero">
       <div><div class="label">Opening, ${fdate(d.from)}</div><div class="big" style="font-size:24px">${d.open_exact ? "" : "≈ "}${short(d.open_total)}</div></div>
       <div><div class="label">Closing, ${fdate(d.to < iso(new Date()) ? d.to : iso(new Date()))}</div><div class="big">${d.close_exact ? "" : "≈ "}${short(d.total)}</div></div>
-      <div class="label" style="grid-column:1/-1">${d.items.length} items</div></div></section>
+      <div class="label" style="grid-column:1/-1">${d.items.length} items${flagged.length ? `, <button class="linkbtn od" id="sflag">${S.sflag ? "show all" : `${flagged.length} need attention`}</button>` : ""}</div></div></section>
     <section class="page">
       <div class="stock-head"><span>Item</span><span>Opening</span><span>In / Out</span><span>Closing</span></div>
-      ${d.items.map((i) => `<a class="row stock-row" href="#/item/${enc(i.name)}">
-        <div class="main"><div class="name">${h(i.name)}</div><div class="meta">${i.rate ? `₹${nf2.format(i.rate)} / ${h(i.unit)}` : ""}</div></div>
+      ${shown.map((i) => `<a class="row stock-row" href="#/item/${enc(i.name)}">
+        <div class="main"><div class="name">${h(i.name)}${i.flag ? ` <span class="badge ${i.flag}">${i.flag === "negative" ? "negative" : "below minimum"}</span>` : ""}</div><div class="meta">${i.rate ? `₹${nf2.format(i.rate)} / ${h(i.unit)}` : ""}</div></div>
         <div class="sc"><span class="lbl">Opening</span><b>${qty(i.open_qty, i.unit)}</b><span class="meta">${i.open_exact ? "" : "≈ "}${money(i.open_value)}</span></div>
         <div class="sc"><span class="lbl">In / Out</span><b class="up">+${nfq.format(i.in_qty)}</b><b class="down">−${nfq.format(i.out_qty)}</b></div>
         <div class="sc"><span class="lbl">Closing</span><b>${qty(i.close_qty, i.unit)}</b><span class="meta">${i.close_exact ? "" : "≈ "}${money(i.close_value)}</span></div></a>`).join("")
       || '<div class="empty">No stock item matches that name.</div>'}</section>
     <div class="actions" style="padding:0 0 4px">${excelBtn("stock", periodParams())}</div>
-    <p class="note" style="border:0">Opening and closing are Tally's own figures for whole months, quarters and years, across all godowns. For other dates Bahi works them out from the nearest month-end and marks them ≈.</p>`;
+    <p class="note" style="border:0">Set a minimum on an item's page to be told on Telegram when it runs low. Negative stock (all godowns together) is flagged too.</p>
+    <p class="note" style="border:0;margin-top:0">Opening and closing are Tally's own figures for whole months, quarters and years, across all godowns. For other dates Bahi works them out from the nearest month-end and marks them ≈.</p>`;
+  const sf = $("#sflag"); if (sf) sf.onclick = (e) => { e.preventDefault(); S.sflag = !S.sflag; vStock(S.sq || "").catch(fail); };
 }
 
 async function vItem(name) {
@@ -490,6 +495,9 @@ async function vItem(name) {
       <div><div class="label">Came in</div><span class="amt">${qty(d.inward, I.unit)}</span></div>
       <div><div class="label">Went out</div><span class="amt">${qty(d.outward, I.unit)}</span></div>
     </div></section>
+    ${can("stock") ? `<section class="page"><form class="form" id="minf" style="padding-top:12px">
+      <label>Alert me on Telegram when stock falls below<span style="display:flex;gap:8px;align-items:center"><input type="number" name="min" min="0" step="any" value="${d.period.min ?? ""}" placeholder="no minimum" style="flex:1"> ${h(I.unit || "")}</span></label>
+      <button class="btn" type="submit">Save minimum</button></form></section>` : ""}
     <section class="page"><div class="block-title">Movements</div>
       ${d.moves.map((m) => `<a class="row" href="#/voucher/${m.id}"><div class="main"><div class="name">${h(m.party || m.vtype)}</div>
         <div class="meta">${fdate(m.date)}, ${h(m.vtype)} ${h(m.number)}${m.rate ? `, ₹${nf2.format(m.rate)}` : ""}</div></div>
@@ -498,6 +506,12 @@ async function vItem(name) {
         || '<div class="empty">No movement in this period.</div>'}
     </section>`;
   wirePeriod(d.from, d.to);
+  const mf = $("#minf");
+  if (mf) mf.onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await fetch(cpath("stockmin"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item: name, min: mf.min.value }) });
+    toast(r.ok ? (mf.min.value ? `You'll get a Telegram message when ${name} falls below ${mf.min.value}.` : "Minimum removed.") : "Couldn't save.");
+  };
 }
 
 let syncPoll = null;
@@ -533,6 +547,7 @@ function vReports() {
     ["#/cashbook", "Cash and bank book", "Money in and out each day, with opening and closing balances", can("accounts")],
     ["#/collect", "Follow-up list", "Who should pay you: overdue, due this week, promises", can("dues")],
     ["#/gst", "GST summary", "Output tax, input credit and net payable by month", can("accounts")],
+    ["#/gstr2b", "GSTR-2B check", "Supplier invoices on the GST portal against your purchases", can("accounts")],
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
@@ -578,7 +593,8 @@ async function vGST() {
   view.innerHTML = `<h1 class="title">GST summary</h1>${periodBar(d.from, d.to)}
     ${!d.total ? '<div class="empty">No GST ledgers found under Duties &amp; Taxes.</div>' :
       block("Whole period", d.total) + d.months.map((m) => block(mname(m.month), m)).join("") +
-      `<p class="note" style="border:0">Worked out from your vouchers, leaving out GST payments to the government and set-off entries. It's a quick check only. File your returns from Tally or the GST portal.<br>Counted: ${d.ledgers.map((l) => `${h(l.name)} (${l.side})`).join(", ")}.</p>`}`;
+      `<p class="note" style="border:0">Worked out from your vouchers, leaving out GST payments to the government and set-off entries. It's a quick check only. File your returns from Tally or the GST portal.<br>Counted: ${d.ledgers.map((l) => `${h(l.name)} (${l.side})`).join(", ")}.</p>`}
+    <section class="page"><a class="row" href="#/gstr2b"><div class="main"><div class="name">Check GSTR-2B</div><div class="meta">Upload the GSTR-2B file from the GST portal to see which supplier bills match your books</div></div><span class="chev"></span></a></section>`;
   wirePeriod(d.from, d.to);
 }
 
@@ -693,6 +709,13 @@ async function vVoucher(id) {
     ${d.bills.length ? `<section class="page"><div class="block-title">Bill references</div>
       ${d.bills.map((b) => { const inner = `<div class="main"><div class="name">${h(b.name || b.btype)}</div><div class="meta">${h(b.btype)}${b.days ? `, ${b.days} days credit` : ""}${b.vid ? ", tap to open the bill" : ""}</div></div><div class="end">${drcr(b.amount)}</div>${b.vid ? '<span class="chev"></span>' : ""}`;
         return b.vid ? `<a class="row" href="#/voucher/${b.vid}">${inner}</a>` : `<div class="row" style="cursor:default">${inner}</div>`; }).join("")}</section>` : ""}
+    ${(() => { const E = V.extra || {};
+      const rows = [["IRN", E.irn], ["Ack No.", E.ack_no], ["Ack Date", E.ack_date && fdate(E.ack_date)], ["e-Way Bill No.", E.ewb_no],
+        ["e-Way Bill date", E.ewb_date && fdate(E.ewb_date)], ["Valid up to", E.ewb_valid], ["Vehicle", E.ewb_vehicle],
+        ["Mode", E.ewb_mode], ["Distance", E.ewb_distance && E.ewb_distance + " km"], ["Transporter", E.ewb_transporter]].filter((r) => r[1]);
+      return rows.length ? `<section class="page"><div class="block-title">${E.irn ? "e-Invoice" : ""}${E.irn && E.ewb_no ? " and " : ""}${E.ewb_no ? "e-Way Bill" : ""}</div>
+        <div class="info">${rows.map(([k, v]) => `<div><span style="color:var(--ink-3)">${k}:</span> <b style="overflow-wrap:anywhere">${h(v)}</b></div>`).join("")}
+        <div style="color:var(--ink-3)">${E.ewb_no ? "The PDF has the e-Way Bill as page 2." : ""}${E.qr ? " The PDF prints the signed QR code." : ""}</div></div></section>` : ""; })()}
     ${V.narration ? `<section class="page"><div class="block-title">Narration</div><div class="info" style="white-space:pre-line">${h(V.narration)}</div></section>` : ""}
     ${!V.balanced ? '<p class="note warn">This voucher\'s debits and credits did not match when it was synced.</p>' : ""}`;
   $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`);
@@ -887,6 +910,7 @@ async function vSettings() {
       ${tg.configured ? `<form class="form" id="tgf">
         <label><span><input type="checkbox" id="tgdaily" ${tg.daily ? "checked" : ""}> Daily summary at</span><input type="time" id="tgtime" value="${h(tg.time || "09:00")}"></label>
         <label><span><input type="checkbox" id="tgalerts" ${tg.alerts ? "checked" : ""}> Alert me when a payment of at least</span><input type="number" id="tgmin" min="0" step="1000" value="${tg.alert_min}"></label>
+        <label><span><input type="checkbox" id="tgstock" ${tg.stock_alerts !== false ? "checked" : ""}> Alert me when stock falls below its minimum or goes negative</span></label>
         <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="tgtest">Send summary now</button><button class="btn danger" type="button" id="tgoff">Turn off</button></div>
         <div class="msg" id="tgmsg" role="status"></div></form>` : `<div class="info" style="padding-top:2px">
         <div>Get yesterday's sales, collections, cash and bank and overdue dues every morning, and a message when a big payment comes in.</div></div>
@@ -898,6 +922,7 @@ async function vSettings() {
         <form class="form" id="tgc"><label>Bot token<input type="text" id="tgtoken" autocomplete="off" placeholder="123456789:AA..." required></label>
         <button class="btn primary" type="submit">Connect</button><div class="msg" id="tgmsg" role="status"></div></form>`}
     </section>
+    <section class="page" id="intsec"></section>
     <section class="page" id="stsec"></section>
     <section class="page" id="bksec"></section>
     <section class="page"><div class="block-title">Change app password</div>
@@ -936,7 +961,7 @@ async function vSettings() {
   if ($("#tgf")) {
     $("#tgf").onsubmit = async (e) => {
       e.preventDefault();
-      try { await post("/api/telegram", { daily: $("#tgdaily").checked, time: $("#tgtime").value, alerts: $("#tgalerts").checked, alert_min: $("#tgmin").value });
+      try { await post("/api/telegram", { daily: $("#tgdaily").checked, time: $("#tgtime").value, alerts: $("#tgalerts").checked, alert_min: $("#tgmin").value, stock_alerts: $("#tgstock").checked });
         $("#tgmsg").textContent = "Saved."; } catch (err) { $("#tgmsg").textContent = err.message; }
     };
     $("#tgtest").onclick = async () => { $("#tgmsg").textContent = "Sending";
@@ -957,6 +982,21 @@ async function vSettings() {
   };
   showBackups();
   showStaff().catch(() => {});
+  (async () => {
+    const it = await api("/api/interest").catch(() => null);
+    if (!it || !$("#intsec")) return;
+    $("#intsec").innerHTML = `<div class="block-title">Interest on overdue bills <span>${it.on ? `${it.rate}% p.a.` : "off"}</span></div>
+      <form class="form" id="intf">
+        <label><span><input type="checkbox" name="on" ${it.on ? "checked" : ""}> Work out interest on overdue customer bills</span></label>
+        <label>Rate, % a year<input type="number" name="rate" min="0" max="60" step="0.5" value="${it.rate}"></label>
+        <label>Grace days after the due date<input type="number" name="grace" min="0" max="365" step="1" value="${it.grace}"></label>
+        <button class="btn primary" type="submit">Save</button>
+        <p class="hint">Simple interest from each bill's due date (or its bill date when it has no credit period). It shows on Dues, ledgers and the follow-up list, goes into WhatsApp reminders, and the ledger PDF gets an interest table at the end. Nothing is posted in Tally.</p></form>`;
+    $("#intf").onsubmit = async (e) => {
+      e.preventDefault(); const f = e.target;
+      try { await post("/api/interest", { on: f.on.checked, rate: f.rate.value, grace: f.grace.value }); toast("Saved."); vSettings().catch(fail); } catch (err) { toast(err.message); }
+    };
+  })();
   $("#pwf").onsubmit = async (e) => {
     e.preventDefault();
     const msg = $("#pwmsg");
@@ -1218,6 +1258,77 @@ async function vNewEntry(kind) {
   };
 }
 
+/* ---------------------------------------------------------------- GSTR-2B check */
+const G2 = [["missing", "Not in Tally"], ["differ", "Amount differs"], ["not_in_2b", "Not in GSTR-2B"], ["matched", "Matched"]];
+const mmyy = (p) => `${MON[+p.slice(0, 2) - 1]} ${p.slice(2)}`;
+async function vGSTR2B(period) {
+  setTitle(true);
+  if (!period) {
+    const L = await api(cpath("gstr2b"));
+    view.innerHTML = `<h1 class="title">GSTR-2B check</h1>
+      <section class="page"><div class="info">
+        <div>Compares the supplier invoices on the GST portal with the purchases booked in Tally, by supplier GSTIN and invoice number.</div>
+        <div><b>1.</b> On the GST portal: <b>Returns → GSTR-2B</b>, pick the month, <b>Download JSON</b> (or Excel).</div>
+        <div><b>2.</b> Choose that file here.</div></div>
+        <form class="form" id="g2f"><input type="file" id="g2file" accept=".json,.zip,.xlsx" required>
+          <button class="btn primary" type="submit">Check</button><div class="msg" id="g2msg" role="status"></div></form></section>
+      ${L.checks.length ? `<section class="page"><div class="block-title">Earlier checks</div>${L.checks.map((c) => `<a class="row" href="#/gstr2b/${c.period}"><div class="main"><div class="name">${mmyy(c.period)}</div><div class="meta">${c.docs} supplier documents, uploaded ${h((c.uploaded || "").replace("T", " "))}</div></div><span class="chev"></span></a>`).join("")}</section>` : ""}
+      <p class="note" style="border:0">Earlier checks are worked out again each time you open them, so bills you book in Tally later show up as matched.</p>`;
+    $("#g2f").onsubmit = async (e) => {
+      e.preventDefault();
+      const file = $("#g2file").files[0]; if (!file) return;
+      $("#g2msg").textContent = "Reading the file";
+      let r = await fetch(cpath("gstr2b"), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
+      let j = await r.json().catch(() => ({}));
+      if (!r.ok && j.need_period) {
+        const p = prompt("Which month is this for? Type it as MMYYYY, e.g. 092026");
+        if (!p) { $("#g2msg").textContent = ""; return; }
+        r = await fetch(cpath("gstr2b", { period: p.trim() }), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
+        j = await r.json().catch(() => ({}));
+      }
+      if (!r.ok) { $("#g2msg").textContent = j.error || "Couldn't read that file."; return; }
+      location.hash = `#/gstr2b/${j.period}`;
+    };
+    return;
+  }
+  const d = await api(cpath("gstr2b", { period }));
+  S.g2tab = S.g2tab || "missing";
+  const T = d.totals;
+  const tabs = `<div class="toolbar" role="tablist">${G2.map(([k, l]) => `<button class="chip ${k === S.g2tab ? "on" : ""}" data-g2="${k}">${l} <span class="cnt">${d[k].length}</span></button>`).join("")}</div>`;
+  const taxes = (x, p = "") => ["igst", "cgst", "sgst", "cess"].filter((k) => x[p + k]).map((k) => `${k.toUpperCase()} ${nf2.format(x[p + k])}`).join(", ") || "no tax";
+  const rows = {
+    missing: (x) => `<div class="row" style="cursor:default"><div class="main"><div class="name">${h(x.name || x.ctin)}</div>
+      <div class="meta">${x.kind === "note" ? (x.note_type === "D" ? "Debit note" : "Credit note") : "Invoice"} ${h(x.num)}, ${fdate(x.date)}, ${h(x.ctin)}</div>
+      <div class="meta">Taxable ${nf2.format(x.taxable)}; ${taxes(x)}${x.itc && x.itc !== "Y" && x.itc !== "Yes" ? `; ITC: ${h(x.itc)}` : ""}</div></div><div class="end">${money(x.tax)}<div class="meta">tax</div></div></div>`,
+    differ: (x) => `<a class="row" href="#/voucher/${x.vid}"><div class="main"><div class="name">${h(x.party || x.name)}</div>
+      <div class="meta">${h(x.num)}, ${fdate(x.date)}; Tally ${h(x.b_vtype)} ${h(x.b_number)}, ${fdate(x.b_date)}</div>
+      <div class="meta">Portal: taxable ${nf2.format(x.taxable)}, ${taxes(x)}</div><div class="meta">Tally: taxable ${nf2.format(x.b_taxable)}, ${taxes(x, "b_")}</div>
+      <div class="meta od">Differs in ${x.diffs.map((k) => k === "taxable" ? "taxable value" : k.toUpperCase()).join(", ")}</div></div>
+      <div class="end">${money(x.tax - x.b_tax)}<div class="meta">difference</div></div><span class="chev"></span></a>`,
+    not_in_2b: (x) => `<a class="row" href="#/voucher/${x.id}"><div class="main"><div class="name">${h(x.party)}</div>
+      <div class="meta">${h(x.vtype)} ${h(x.number)}${x.reference ? `, supplier invoice ${h(x.reference)}` : ""}, ${fdate(x.date)}, ${h(x.gstin)}</div></div>
+      <div class="end">${money(x.tax)}<div class="meta">tax</div></div><span class="chev"></span></a>`,
+    matched: (x) => `<a class="row" href="#/voucher/${x.vid}"><div class="main"><div class="name">${h(x.party || x.name)}</div>
+      <div class="meta">${h(x.num)}, ${fdate(x.date)}; Tally ${h(x.b_number)}${x.b_date.slice(0, 7) !== x.date.slice(0, 7) ? ` <span class="od">booked ${fdate(x.b_date)}</span>` : ""}</div></div>
+      <div class="end">${money(x.tax)}<div class="meta">tax</div></div><span class="chev"></span></a>`,
+  };
+  const help = { missing: "On the portal but not booked in Tally (or booked under another invoice number or GSTIN). Book them to claim the credit.",
+    differ: "Found in both, but the taxable value or tax differs by more than ₹1.",
+    not_in_2b: "Purchases booked in Tally for this month, with GST, that the supplier hasn't reported. Credit on these is at risk until the supplier files.",
+    matched: "Same supplier, invoice number and amounts in both." };
+  view.innerHTML = `<div class="crumbs"><a href="#/gstr2b">GSTR-2B check</a></div><h1 class="title">GSTR-2B for ${mmyy(d.period)}</h1>
+    <section class="page"><div class="hero"><div><div class="label">Input credit on the portal</div><div class="big">${short(T.itc_2b)}</div></div>
+      <div><div class="label">Matched with Tally</div><div class="big" style="font-size:22px">${short(T.matched)}</div></div></div>
+      <div class="tiles"><div class="tile"><div class="label">Not in Tally</div><div class="val">${short(T.missing)}</div></div>
+        <div class="tile"><div class="label">Differs</div><div class="val">${short(T.differ_2b - T.differ_books)}</div></div>
+        <div class="tile"><div class="label">At risk</div><div class="val od">${short(T.at_risk)}</div></div></div></section>
+    ${tabs}<p class="note" style="border:0;margin:0 4px 8px">${help[S.g2tab]}</p>
+    <section class="page">${d[S.g2tab].map(rows[S.g2tab]).join("") || '<div class="empty">Nothing here.</div>'}</section>
+    <div class="actions" style="padding:0 0 12px">${excelBtn("gstr2b", { period })}</div>
+    <p class="note" style="border:0">Matching uses the supplier's GSTIN and the supplier invoice number (Supplier Invoice No. in Tally, or the voucher number). Uploaded ${h((d.uploaded || "").replace("T", " "))}.</p>`;
+  view.querySelectorAll("[data-g2]").forEach((b) => b.onclick = () => { S.g2tab = b.dataset.g2; vGSTR2B(period).catch(fail); });
+}
+
 function fyStart(day) {
   const d = new Date((day || iso(new Date())) + "T00:00:00");
   const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
@@ -1319,6 +1430,7 @@ async function vCollect() {
   setTitle(true);
   S.cf = S.cf || "all";
   const d = await api(cpath("collections"));
+  try { const it = await api("/api/interest"); S.irate = it.on ? it.rate : 0; } catch (e) { S.irate = 0; }
   const co = S.companies.find((c) => c.id === S.cid)?.name || "";
   const F = { all: ["Everyone", () => true], overdue: ["Overdue", (p) => p.overdue > 0.5], week: ["Due this week", (p) => p.due_soon > 0.5],
     promised: ["Promised", (p) => p.promise] };
@@ -1339,12 +1451,12 @@ async function vCollect() {
       const status = p.promise_missed ? `<span class="od">promised ${fdate(p.promise)}, not paid</span>` :
         p.promise ? `promised ${fdate(p.promise)}` : "";
       return `<div class="party"><button class="row" aria-expanded="false" data-c="${i}"><div class="main"><div class="name">${h(p.name)}</div>
-          <div class="meta">${p.overdue > 0.5 ? `<span class="od">${rupees(p.overdue, false)} overdue</span>, up to ${p.late} days late` : `${rupees(p.due_soon, false)} due this week`}${status ? `, ${status}` : ""}</div>
+          <div class="meta">${p.overdue > 0.5 ? `<span class="od">${rupees(p.overdue, false)} overdue</span>, up to ${p.late} days late` : `${rupees(p.due_soon, false)} due this week`}${p.interest > 0.5 ? `, interest ${rupees(p.interest, false)}` : ""}${status ? `, ${status}` : ""}</div>
           ${p.note ? `<div class="meta notep">${h(p.note)}</div>` : ""}</div>
           <div class="end">${money(p.balance)}<div class="meta">balance</div></div><span class="chev down"></span></button>
         <div class="bills" id="cb${i}" hidden>
           <div class="actions" style="padding:12px 14px 4px">
-              ${ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
+              ${ph ? `<a class="btn wa" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od, p.interest, S.irate || 0))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
               <a class="btn" href="#/ledger/${enc(p.name)}">Ledger</a></div>
           <form class="form fu" data-party="${h(p.name)}" style="padding:8px 14px 14px">
             <div class="block-title" style="padding:0">Note and promised date</div>
@@ -1431,6 +1543,7 @@ async function route() {
       case "cashbook": await vCashbook(); break;
       case "collect": await vCollect(); break;
       case "entries": await vEntries(); break;
+      case "gstr2b": await vGSTR2B(parts[1]); break;
       case "new": await vNewEntry(parts[1]); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;

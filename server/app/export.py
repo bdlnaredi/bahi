@@ -57,6 +57,24 @@ def build(cid, what, q):
                              p["mobile"] or p["phone"] or ""])
         return f"{kind} bills", _csv(f"{co} - {'to receive' if kind == 'receivable' else 'to pay'}",
                                      ["Party", "Bill", "Bill date", "Due date", "Amount", "Days old", "Days overdue", "Phone"], rows)
+    if what == "gstr2b":
+        import gstr2b
+        co_name = next((x["name"] for x in store.companies() if x["id"] == cid), "")
+        saved = gstr2b.load(co_name, q.get("period", ""))
+        if not saved:
+            return None
+        r = gstr2b.check(cid, saved["period"], saved["docs"])
+        rows = []
+        for label, key in (("Not in Tally", "missing"), ("Amount differs", "differ"), ("Matched", "matched")):
+            for x in r[key]:
+                rows.append([label, x["ctin"], x["name"], x["num"], x["date"], x["taxable"], x["tax"],
+                             x.get("b_number", ""), x.get("b_date", ""), x.get("b_taxable", ""), x.get("b_tax", ""), ", ".join(x.get("diffs", []))])
+        for x in r["not_in_2b"]:
+            rows.append(["Not in GSTR-2B", x["gstin"], x["party"], x["reference"] or x["number"], x["date"], "", "",
+                         x["number"], x["date"], x["taxable"], x["tax"], ""])
+        return f"GSTR-2B check {saved['period']}", _csv(f"{co} - GSTR-2B check for {saved['period'][:2]}/{saved['period'][2:]}",
+                    ["Result", "Supplier GSTIN", "Supplier", "Invoice no. (2B)", "Date (2B)", "Taxable (2B)", "Tax (2B)",
+                     "Voucher no. (Tally)", "Date (Tally)", "Taxable (Tally)", "Tax (Tally)", "Differs in"], rows)
     if what == "stock":
         d = store.stock(cid, "", f, t)
         return "stock", _csv(f"{co} - stock summary {d['from']} to {d['to']}",

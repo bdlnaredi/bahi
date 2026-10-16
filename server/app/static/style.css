@@ -409,3 +409,6 @@ a.bill:active { background: var(--rule); }
   .tside + .tside { border-top: 0; border-left: 1px solid var(--ink-3); }
   .tblock + .tblock .thead { display: none; }
 }
+
+.badge.negative, .badge.low { background: color-mix(in srgb, var(--cr) 14%, transparent); color: var(--cr); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
