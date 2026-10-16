@@ -116,12 +116,13 @@ Bills come from Tally's own *Bills Receivable / Bills Payable* when available. O
 
 ## Stock
 
-<table><tr>
-<td><img src="images/stock.png" width="260" alt="Stock summary"></td>
-<td><img src="images/stock-item.png" width="260" alt="Stock item"></td>
-</tr></table>
+Pick a period at the top. For each item you see:
 
-The list shows every item's quantity, rate and value, with the total closing stock value at the top. Tap an item to see what came in and went out in the period, with each voucher. Tap a movement to open its voucher.
+- **Opening:** the quantity at the start of the period, and its value.
+- **In / Out:** what came in (green) and went out (red) during the period.
+- **Closing:** the quantity at the end of the period, and its value.
+
+Quantities match Tally. Values marked ≈ are worked out at the item's average rate, so they can differ a little from Tally's Stock Summary. When the period runs to today, the closing value is Tally's own figure. **Excel** downloads the same table. Tap an item to see each voucher that moved it.
 
 ## Reports
 

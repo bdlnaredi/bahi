@@ -358,3 +358,18 @@ a.bill:active { background: var(--rule); }
   .login { min-height: 80vh; }
   body:has(.login) { padding-left: 0; }
 }
+
+/* stock summary: item, opening, in/out, closing */
+.stock-head { display: none; }
+.stock-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px 10px; align-items: start; }
+.stock-row .main { grid-column: 1 / -1; }
+.stock-row .sc { display: grid; gap: 1px; font-size: 14px; min-width: 0; }
+.stock-row .sc .lbl { font-size: 11.5px; color: var(--ink-3); font-weight: 600; }
+.stock-row .sc .meta { font-size: 12.5px; color: var(--ink-2); }
+.stock-row .sc .amt { font-weight: 500; }
+@media (min-width: 1000px) and (pointer: fine), (min-width: 1100px) {
+  .stock-head { display: grid; grid-template-columns: minmax(0, 2fr) 1fr 1fr 1fr; gap: 10px; padding: 10px 14px; font-size: 12.5px; font-weight: 700; color: var(--ink-3); border-bottom: 1px solid var(--rule); }
+  .stock-row { grid-template-columns: minmax(0, 2fr) 1fr 1fr 1fr; }
+  .stock-row .main { grid-column: auto; }
+  .stock-row .sc .lbl { display: none; }
+}

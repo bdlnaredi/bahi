@@ -58,10 +58,12 @@ def build(cid, what, q):
         return f"{kind} bills", _csv(f"{co} - {'to receive' if kind == 'receivable' else 'to pay'}",
                                      ["Party", "Bill", "Bill date", "Due date", "Amount", "Days old", "Days overdue", "Phone"], rows)
     if what == "stock":
-        d = store.stock(cid)
-        return "stock", _csv(f"{co} - stock summary", ["Item", "Group", "Quantity", "Unit", "Rate", "Value"],
-                             [[i["name"], i["parent"], i["closing_qty"], i["unit"], i["closing_rate"], i["closing_value"]]
-                              for i in d["items"]])
+        d = store.stock(cid, "", f, t)
+        return "stock", _csv(f"{co} - stock summary {d['from']} to {d['to']}",
+                             ["Item", "Group", "Unit", "Opening qty", "Opening value (approx.)", "Inward qty", "Outward qty",
+                              "Closing qty", "Rate", "Closing value"],
+                             [[i["name"], i["parent"], i["unit"], i["open_qty"], i["open_value"], i["in_qty"], i["out_qty"],
+                               i["close_qty"], i["rate"], i["close_value"]] for i in d["items"]])
     if what == "daily":
         kind = q.get("kind", "sales")
         d = store.daily(cid, kind, f, t)

@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.6.1";
+const APP_VERSION = "2.6.2";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -442,15 +442,28 @@ async function vDues(kind) {
 
 async function vStock(q = "") {
   setTitle(false);
-  const d = await api(cpath("stock", { q }));
+  S.sq = q;
+  const d = await api(cpath("stock", { q, ...periodParams() }));
   if (!$("#ssearch")) {
-    view.innerHTML = `<input class="search" id="ssearch" type="search" placeholder="Search items" aria-label="Search stock items" value="${h(q)}"><div id="slist"></div>`;
+    view.innerHTML = `<div id="speriod"></div><input class="search" id="ssearch" type="search" placeholder="Search items" aria-label="Search stock items" value="${h(q)}"><div id="slist"></div>`;
     $("#ssearch").oninput = (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => vStock(e.target.value).catch(fail), 200); };
   }
-  $("#slist").innerHTML = `<section class="page"><div class="hero" style="grid-template-columns:1fr"><div class="label">Closing stock value</div><div class="big">${rupees(d.total)}</div><div class="label">${d.items.length} items</div></div></section>
-    <section class="page">${d.items.map((i) => `<a class="row" href="#/item/${enc(i.name)}"><div class="main"><div class="name">${h(i.name)}</div>
-      <div class="meta">${qty(i.closing_qty, i.unit)}${i.closing_rate ? ` at ₹${nf2.format(i.closing_rate)}` : ""}</div></div><div class="end">${money(i.closing_value)}</div></a>`).join("")
-      || '<div class="empty">No stock item matches that name.</div>'}</section>`;
+  $("#speriod").innerHTML = periodBar(d.from, d.to);
+  wirePeriod(d.from, d.to);
+  $("#slist").innerHTML = `<section class="page"><div class="hero">
+      <div><div class="label">Opening, ${fdate(d.from)}</div><div class="big" style="font-size:24px">≈ ${short(d.open_total)}</div></div>
+      <div><div class="label">Closing, ${fdate(d.to < iso(new Date()) ? d.to : iso(new Date()))}</div><div class="big">${d.close_exact ? "" : "≈ "}${short(d.total)}</div></div>
+      <div class="label" style="grid-column:1/-1">${d.items.length} items</div></div></section>
+    <section class="page">
+      <div class="stock-head"><span>Item</span><span>Opening</span><span>In / Out</span><span>Closing</span></div>
+      ${d.items.map((i) => `<a class="row stock-row" href="#/item/${enc(i.name)}">
+        <div class="main"><div class="name">${h(i.name)}</div><div class="meta">${i.rate ? `₹${nf2.format(i.rate)} / ${h(i.unit)}` : ""}</div></div>
+        <div class="sc"><span class="lbl">Opening</span><b>${qty(i.open_qty, i.unit)}</b><span class="meta">≈ ${money(i.open_value)}</span></div>
+        <div class="sc"><span class="lbl">In / Out</span><b class="up">+${nfq.format(i.in_qty)}</b><b class="down">−${nfq.format(i.out_qty)}</b></div>
+        <div class="sc"><span class="lbl">Closing</span><b>${qty(i.close_qty, i.unit)}</b><span class="meta">${i.close_exact ? "" : "≈ "}${money(i.close_value)}</span></div></a>`).join("")
+      || '<div class="empty">No stock item matches that name.</div>'}</section>
+    <div class="actions" style="padding:0 0 4px">${excelBtn("stock", periodParams())}</div>
+    <p class="note" style="border:0">Quantities match Tally. Values marked ≈ are worked out at the item's average rate, so they can differ a little from Tally's Stock Summary. The closing value is Tally's own when the period runs to today.</p>`;
 }
 
 async function vItem(name) {
@@ -462,15 +475,15 @@ async function vItem(name) {
     <h1 class="title">${h(I.name)}</h1>
     ${periodBar(d.from, d.to)}
     <section class="page"><div class="totals">
-      <div><div class="label">In hand now</div><span class="amt">${qty(I.closing_qty, I.unit)}</span></div>
-      <div><div class="label">Value</div>${money(I.closing_value)}</div>
+      <div><div class="label">Opening, ${fdate(d.from)}</div><span class="amt">${qty(d.period.open_qty, I.unit)}</span><div class="meta">≈ ${money(d.period.open_value)}</div></div>
+      <div><div class="label">Closing${d.period.close_exact ? " (in hand now)" : `, ${fdate(d.to)}`}</div><span class="amt">${qty(d.period.close_qty, I.unit)}</span><div class="meta">${d.period.close_exact ? "" : "≈ "}${money(d.period.close_value)}</div></div>
       <div><div class="label">Came in</div><span class="amt">${qty(d.inward, I.unit)}</span></div>
       <div><div class="label">Went out</div><span class="amt">${qty(d.outward, I.unit)}</span></div>
     </div></section>
     <section class="page"><div class="block-title">Movements</div>
       ${d.moves.map((m) => `<a class="row" href="#/voucher/${m.id}"><div class="main"><div class="name">${h(m.party || m.vtype)}</div>
         <div class="meta">${fdate(m.date)}, ${h(m.vtype)} ${h(m.number)}${m.rate ? `, ₹${nf2.format(m.rate)}` : ""}</div></div>
-        <div class="end"><span class="amt ${m.qty < 0 ? "cr" : ""}">${m.qty > 0 ? "+" : "−"}${qty(Math.abs(m.qty), I.unit)}</span></div></a>`).join("")
+        <div class="end"><span class="amt ${m.qty < 0 ? "down" : "up"}">${m.qty > 0 ? "+" : "−"}${qty(Math.abs(m.qty), I.unit)}</span></div></a>`).join("")
         || '<div class="empty">No movement in this period.</div>'}
     </section>`;
   wirePeriod(d.from, d.to);

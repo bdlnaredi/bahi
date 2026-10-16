@@ -576,11 +576,46 @@ def group(cid, name=""):
                 "total": round(total, 2), "groups": out, "ledgers": leds}
 
 
-def stock(cid, q=""):
+def _stock_moves(c, cid, f, t, item=None):
+    """Per item: quantity moved after f and after t (to work back from Tally's closing), and in/out within f..t."""
+    extra, args = ("AND vi.item=?", [item]) if item else ("", [])
+    return {r["item"]: r for r in c.execute(f"""SELECT vi.item,
+            COALESCE(SUM(CASE WHEN v.date >= ? THEN vi.qty END), 0) after_f,
+            COALESCE(SUM(CASE WHEN v.date > ? THEN vi.qty END), 0) after_t,
+            COALESCE(SUM(CASE WHEN v.date BETWEEN ? AND ? AND vi.qty > 0 THEN vi.qty END), 0) in_q,
+            COALESCE(-SUM(CASE WHEN v.date BETWEEN ? AND ? AND vi.qty < 0 THEN vi.qty END), 0) out_q,
+            COALESCE(SUM(CASE WHEN v.date BETWEEN ? AND ? AND vi.qty > 0 THEN ABS(vi.amount) END), 0) in_v
+        FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id WHERE v.company_id=? {extra} GROUP BY vi.item""",
+                                         [f, t, f, t, f, t, f, t, cid] + args)}
+
+
+def _stock_row(i, m, t, today):
+    """Opening and closing quantity for the period, worked back from Tally's current closing.
+    Values: Tally's own closing value when the period runs to today, otherwise quantity x average rate."""
+    after_f = m["after_f"] if m else 0
+    after_t = m["after_t"] if m else 0
+    rate = i["closing_rate"] or (i["closing_value"] / i["closing_qty"] if i["closing_qty"] else 0) or \
+        (i["opening_value"] / i["opening_qty"] if i["opening_qty"] else 0)
+    oq = i["closing_qty"] - after_f
+    cq = i["closing_qty"] - after_t
+    exact_close = t >= today and abs(after_t) < 1e-9
+    return {**i, "rate": round(rate, 2), "open_qty": round(oq, 3), "open_value": round(oq * rate, 2),
+            "in_qty": round(m["in_q"], 3) if m else 0, "out_qty": round(m["out_q"], 3) if m else 0,
+            "in_value": round(m["in_v"], 2) if m else 0,
+            "close_qty": round(cq, 3), "close_value": round(i["closing_value"] if exact_close else cq * rate, 2),
+            "close_exact": exact_close}
+
+
+def stock(cid, q="", d_from=None, d_to=None):
     with conn() as c:
-        items = _rows(c, """SELECT name, parent, unit, closing_qty, closing_value, closing_rate FROM stock
+        f, t = period(c, cid, d_from, d_to)
+        items = _rows(c, """SELECT name, parent, unit, opening_qty, opening_value, closing_qty, closing_value, closing_rate FROM stock
             WHERE company_id=? AND name LIKE ? ORDER BY name COLLATE NOCASE""", (cid, f"%{q}%"))
-        return {"items": items, "total": sum(i["closing_value"] for i in items)}
+        moves = _stock_moves(c, cid, f, t)
+    today = date.today().isoformat()
+    rows = [_stock_row(i, moves.get(i["name"]), t, today) for i in items]
+    return {"from": f, "to": t, "items": rows, "total": round(sum(i["close_value"] for i in rows), 2),
+            "open_total": round(sum(i["open_value"] for i in rows), 2), "close_exact": all(i["close_exact"] for i in rows)}
 
 
 def stock_item(cid, name, d_from=None, d_to=None):
@@ -595,7 +630,9 @@ def stock_item(cid, name, d_from=None, d_to=None):
             GROUP BY v.id ORDER BY v.date DESC, v.id DESC""", (cid, name, f, t))
         inward = sum(r["qty"] for r in rows if r["qty"] > 0)
         outward = -sum(r["qty"] for r in rows if r["qty"] < 0)
-        return {"item": dict(info), "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
+        m = _stock_moves(c, cid, f, t, name).get(name)
+    row = _stock_row(dict(info), m, t, date.today().isoformat())
+    return {"item": dict(info), "period": row, "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
 
 
 BUCKETS = ["0-30 days", "31-60 days", "61-90 days", "Over 90 days", "No bill date"]
