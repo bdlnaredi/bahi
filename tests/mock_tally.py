@@ -456,7 +456,10 @@ class H(BaseHTTPRequestHandler):
             out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA><COLLECTION>"
             if ctype == "Voucher":
                 light = "AllLedgerEntries" not in req
+                picked = set() if os.environ.get("NO_GUID_FILTER") == "1" else set(re.findall(r'\$GUID = "([^"]+)"', req))
                 for v in VOUCHERS:
+                    if picked and v["guid"] not in picked:
+                        continue
                     if f <= v["date"] <= t:
                         if light:
                             out += (f'<VOUCHER><DATE TYPE="Date">{v["date"].strftime("%Y%m%d")}</DATE><GUID>{v["guid"]}</GUID><ALTERID> {v["alterid"]}</ALTERID>'

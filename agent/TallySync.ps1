@@ -104,6 +104,17 @@ function VchCollection-Xml([string]$company, [datetime]$from, [datetime]$to, [st
            "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
 }
 
+# Only the vouchers with these GUIDs (what was created or changed since the last sync)
+function VchGuid-Xml([string]$company, [string[]]$guids, [string]$fetch) {
+    $sv = Static-Vars $company $FromDate $ToDate
+    $cond = ($guids | ForEach-Object { "`$GUID = `"" + ($_ -replace '[^A-Za-z0-9\-]', '') + "`"" }) -join " OR "
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMVouchers</ID></HEADER>" +
+           "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES><TDL><TDLMESSAGE>" +
+           "<COLLECTION NAME=`"TMVouchers`" ISMODIFY=`"No`"><TYPE>Voucher</TYPE><FETCH>$fetch</FETCH><FILTER>TMPicked</FILTER></COLLECTION>" +
+           "<SYSTEM TYPE=`"Formulae`" NAME=`"TMPicked`">$cond</SYSTEM>" +
+           "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
+}
+
 function Parse-Xml([byte[]]$raw) {
     try {
         $text = [System.Text.Encoding]::UTF8.GetString($raw)
@@ -375,7 +386,7 @@ foreach ($co in $companies) {
         } catch { $light = $null; $expected = $null }
 
         # 2. Ask the server which months need resending
-        $full = $true; $months = @()
+        $full = $true; $months = @(); $byVch = $false; $changed = @(); $deleted = @()
         if ($light -and -not $Force) {
             try {
                 $wc = Server-Client
@@ -384,12 +395,16 @@ foreach ($co in $companies) {
                 $plan = [System.Text.Encoding]::UTF8.GetString($wc.UploadData("$Server/agent/plan?$q", "POST", (Gzip $light))) | ConvertFrom-Json
                 $full = [bool]$plan.full
                 $months = @($plan.months)
+                $byVch = (-not $full) -and [bool]$plan.by_voucher
+                $changed = @($plan.changed | Where-Object { $_ })
+                $deleted = @($plan.deleted | Where-Object { $_ })
             } catch { $full = $true }
         }
         if ($deepCheck -and -not $full -and $months.Count -eq 0) { continue }   # the 30-minute check found nothing new
         if ($deepCheck) { Log ("Found changes in " + $co.Name + " that Tally's change counter didn't show.") }
         $mastersChanged = $full -or ($state.alt_mst -ne $co.AltMst) -or [bool]$state.need_groups
         if ($full) { Log ("Syncing " + $co.Name + " (" + $fromIso + " to " + $toIso + ") - full ...") "Cyan" }
+        elseif ($byVch -and ($changed.Count + $deleted.Count)) { Log ("Syncing " + $co.Name + " - " + $changed.Count + " new or changed, " + $deleted.Count + " deleted voucher(s) ...") "Cyan" }
         else { Log ("Syncing " + $co.Name + " - " + $(if ($months.Count) { "changed months: " + ($months -join ", ") } else { "no voucher changes found, refreshing balances" }) + " ...") "Cyan" }
 
         # 3. Masters: ledgers and stock every time (their balances move with every entry), the rest only when changed
@@ -431,12 +446,38 @@ foreach ($co in $companies) {
             }
         }
 
+        # 4a. Only the vouchers that changed, fetched by GUID (25 at a time). If Tally sends back fewer than
+        #     asked for, fall back to whole months below.
+        $sentByVch = $false
+        $noGuidFile = Join-Path $Here "TallySync.noguid"
+        if ($byVch -and $changed.Count -gt 0 -and (Test-Path $noGuidFile)) { $byVch = $false }   # this Tally can't pick single vouchers
+        if ($byVch -and $changed.Count -gt 0) {
+            $parts = @(); $got = 0
+            try {
+                for ($i = 0; $i -lt $changed.Count; $i += 25) {
+                    $batch = @($changed[$i..([math]::Min($i + 24, $changed.Count - 1))])
+                    $raw = Tally-Raw (VchGuid-Xml $co.Name $batch $VchFields)
+                    $c = Check-Vouchers $raw $FromDate $ToDate
+                    $got += [math]::Max(0, $c.In); $parts += , $raw
+                }
+            } catch { $got = -1 }
+            if ($got -eq $changed.Count) {
+                foreach ($p in $parts) { Send-Part $run "daybook" $p }
+                Log ("Vouchers checked: all " + $changed.Count + " changed voucher(s) received")
+                $sentByVch = $true
+            } else {
+                Log ("Fetching single vouchers didn't work here (" + $got + " of " + $changed.Count + ") - sending whole months instead, from now on") "Gray"
+                if ($got -gt $changed.Count) { try { Set-Content $noGuidFile "1" } catch {} }
+                $byVch = $false
+            }
+        } elseif ($byVch) { $sentByVch = $true }   # only deletions, or nothing at all
+
         # 4. Vouchers, one month at a time (all months on a full sync, only changed ones otherwise).
         # Day Book first; if Tally ignores the dates or sends too few, use a date-filtered voucher collection.
         $todo = @()
         $m = Get-Date -Year $FromDate.Year -Month $FromDate.Month -Day 1
         while ($m -le $ToDate) {
-            if ($full -or ($months -contains $m.ToString("yyyy-MM"))) { $todo += $m }
+            if ($full -or ((-not $sentByVch) -and ($months -contains $m.ToString("yyyy-MM")))) { $todo += $m }
             $m = $m.AddMonths(1)
         }
         $method = $script:VchMethod; $sentTotal = 0; $expTotal = 0; $short = @()
@@ -474,7 +515,8 @@ foreach ($co in $companies) {
         if ($short.Count -gt 0) { Log ("Warning: some months came back incomplete - " + ($short -join "; ") + ". Please report this.") "Yellow" }
 
         $meta = @{ run = $run; company = $co.Name; from = $fromIso; to = $toIso; alt_vch = $co.AltVch; alt_mst = $co.AltMst }
-        if (-not $full) { $meta.months = @($todo | ForEach-Object { $_.ToString("yyyy-MM") }) }
+        if ($sentByVch) { $meta.guids = @($changed + $deleted) }
+        elseif (-not $full) { $meta.months = @($todo | ForEach-Object { $_.ToString("yyyy-MM") }) }
         $res = Server-Json "POST" "/agent/commit" $meta
         $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
         Log ("Done: " + $res.ledgers + " ledgers, " + $res.stock + " stock items, " + $res.vouchers +

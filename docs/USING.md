@@ -326,7 +326,7 @@ The PDF follows Tally's *Ledger Account* layout:
 
 ## Good to know
 
-- The Tally PC sends only the months that changed, so a normal sync takes a few seconds. After a server update that changes how data is stored, the next sync sends everything again.
+- The Tally PC sends only the vouchers that were created, changed or deleted since the last sync, so a normal sync takes a few seconds. After a big change (more than 100 vouchers at once) it sends the affected months instead. After a server update that changes how data is stored, the next sync sends everything again.
 - Figures are as of the **last sync**. If the Tally PC is off, the app shows the last copy and says so at the top.
 - Without internet, the phone shows the screens you opened before, with a note saying it's a saved copy.
 - PDFs use a standard font, so names written in Hindi or other Indian scripts print as "?". The ₹ sign prints correctly.

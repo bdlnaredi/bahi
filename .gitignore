@@ -7,3 +7,4 @@ agent/TallySync.method
 agent/TallySync.sent
 agent/TallySync.task2
 agent/TallySync.deep
+agent/TallySync.noguid

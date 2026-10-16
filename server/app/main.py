@@ -391,7 +391,8 @@ class Handler(BaseHTTPRequestHandler):
                             parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"],
                             parts["company"].get(meta["company"]) or next(iter(parts["company"].values()), {}),
                             parts["ledger_x"], parts["stock_x"],
-                            meta.get("months") if isinstance(meta.get("months"), list) else None)
+                            meta.get("months") if isinstance(meta.get("months"), list) else None,
+                            [str(g) for g in meta["guids"]] if isinstance(meta.get("guids"), list) else None)
 
     # ------------------------------------------------------------ app endpoints
     def api(self, method, path, q):

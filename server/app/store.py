@@ -279,11 +279,24 @@ def plan(company, d_from, d_to, tally_list):
     for m in set(counts_t) | set(counts_s):
         if counts_t.get(m, 0) != counts_s.get(m, 0):
             months.add(m)
-    return {"full": False, "months": sorted(months)}
+    # Voucher by voucher: only what was created, altered or deleted in Tally, when every voucher has a GUID
+    # and, once those are applied, each month holds exactly as many vouchers as Tally has.
+    in_range = [(g, a, d) for g, a, d in tally_list if d_from <= d <= d_to]
+    changed = [g for g, a, d in in_range if g and (stored.get(g) is None or stored[g][0] != a or stored[g][1] != d)]
+    deleted = [g for g in stored if g not in seen]
+    after = {g: d for g, (a, d) in stored.items() if g not in set(deleted)}
+    after.update({g: d for g, a, d in in_range if g in set(changed)})
+    counts_a = {}
+    for d in after.values():
+        counts_a[d[:7]] = counts_a.get(d[:7], 0) + 1
+    by_voucher = (all(g for g, a, d in in_range) and len(changed) + len(deleted) <= 100
+                  and all(counts_a.get(m, 0) == counts_t.get(m, 0) for m in set(counts_a) | set(counts_t)))
+    return {"full": False, "months": sorted(months), "by_voucher": by_voucher,
+            "changed": changed if by_voucher else [], "deleted": deleted if by_voucher else []}
 
 
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
-           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None):
+           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None):
     """Store a sync. Masters are replaced when sent (groups/types/details are kept if a partial sync left them out).
     Vouchers are replaced for the whole [d_from, d_to] range, or only for `months` (YYYY-MM) on a partial sync."""
     with _lock, conn() as c:
@@ -292,7 +305,7 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
         if kf and d_from < kf:
             d_from = kf
             vouchers = [v for v in vouchers if v["date"] >= kf]
-        partial = months is not None
+        partial = months is not None or guids is not None
         if groups or not partial:
             chains = _chains(groups)
             c.execute("DELETE FROM grp WHERE company_id=?", (cid,))
@@ -330,16 +343,31 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                  s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""))
                 for s in stock])
 
-        ranges = [_month_range(m, d_from, d_to) for m in months] if partial else [(d_from, d_to)]
-        ranges = [(a, b) for a, b in ranges if a <= b]
-        for a, b in ranges:
-            old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
-            for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
-                c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, a, b))
-            c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, a, b))
+        if guids is not None:
+            # only the vouchers that changed: drop their old copies (and deleted ones), then add what Tally sent
+            gset = set(guids)
+            for i in range(0, len(guids), 400):
+                part = guids[i:i + 400]
+                ph = ",".join("?" for _ in part)
+                old = f"SELECT id FROM voucher WHERE company_id=? AND guid IN ({ph})"
+                for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+                    c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", [cid] + part)
+                c.execute(f"DELETE FROM voucher WHERE company_id=? AND guid IN ({ph})", [cid] + part)
+            ranges = [(d_from, d_to)]
+        else:
+            gset = None
+            ranges = [_month_range(m, d_from, d_to) for m in months] if months is not None else [(d_from, d_to)]
+            ranges = [(a, b) for a, b in ranges if a <= b]
+            for a, b in ranges:
+                old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
+                for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+                    c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, a, b))
+                c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, a, b))
         inserted = 0
         for v in vouchers:
             if not any(a <= v["date"] <= b for a, b in ranges):
+                continue
+            if gset is not None and v["guid"] not in gset:
                 continue
             inserted += 1
             base = bases.get(v["vtype"], v["vtype"])
@@ -384,7 +412,7 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                   " unbalanced=? WHERE id=?", (now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, cid))
         n_v = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=?", (cid,)).fetchone()["n"]
     return {"ledgers": len(ledgers), "stock": len(stock), "vouchers": n_v, "unbalanced": unbalanced,
-            "changed": inserted, "months": len(ranges) if partial else "all"}
+            "changed": inserted, "months": ("vouchers" if guids is not None else len(ranges)) if partial else "all"}
 
 
 # ---------------------------------------------------------------- reports
