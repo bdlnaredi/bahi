@@ -419,6 +419,13 @@ EINV_TAGS = {
     "qr": ("IRNQRCODE", "SIGNEDQRCODE", "IRNSIGNEDQRCODE", "QRCODE", "EINVQRCODE"),
     "ewb_no": ("EWAYBILLNO", "EWAYBILLNUMBER", "EWBNO", "BILLNUMBER"),
     "ewb_date": ("EWAYBILLDATE", "EWBDATE", "BILLDATE"),
+    "ewb_generated": ("GENERATEDON", "UPDATEDDATE"),
+    "ewb_from_addr": ("CONSIGNORADDRESS",),
+    "ewb_to_addr": ("CONSIGNEEADDRESS",),
+    "ewb_from_state": ("SHIPPEDFROMSTATE",),
+    "ewb_to_state": ("SHIPPEDTOSTATE",),
+    "irn_cancelled": ("IRNCANCELLED",),
+    "ewb_cancelled": ("ISCANCELLED",),
     "ewb_valid": ("VALIDUPTO", "EWAYBILLVALIDUPTO", "BILLVALIDUPTO", "EWBVALIDUPTO", "VALIDTILL"),
     "ewb_mode": ("TRANSPORTMODE", "MODEOFTRANSPORT", "MODE"),
     "ewb_distance": ("DISTANCE", "APPROXDISTANCE", "TRANSPORTDISTANCE"),
@@ -435,8 +442,23 @@ EINV_TAGS = {
     "ewb_sub_type": ("SUBTYPE", "EWAYBILLSUBTYPE"),
     "ewb_doc_type": ("DOCUMENTTYPE", "EWAYBILLDOCTYPE"),
     "ewb_status": ("EWAYBILLSTATUS", "EWBSTATUS"),
-    "irn_status": ("IRNSTATUS", "IRNCANCELLED"),
+    "irn_status": ("IRNSTATUS",),
 }
+
+
+def _tally_datetime(s):
+    """'20261017235900000' (Tally's date-time) -> '17-Oct-26 11:59 PM'."""
+    import datetime as _dt
+    s = (s or "").strip()
+    if re.match(r"^\d{12,17}$", s) and not s.startswith("0000"):
+        try:
+            t = _dt.datetime.strptime(s[:12], "%Y%m%d%H%M")
+            return f"{t.day}-{t.strftime('%b-%y')} {t.strftime('%I:%M %p').lstrip('0')}"
+        except ValueError:
+            return ""
+    if re.match(r"^0+$", s):
+        return ""
+    return s
 EWB_LISTS = ("EWAYBILLDETAILS.LIST", "EWAYBILLDETAIL.LIST", "EWAYBILL.LIST")
 
 
@@ -464,7 +486,16 @@ def einvoice_fields(v):
                 break
     for k in ("ack_date", "ewb_date", "ewb_doc_date"):
         if out.get(k):
-            out[k] = tdate(out[k].split(" ")[0]) or out[k]
+            out[k] = tdate(out[k].split(" ")[0][:8]) or out[k]
+    for k in ("ewb_valid", "ewb_generated"):
+        if out.get(k):
+            out[k] = _tally_datetime(out[k])
+    if out.get("ewb_distance"):
+        out["ewb_distance"] = out["ewb_distance"].strip()
+    for k in ("irn_cancelled", "ewb_cancelled"):        # keep only a real "Yes"
+        if out.get(k, "").lower() != "yes":
+            out.pop(k, None)
+    out = {k: v for k, v in out.items() if v}
     if out.get("irn") and not re.match(r"^[0-9a-fA-F]{64}$", out["irn"].strip()):
         out.pop("irn")          # not an IRN (64 hex characters)
     return out
