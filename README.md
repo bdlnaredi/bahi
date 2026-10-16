@@ -11,6 +11,10 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 </tr>
 </table>
 
+On a computer, Bahi switches to a wide layout with a menu down the left:
+
+<img src="docs/images/desktop-ledger.png" width="720" alt="Ledger on a computer: statement with pending bills beside it">
+
 *Screenshots use made-up demo data.*
 
 ## What you get

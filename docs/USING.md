@@ -10,6 +10,13 @@ The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues a
 
 ---
 
+## Look and layout
+
+- The app always opens in the **light** theme, whatever your phone's dark-mode setting. To use dark, tap **Switch light/dark** at the bottom of **Reports**.
+- Amounts marked **Dr** are red and **Cr** are green.
+- On a **phone** the sections are tabs along the bottom. Even if Chrome's *Desktop site* is switched on, Bahi shows its phone layout.
+- On a **computer** the sections, and the main reports, are in a menu down the left. Home shows its cards in two columns, and a ledger shows the statement with pending bills beside it.
+
 ## Home
 
 <img src="images/home.png" width="260" align="right" alt="Home screen">

@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.6";
+const APP_VERSION = "2.6.1";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -14,7 +14,8 @@ const ENTRY = { receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payme
 const entryKinds = () => Object.keys(ENTRY).filter((k) => can(ENTRY[k][1]));
 function applyTabs() {
   const show = { home: true, sales: can("sales"), parties: canLedgers(), vouchers: can("vouchers"), dues: can("dues"), reports: true };
-  document.querySelectorAll("#tabs a").forEach((a) => a.hidden = !show[a.dataset.tab]);
+  document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.hidden = !show[a.dataset.tab]);
+  document.querySelectorAll("#tabs a[data-need]").forEach((a) => a.hidden = !a.dataset.need.split(" ").some((p) => p === "owner" ? S.me.owner : can(p)));
 }
 function entryBar() {
   const ks = entryKinds();
@@ -165,7 +166,9 @@ function setTitle(back) {
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
   const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports" };
   const on = map[tab] || tab;
-  document.querySelectorAll("#tabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
+  document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
+  document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
+  if (document.querySelector(`#tabs a[data-route="${tab}"]`)) document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.remove("on"));
 }
 
 /* ---------------------------------------------------------------- views */
@@ -339,14 +342,12 @@ async function vLedger(name) {
       <div class="totals">
         <div><div class="label">Opening</div>${drcr(d.opening)}</div>
         <div><div class="label">Closing</div>${drcr(d.closing)}</div>
-        <div><div class="label">Debits</div>${money(d.debit)}</div>
-        <div><div class="label">Credits</div>${money(d.credit)}</div>
+        <div><div class="label">Debits</div>${money(d.debit, "dr")}</div>
+        <div><div class="label">Credits</div>${money(d.credit, "cr")}</div>
       </div>
     </section>
-    ${pending.length ? `<section class="page"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}</span></div>${billRows(pending.slice(0, 5))}
-      ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}
     ${d.entries.length > 1 ? sortChips("esorts", [["old", "Oldest first"], ["new", "Newest first"], ["amount", "Largest amount"]], S.esort) : ""}
-    <section class="page ruled">
+    <section class="page ruled stmt">
       <div class="carry"><span>Opening balance</span>${drcr(d.opening)}</div>
       ${sortEntries(d.entries).map((e) => `<a class="entry" href="#/voucher/${e.id}">
           <span class="d">${fdate(e.date)}</span>
@@ -354,7 +355,9 @@ async function vLedger(name) {
           <span class="v">${h(e.vtype)} ${h(e.number)}</span><span class="bal">Bal ${drcr(e.balance)}</span>
         </a>`).join("") || '<div class="empty">No entries in this period.</div>'}
       <div class="closing"><span>Closing balance</span>${drcr(d.closing)}</div>
-    </section>`;
+    </section>
+    ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}</span></div>${billRows(pending.slice(0, 5))}
+      ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}`;
   wirePeriod(d.from, d.to);
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`);
   view.querySelectorAll("#esorts [data-sort]").forEach((b) => b.onclick = () => {
@@ -527,7 +530,7 @@ function vReports() {
   if ($("#syncrow")) $("#syncrow").onclick = () => syncNow();
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
   $("#theme").onclick = () => {
-    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const cur = document.documentElement.dataset.theme || "light";
     const next = cur === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem("theme", next); } catch (e) {}
@@ -761,7 +764,7 @@ async function vAnalysis(tab) {
         <div><div class="label">${d.last_label}</div><div class="big" style="font-size:22px">${d.has_prev ? short(d.last_total) : "not synced"}</div></div></div>
         ${ch !== null ? `<div class="note">${ch >= 0 ? "Up" : "Down"} ${Math.abs(ch)}% on last year so far (last year's figure is the full year).</div>` : ""}
         <div class="chart" id="ychart"></div>
-        <div class="legend"><span><i style="background:var(--bar)"></i>${d.this_label}</span><span><i style="background:var(--age1)"></i>${d.last_label}</span></div></section>
+        <div class="legend"><span><i style="background:var(--bar)"></i>${d.this_label}</span><span><i style="background:var(--bar2)"></i>${d.last_label}</span></div></section>
       <section class="page"><div class="block-title"><span>Month</span><span>${d.this_label} / ${d.last_label}</span></div>
       ${d.months.map((m) => { const c = m.last ? Math.round((m.this - m.last) / m.last * 100) : null;
         return `<div class="row" style="cursor:default"><div class="main name">${mon(m.month)}</div><div class="end">${money(m.this)}<div class="meta">${d.has_prev ? money(m.last) : ""}${c !== null && m.this ? ` <span class="${c >= 0 ? "up" : "down"}">${c >= 0 ? "▲" : "▼"}${Math.abs(c)}%</span>` : ""}</div></div></div>`; }).join("")}
@@ -793,7 +796,7 @@ function drawYears(el, rows) {
     const x0 = i * slot + (slot - bw * 2 - 2) / 2;
     const one = (v, x, fill, label) => { const hh = Math.max(v > 0 ? 2 : 0, (v / max) * (H - padB - padT)); const y = H - padB - hh, rad = Math.min(3, bw / 2, hh);
       return hh ? `<path d="M${x},${H - padB} V${y + rad} Q${x},${y} ${x + rad},${y} H${x + bw - rad} Q${x + bw},${y} ${x + bw},${y + rad} V${H - padB} Z" fill="${fill}"><title>${label}: ${rupees(v, false)}</title></path>` : ""; };
-    return one(r.last, x0, "var(--age1)", MON[+r.month - 1] + " last year") + one(r.this, x0 + bw + 2, "var(--bar)", MON[+r.month - 1] + " this year") +
+    return one(r.last, x0, "var(--bar2)", MON[+r.month - 1] + " last year") + one(r.this, x0 + bw + 2, "var(--bar)", MON[+r.month - 1] + " this year") +
       `<text x="${i * slot + slot / 2}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--ink-3)">${MON[+r.month - 1][0]}</text>`;
   }).join("");
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" aria-label="Monthly sales, this year against last year"><line x1="0" x2="${W}" y1="${H - padB}" y2="${H - padB}" stroke="var(--rule)"/>${bars}</svg>`;
@@ -1358,6 +1361,7 @@ async function route() {
     view.innerHTML = '<div class="empty">No data yet. Run Setup on the Tally PC to send your first sync.</div>';
     return;
   }
+  view.dataset.view = parts[0] || "home";
   loading();
   try {
     switch (parts[0]) {
