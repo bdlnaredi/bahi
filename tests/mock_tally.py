@@ -20,7 +20,7 @@ GROUPS = [  # name, parent
 ]
 VTYPES = [("Sales", ""), ("Purchase", ""), ("Receipt", ""), ("Payment", ""), ("Journal", ""), ("Contra", ""),
           ("Credit Note", ""), ("Debit Note", ""), ("GST Sales", "Sales"),
-          ("Stock Journal", ""), ("Sales Order", ""), ("Memorandum", "")]
+          ("Stock Journal", ""), ("Sales Order", ""), ("Memorandum", ""), ("Delivery Note", "")]
 
 DEBTORS = [("Sharma & Sons", "Sundry Debtors", 45000), ("Gupta Hardware", "Sundry Debtors", 0),
            ("Patel Enterprises", "Mumbai Debtors", 120000), ("Shree Ganesh Traders", "Sundry Debtors", 0),
@@ -121,6 +121,16 @@ def make_vouchers():
     # vouchers outside the books: stock journal, sales order, memorandum; and one broken journal
     vs.append({"kind": "sj", "date": date(2026, 7, 3), "type": "Stock Journal", "no": "SJ1", "party": "",
                "out": [("PVC Pipe 2 inch", 5, "Nos", 210.0, 1050.0)], "in": [("PVC Pipe 1 inch", 8, "Nos", 131.25, 1050.0)], "ledgers": []})
+    # a godown transfer: 40 Primer out of the shop, into the back store
+    vs.append({"kind": "sj", "date": date(2026, 9, 3), "type": "Stock Journal", "no": "SJ2", "party": "",
+               "out": [("Primer 4L", 40, "Nos", 650.0, 26000.0)], "in": [("Primer 4L", 40, "Nos", 650.0, 26000.0)], "ledgers": []})
+    # goods sent on a delivery note on 4 Sep, billed on 6 Sep against that note (stock moves once, on the note)
+    vs.append({"kind": "dn", "date": date(2026, 9, 4), "type": "Delivery Note", "no": "DN1", "party": "Sharma & Sons",
+               "out": [("TMT Bar 12mm", 100, "Kg", 77.5, 7750.0)], "in": [], "ledgers": []})
+    vs.append({"kind": "sales", "date": date(2026, 9, 6), "type": "Sales", "no": "S/9001", "party": "Sharma & Sons",
+               "items": [("TMT Bar 12mm", 100, "Kg", 77.5, 7750.0)], "tracked": "DN1",
+               "ledgers": [("Sharma & Sons", 7750.0 + 2 * 697.5), ("Output CGST", -697.5), ("Output SGST", -697.5)],
+               "sales_ledger": "Sales GST 18%", "taxable": 7750.0})
     vs.append({"kind": "order", "date": date(2026, 8, 9), "type": "Sales Order", "no": "SO1", "party": "Gupta Hardware",
                "items": [("Primer 4L", 30, "Nos", 800.0, 24000.0)], "ledgers": [], "nonposting": True})
     vs.append({"kind": "acct", "date": date(2026, 8, 10), "type": "Memorandum", "no": "M1", "party": "Rent",
@@ -211,7 +221,12 @@ def stock_closing(to):
     for name, grp, unit, oq, rate in STOCK:
         q, val = oq, oq * rate
         for v in VOUCHERS:
-            if live(v) and v["date"] <= to and v["kind"] in ("sales", "purchase"):
+            if live(v) and v["date"] <= to and v["kind"] == "dn":
+                for it in v["out"]:
+                    if it[0] == name:
+                        q -= it[1]
+                        val -= it[1] * rate
+            if live(v) and v["date"] <= to and v["kind"] in ("sales", "purchase") and not v.get("tracked"):
                 for it in v["items"]:
                     if it[0] == name:
                         if v["kind"] == "purchase":
@@ -254,7 +269,7 @@ def xml_voucher(v):
         return "".join(f"<BILLALLOCATIONS.LIST><NAME>{escape(r)}</NAME><BILLTYPE>{t}</BILLTYPE>"
                        f"{f'<BILLCREDITPERIOD JD=\"0\" P=\"{dd} Days\">{dd} Days</BILLCREDITPERIOD>' if dd else ''}"
                        f"<AMOUNT>{amt(a)}</AMOUNT></BILLALLOCATIONS.LIST>" for r, t, a, dd in v.get("billalloc", []))
-    if v["kind"] == "sj":
+    if v["kind"] in ("sj", "dn"):
         for tag, rows, sign in (("INVENTORYENTRIESOUT.LIST", v["out"], -1), ("INVENTORYENTRIESIN.LIST", v["in"], 1)):
             for name, q, unit, rate, a in rows:
                 body += (f"<{tag}><STOCKITEMNAME>{escape(name)}</STOCKITEMNAME><RATE>{rate:.2f}/{unit}</RATE>"
@@ -276,6 +291,7 @@ def xml_voucher(v):
                      f"<ISDEEMEDPOSITIVE>{'Yes' if inward else 'No'}</ISDEEMEDPOSITIVE>"
                      f"<RATE>{rate:.2f}/{unit}</RATE><AMOUNT>{amt(sign * a)}</AMOUNT>"
                      f"<ACTUALQTY> {q} {unit}</ACTUALQTY><BILLEDQTY> {q} {unit}</BILLEDQTY>"
+                     + f"<BATCHALLOCATIONS.LIST><GODOWNNAME>Main Location</GODOWNNAME><TRACKINGNUMBER>{v.get('tracked') or '&#4; Not Applicable'}</TRACKINGNUMBER></BATCHALLOCATIONS.LIST>"
                      + ("<BASICUSERDESCRIPTION.LIST><BASICUSERDESCRIPTION>Asian Paints Apex, colour: Ivory</BASICUSERDESCRIPTION></BASICUSERDESCRIPTION.LIST>" if name == "Wall Paint 20L" else "")
                      + 
                      f"<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>{escape(v['sales_ledger'])}</LEDGERNAME>"

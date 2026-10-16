@@ -87,6 +87,7 @@ $VchFields = @(
     "LedgerEntries.BillAllocations.Name", "LedgerEntries.BillAllocations.BillType",
     "LedgerEntries.BillAllocations.Amount", "LedgerEntries.BillAllocations.BillCreditPeriod",
     "AllInventoryEntries.StockItemName", "AllInventoryEntries.ActualQty", "AllInventoryEntries.BilledQty",
+    "AllInventoryEntries.BatchAllocations.TrackingNumber", "AllInventoryEntries.BatchAllocations.GodownName",
     "AllInventoryEntries.Rate", "AllInventoryEntries.Amount", "AllInventoryEntries.IsDeemedPositive",
     "AllInventoryEntries.Discount", "AllInventoryEntries.AccountingAllocations.LedgerName",
     "AllInventoryEntries.AccountingAllocations.Amount",

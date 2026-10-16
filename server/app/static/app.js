@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.7";
+const APP_VERSION = "2.8";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -493,7 +493,8 @@ async function vItem(name) {
     <section class="page"><div class="block-title">Movements</div>
       ${d.moves.map((m) => `<a class="row" href="#/voucher/${m.id}"><div class="main"><div class="name">${h(m.party || m.vtype)}</div>
         <div class="meta">${fdate(m.date)}, ${h(m.vtype)} ${h(m.number)}${m.rate ? `, ₹${nf2.format(m.rate)}` : ""}</div></div>
-        <div class="end"><span class="amt ${m.qty < 0 ? "down" : "up"}">${m.qty > 0 ? "+" : "−"}${qty(Math.abs(m.qty), I.unit)}</span></div></a>`).join("")
+        <div class="end">${m.transfer ? `<span class="meta">moved between godowns</span>` : m.tracked ? `<span class="meta">${qty(Math.abs(m.qty), I.unit)}, counted on the delivery note</span>` :
+          `<span class="amt ${m.qty < 0 ? "down" : "up"}">${m.qty > 0 ? "+" : "−"}${qty(Math.abs(m.qty), I.unit)}</span>`}</div></a>`).join("")
         || '<div class="empty">No movement in this period.</div>'}
     </section>`;
   wirePeriod(d.from, d.to);

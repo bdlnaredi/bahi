@@ -9,7 +9,7 @@ from datetime import date, timedelta
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", "/data"), "tally.db")
 _lock = threading.Lock()
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -39,13 +39,13 @@ CREATE TABLE IF NOT EXISTS vline(voucher_id INT, ledger TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_vl_l ON vline(ledger, voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vl_v ON vline(voucher_id);
 CREATE TABLE IF NOT EXISTS vitem(voucher_id INT, item TEXT, qty REAL, unit TEXT, rate REAL, amount REAL,
-  hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '');
+  hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '', tracked INT DEFAULT 0);
 CREATE INDEX IF NOT EXISTS ix_vi_i ON vitem(item, voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vi_v ON vitem(voucher_id);
 CREATE TABLE IF NOT EXISTS vline_np(voucher_id INT, ledger TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_vlnp_v ON vline_np(voucher_id);
 CREATE TABLE IF NOT EXISTS vitem_np(voucher_id INT, item TEXT, qty REAL, unit TEXT, rate REAL, amount REAL,
-  hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '');
+  hsn TEXT DEFAULT '', disc REAL DEFAULT 0, descr TEXT DEFAULT '', tracked INT DEFAULT 0);
 CREATE INDEX IF NOT EXISTS ix_vinp_v ON vitem_np(voucher_id);
 CREATE TABLE IF NOT EXISTS vbill(voucher_id INT, ledger TEXT, name TEXT, btype TEXT, amount REAL, days INT);
 CREATE INDEX IF NOT EXISTS ix_vb_v ON vbill(voucher_id);
@@ -385,9 +385,10 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                 agg[ln] = agg.get(ln, 0) + a
             c.executemany(f"INSERT INTO {'vline' if posting else 'vline_np'} VALUES(?,?,?)",
                           [(vid, ln, round(a, 2)) for ln, a in agg.items()])
-            c.executemany(f"INSERT INTO {'vitem_np' if (base in NO_STOCK or status) else 'vitem'} VALUES(?,?,?,?,?,?,?,?,?)",
+            c.executemany(f"INSERT INTO {'vitem_np' if (base in NO_STOCK or status) else 'vitem'} VALUES(?,?,?,?,?,?,?,?,?,?)",
                           [(vid, i["item"], i["qty"], i["unit"], i["rate"], i["amount"],
-                            i.get("hsn") or stock_x.get(i["item"], {}).get("hsn", ""), i.get("disc", 0), i.get("descr", ""))
+                            i.get("hsn") or stock_x.get(i["item"], {}).get("hsn", ""), i.get("disc", 0), i.get("descr", ""),
+                            1 if i.get("tracked") else 0)
                            for i in v["items"]])
             if posting:
                 c.executemany("INSERT INTO vbill VALUES(?,?,?,?,?,?)",
@@ -619,16 +620,22 @@ def group(cid, name=""):
 
 
 def _stock_moves(c, cid, f, t, item=None):
-    """Per item: quantity moved after f and after t (to work back from Tally's closing), and in/out within f..t."""
+    """Per item: quantity moved after f and after t (to work back from Tally's closing), and in/out within f..t.
+    Each voucher counts once per item with its net quantity, so a transfer between godowns (out of one, into
+    another) moves nothing; lines on an invoice made against a delivery/receipt note are left out, because
+    Tally moved that stock on the note."""
     extra, args = ("AND vi.item=?", [item]) if item else ("", [])
-    return {r["item"]: r for r in c.execute(f"""SELECT vi.item,
-            COALESCE(SUM(CASE WHEN v.date >= ? THEN vi.qty END), 0) after_f,
-            COALESCE(SUM(CASE WHEN v.date > ? THEN vi.qty END), 0) after_t,
-            COALESCE(SUM(CASE WHEN v.date BETWEEN ? AND ? AND vi.qty > 0 THEN vi.qty END), 0) in_q,
-            COALESCE(-SUM(CASE WHEN v.date BETWEEN ? AND ? AND vi.qty < 0 THEN vi.qty END), 0) out_q,
-            COALESCE(SUM(CASE WHEN v.date BETWEEN ? AND ? AND vi.qty > 0 THEN ABS(vi.amount) END), 0) in_v
-        FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id WHERE v.company_id=? {extra} GROUP BY vi.item""",
-                                         [f, t, f, t, f, t, f, t, cid] + args)}
+    return {r["item"]: r for r in c.execute(f"""WITH net AS (
+            SELECT vi.item, v.date, SUM(vi.qty) q, SUM(CASE WHEN vi.qty > 0 THEN ABS(vi.amount) ELSE 0 END) inamt
+            FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+            WHERE v.company_id=? AND vi.tracked=0 {extra} GROUP BY vi.voucher_id, vi.item)
+        SELECT item,
+            COALESCE(SUM(CASE WHEN date >= ? THEN q END), 0) after_f,
+            COALESCE(SUM(CASE WHEN date > ? THEN q END), 0) after_t,
+            COALESCE(SUM(CASE WHEN date BETWEEN ? AND ? AND q > 0 THEN q END), 0) in_q,
+            COALESCE(-SUM(CASE WHEN date BETWEEN ? AND ? AND q < 0 THEN q END), 0) out_q,
+            COALESCE(SUM(CASE WHEN date BETWEEN ? AND ? AND q > 0 THEN inamt END), 0) in_v
+        FROM net GROUP BY item""", [cid] + args + [f, t, f, t, f, t, f, t])}
 
 
 def _stock_row(i, m, t, today):
@@ -667,11 +674,15 @@ def stock_item(cid, name, d_from=None, d_to=None):
             return None
         f, t = period(c, cid, d_from, d_to)
         rows = _rows(c, """SELECT v.id, v.date, v.vtype, v.number, v.party, SUM(vi.qty) qty, MAX(vi.rate) rate,
-            SUM(vi.amount) amount FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+            SUM(vi.amount) amount, MIN(vi.qty) lo, MAX(vi.qty) hi, MAX(vi.tracked) tracked
+            FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
             WHERE v.company_id=? AND vi.item=? AND v.date BETWEEN ? AND ?
             GROUP BY v.id ORDER BY v.date DESC, v.id DESC""", (cid, name, f, t))
-        inward = sum(r["qty"] for r in rows if r["qty"] > 0)
-        outward = -sum(r["qty"] for r in rows if r["qty"] < 0)
+        for r in rows:
+            r["transfer"] = r["lo"] < 0 < r["hi"] and abs(r["qty"]) < 1e-9     # out of one godown, into another
+        moving = [r for r in rows if not r["tracked"]]
+        inward = sum(r["qty"] for r in moving if r["qty"] > 0)
+        outward = -sum(r["qty"] for r in moving if r["qty"] < 0)
         m = _stock_moves(c, cid, f, t, name).get(name)
     row = _stock_row(dict(info), m, t, date.today().isoformat())
     return {"item": dict(info), "period": row, "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
@@ -1121,7 +1132,7 @@ def slow_stock(cid, days=60):
     with conn() as c:
         items = _rows(c, """SELECT s.name, s.unit, s.closing_qty, s.closing_value,
             (SELECT MAX(v.date) FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
-              WHERE v.company_id=s.company_id AND vi.item=s.name AND vi.qty < 0) last_out
+              WHERE v.company_id=s.company_id AND vi.item=s.name AND v.base IN ('Sales', 'Delivery Note')) last_out
             FROM stock s WHERE s.company_id=? AND s.closing_qty > 0""", (cid,))
     out = []
     for it in items:

@@ -127,6 +127,8 @@ Pick a period at the top. For each item you see:
 - **In / Out:** what came in (green) and went out (red) during the period.
 - **Closing:** the quantity at the end of the period, and its value.
 
+Stock is the **total of all your godowns**, as in Tally's own item balance: a godown showing negative because a transfer was entered late simply nets off against the others. A transfer between godowns doesn't count as stock in or out, and an invoice made against a delivery note doesn't take the stock off a second time. On an item's page these show as *moved between godowns* and *counted on the delivery note*.
+
 Quantities match Tally. Values marked ≈ are worked out at the item's average rate, so they can differ a little from Tally's Stock Summary. When the period runs to today, the closing value is Tally's own figure. **Excel** downloads the same table. Tap an item to see each voucher that moved it.
 
 ## Reports

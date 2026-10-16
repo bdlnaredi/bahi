@@ -269,7 +269,11 @@ def _inv_row(e, force_dir=None):
             break
     descr = [d.text.strip() for d in e.findall(".//BASICUSERDESCRIPTION.LIST/BASICUSERDESCRIPTION") if d.text and d.text.strip()]
     rtxt = txt(e, "RATE")
+    # Invoice line made against a delivery / receipt note: Tally moved the stock on the note already
+    tracked = any((t.text or "").strip().lstrip("\x04").strip().lower() not in ("", "not applicable")
+                  for t in e.findall("BATCHALLOCATIONS.LIST/TRACKINGNUMBER"))
     return {
+        "tracked": tracked,
         "item": item,
         "qty": qty if inward else -qty,
         "unit": unit_of(qtxt) or rtxt.split("/")[-1].strip() if "/" in rtxt else unit_of(qtxt),
