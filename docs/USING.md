@@ -272,6 +272,22 @@ Staff log in with their **name** and password. You log in as before, with the na
 
 <br clear="right">
 
+## Sync: automatic, manual or paused
+
+In **Reports → Settings → Syncing from Tally** choose:
+
+| Setting | What happens |
+|---|---|
+| **Automatic, every N minutes** | The default. Pick 2, 5, 10, 15, 30 or 60 minutes. |
+| **Manual** | Nothing is sent until someone taps **Sync now** (top of **Reports**, or in Settings). |
+| **Paused** | Nothing is sent from Tally at all, not even with Sync now or `Sync-Now.bat`. Entries made on the phone wait until you resume. |
+
+You can also pause one company on its own (in that company's box lower down in Settings), for example an old year you've finished with.
+
+The Tally PC checks with the app every 2 minutes, so **Sync now** starts within 2 minutes, while the PC is on and Tally is open. The app tells you when it's done. The line under the company name shows *Manual sync* or *Sync paused* when it isn't automatic.
+
+On the Tally PC itself, `Pause-Sync.bat` stops the automatic task completely and `Resume-Sync.bat` starts it again. `Sync-Now.bat` still works when the PC is paused this way.
+
 ## Backups
 
 The server makes a backup every night at 02:30 and keeps the last 7. **Reports → Settings → Backups** shows when the last one ran, lets you download any of them, and has a **Back up now** button.

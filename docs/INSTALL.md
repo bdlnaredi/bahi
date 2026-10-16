@@ -128,11 +128,12 @@ To update: **Compose Pull**, then **Compose Up**.
    Done. Tally data will sync every 10 minutes while this PC is on and Tally is open.
    ```
 
-**Day-to-day:** nothing to do. While the PC is on and TallyPrime is open, changes reach the server within 10 minutes. Syncs run silently in the background and only send data when something changed in Tally.
+**Day-to-day:** nothing to do. While the PC is on and TallyPrime is open, changes reach the server within 10 minutes. You can change how often, or switch to manual or paused, in the app (**Reports → Settings**). Syncs run silently in the background and only send data when something changed in Tally.
 
 | File | Use |
 |---|---|
 | `Sync-Now.bat` | Send everything right now, e.g. after a big data entry |
+| `Pause-Sync.bat` / `Resume-Sync.bat` | Stop or restart the automatic sync on this PC. You can also choose automatic, manual or paused in the app's Settings. |
 | `TallySync.log` | What each sync did, and any warnings |
 | `Setup.bat` | Change the server address, token or from-date |
 | `Diagnose.bat` | Writes a short report of voucher counts, for checking a sync problem |

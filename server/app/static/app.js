@@ -1,12 +1,12 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.5";
+const APP_VERSION = "2.6";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
 const S = {
   companies: [], cid: null, period: null, // period: {key, from, to} or null = full synced year
-  dueKind: "receivable", dayType: "", cache: {}, me: { owner: true, perms: [], name: "" }, approvals: 0,
+  sync: { mode: "auto", every: 10 }, dueKind: "receivable", dayType: "", cache: {}, me: { owner: true, perms: [], name: "" }, approvals: 0,
 };
 const can = (p) => S.me.owner || S.me.perms.includes(p);
 const canLedgers = () => can("ledgers") || can("parties");
@@ -97,6 +97,7 @@ async function loadCompanies() {
   const d = await api("/api/companies");
   S.companies = d.companies;
   S.approvals = d.approvals || 0;
+  S.sync = d.sync || { mode: "auto", every: 10 };
   if (!S.companies.find((c) => c.id === S.cid)) {
     // start with the company holding the most recent vouchers (usually the current year's)
     const latest = S.companies.slice().sort((a, b) => (b.last_vch || "").localeCompare(a.last_vch || ""))[0];
@@ -112,6 +113,10 @@ function renderCover() {
   const st = $("#status");
   if (!c) { st.innerHTML = ""; return; }
   const online = c.last_seen && Date.now() / 1000 - c.last_seen < 30 * 60;
+  if (c.paused || S.sync.mode === "manual") {
+    st.innerHTML = `<span class="dot off"></span>${c.paused ? "Sync paused" : "Manual sync"}. Figures as of ${new Date(c.last_sync * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`;
+    return;
+  }
   st.innerHTML = `<span class="dot ${online ? "" : "off"}"></span>` +
     (online ? `Tally connected. Last change synced ${ago(c.last_sync)}` :
       `Tally offline since ${ago(c.last_seen)}. Figures as of ${new Date(c.last_sync * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`);
@@ -468,6 +473,26 @@ async function vItem(name) {
   wirePeriod(d.from, d.to);
 }
 
+let syncPoll = null;
+async function syncNow() {
+  const r = await fetch("/api/sync/now", { method: "POST" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { toast(j.error || "Couldn't ask for a sync."); return; }
+  const c0 = S.companies.find((x) => x.id === S.cid), before = c0 ? c0.last_sync : 0, t0 = Date.now();
+  toast("Asked the Tally PC to sync. It starts within 2 minutes.");
+  clearInterval(syncPoll);
+  syncPoll = setInterval(async () => {
+    try { await loadCompanies(); } catch (e) { return; }
+    const c = S.companies.find((x) => x.id === S.cid);
+    const picked = S.sync.last_run * 1000 >= t0 - 1000;
+    if ((c && c.last_sync > before) || (picked && c && c.last_seen * 1000 > t0)) {
+      clearInterval(syncPoll); toast(c && c.last_sync > before ? "Sync finished. Showing the latest figures." : "Synced. Nothing had changed in Tally."); route();
+    } else if (Date.now() - t0 > 5 * 60000) {
+      clearInterval(syncPoll); toast("The Tally PC didn't respond. Is it on, with Tally open?");
+    }
+  }, 10000);
+}
+
 function vReports() {
   setTitle(false);
   const c = S.companies.find((x) => x.id === S.cid);
@@ -485,7 +510,9 @@ function vReports() {
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
   ].filter((r) => r[3]);
-  view.innerHTML = `${S.me.owner ? "" : `<p class="subtitle" style="margin-top:4px">Logged in as ${h(S.me.name)}</p>`}<section class="page">
+  view.innerHTML = `${S.me.owner ? "" : `<p class="subtitle" style="margin-top:4px">Logged in as ${h(S.me.name)}</p>`}
+  ${S.sync.mode !== "paused" ? `<section class="page"><button class="row" id="syncrow"><div class="main"><div class="name">Sync now</div><div class="meta">${S.sync.mode === "manual" ? "Sync is manual. " : ""}Get the latest from Tally (the Tally PC must be on with Tally open)</div></div></button></section>` : ""}
+  <section class="page">
     ${R.map(([href, name, meta]) => `<a class="row" href="${href}"><div class="main"><div class="name">${name}${href === "#/entries" && S.me.owner && S.approvals ? ` <span class="badge">${S.approvals} to approve</span>` : ""}</div><div class="meta">${meta}</div></div><span class="chev"></span></a>`).join("")}
   </section>
   ${c && S.me.owner ? `<section class="page"><div class="block-title">Sync</div><div class="info">
@@ -497,6 +524,7 @@ function vReports() {
     <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">${S.me.owner ? `Staff logins, Telegram summaries, backups, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}` : "Change your password"}</div></div><span class="chev"></span></a>
     <div class="actions" style="padding-top:12px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
+  if ($("#syncrow")) $("#syncrow").onclick = () => syncNow();
   $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
   $("#theme").onclick = () => {
     const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -796,6 +824,15 @@ async function vSettings() {
   let tg = {};
   try { tg = await api("/api/telegram"); } catch (e) {}
   view.innerHTML = `<h1 class="title">Settings</h1>
+    <section class="page" id="syncsec"><div class="block-title">Syncing from Tally <span>${{ auto: `every ${S.sync.every} min`, manual: "manual", paused: '<span class="od">paused</span>' }[S.sync.mode]}</span></div>
+      <form class="form" id="syncf" style="padding-top:4px">
+        <label><span><input type="radio" name="mode" value="auto" ${S.sync.mode === "auto" ? "checked" : ""}> Automatic, every
+          <select name="every" style="padding:4px 8px">${[2, 5, 10, 15, 30, 60].map((n) => `<option value="${n}" ${n === S.sync.every ? "selected" : ""}>${n} minutes</option>`).join("")}</select></span></label>
+        <label><span><input type="radio" name="mode" value="manual" ${S.sync.mode === "manual" ? "checked" : ""}> Manual: only when I tap Sync now</span></label>
+        <label><span><input type="radio" name="mode" value="paused" ${S.sync.mode === "paused" ? "checked" : ""}> Paused: send nothing from Tally</span></label>
+        <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save</button>${S.sync.mode !== "paused" ? '<button class="btn" type="button" id="syncnow">Sync now</button>' : ""}</div>
+        <p class="hint">${S.sync.mode === "paused" ? "The app shows the figures from the last sync. Entries made on the phone wait until you resume." :
+          "The Tally PC checks with the app every 2 minutes while it's on and Tally is open, so Sync now takes up to 2 minutes to start."}</p></form></section>
     <section class="page" id="tgsec"><div class="block-title">Telegram summary and alerts <span>${tg.configured ? "on" : "off"}</span></div>
       ${tg.configured ? `<form class="form" id="tgf">
         <label><span><input type="checkbox" id="tgdaily" ${tg.daily ? "checked" : ""}> Daily summary at</span><input type="time" id="tgtime" value="${h(tg.time || "09:00")}"></label>
@@ -831,7 +868,9 @@ async function vSettings() {
         <button class="btn" type="submit">Delete older vouchers</button>
         <p class="hint">Removes them from Bahi only, never from Tally. Later syncs won't bring them back.</p>
       </form>
-      <div class="actions"><button class="btn danger" data-del="${c.id}">Delete all of this company's data</button></div>
+      <div class="actions">${S.sync.mode === "paused" ? "" : `<button class="btn" data-pause="${h(c.name)}" data-on="${c.paused ? "" : "1"}">${c.paused ? "Resume syncing this company" : "Pause syncing this company"}</button>`}
+        <button class="btn danger" data-del="${c.id}">Delete all of this company's data</button></div>
+      ${c.paused && S.sync.mode !== "paused" ? '<p class="hint" style="padding:0 14px"><span class="od">Syncing is paused for this company.</span></p>' : ""}
       <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
     </section>`).join("")}`;
   const post = async (url, body) => {
@@ -878,6 +917,19 @@ async function vSettings() {
     msg.textContent = r.ok ? "Password changed." : (j.error || "Couldn't change the password.");
     if (r.ok) $("#pwf").reset();
   };
+  $("#syncf").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target, mode = f.querySelector("[name=mode]:checked").value;
+    try { await post("/api/sync", { mode, every: +f.every.value }); } catch (err) { toast(err.message); return; }
+    toast({ auto: `Syncing every ${f.every.value} minutes.`, manual: "Manual sync: tap Sync now when you want fresh figures.", paused: "Syncing paused. Nothing more is sent from Tally until you resume." }[mode]);
+    await loadCompanies(); renderCover(); vSettings().catch(fail);
+  };
+  if ($("#syncnow")) $("#syncnow").onclick = () => syncNow();
+  view.querySelectorAll("[data-pause]").forEach((b) => b.onclick = async () => {
+    await post("/api/sync", { company: b.dataset.pause, paused: !!b.dataset.on });
+    toast(b.dataset.on ? "Syncing paused for this company." : "Syncing resumed for this company.");
+    await loadCompanies(); renderCover(); vSettings().catch(fail);
+  });
   view.querySelectorAll("[data-use]").forEach((b) => b.onclick = () => {
     S.cid = Number(b.dataset.use); try { localStorage.setItem("cid", S.cid); } catch (e) {}
     renderCover(); vSettings().catch(fail);

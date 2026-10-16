@@ -46,11 +46,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "Scheduling automatic sync every 10 minutes ..."
+Write-Host "Scheduling the sync check every 2 minutes ..."
 $vbs = Join-Path $Here "run-hidden.vbs"
-& schtasks.exe /Create /TN "Tally Mobile Sync" /TR "wscript.exe `"$vbs`"" /SC MINUTE /MO 10 /F | Out-Null
+& schtasks.exe /Create /TN "Tally Mobile Sync" /TR "wscript.exe `"$vbs`"" /SC MINUTE /MO 2 /F | Out-Null
+Set-Content (Join-Path $Here "TallySync.task2") "2"
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "Done. Tally data will sync every 10 minutes while this PC is on and Tally is open." -ForegroundColor Green
+    Write-Host "Done. Tally data syncs while this PC is on and Tally is open: every 10 minutes to start with." -ForegroundColor Green
+    Write-Host "Change how often, or switch to manual sync, in the app: Reports, Settings." -ForegroundColor Green
 } else {
     Write-Host "Could not create the scheduled task. Try running Setup.bat as administrator." -ForegroundColor Red
 }

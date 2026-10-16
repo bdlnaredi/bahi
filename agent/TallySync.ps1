@@ -239,6 +239,37 @@ catch { Log ("Tally is not reachable on $Tally - is TallyPrime open? (" + $_.Exc
 
 if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yellow"; exit 3 }
 
+function Send-Heartbeat {
+    try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }) }) } catch {}
+}
+
+# The scheduled task runs every 2 minutes; the app decides whether it is time to sync
+# (Settings: automatic every N minutes, manual "Sync now" only, or paused).
+function Update-Task {
+    $marker = Join-Path $Here "TallySync.task2"
+    if (Test-Path $marker) { return }
+    try {
+        & schtasks.exe /Query /TN "Tally Mobile Sync" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { return }
+        $vbs = Join-Path $Here "run-hidden.vbs"
+        & schtasks.exe /Create /TN "Tally Mobile Sync" /TR "wscript.exe `"$vbs`"" /SC MINUTE /MO 2 /F 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { Set-Content $marker "2"; Log "The app now decides when to sync (Settings in the app). This PC checks every 2 minutes." }
+    } catch {}
+}
+Update-Task
+try {
+    $sched = Server-Json "GET" ("/agent/schedule?force=" + $(if ($Force) { "1" } else { "0" })) $null
+    if (-not $sched.run) {
+        Send-Heartbeat
+        if ($sched.why -eq "paused" -and ($Force -or $Verbose)) { Log "Syncing is paused in the app (Reports, Settings). Nothing was sent." "Yellow" }
+        elseif ($Verbose) { Log ("Not syncing now (" + $sched.why + ")") }
+        exit 0
+    }
+    if ($sched.why -eq "asked") { Log "Sync asked for in the app" }
+} catch {
+    # an older server without sync settings: carry on as before
+}
+
 $BaseFrom = $FromDate
 $exitCode = 0
 $MethodFile = Join-Path $Here "TallySync.method"
@@ -288,8 +319,13 @@ function Push-Entries($co) {
 
 foreach ($co in $companies) {
     try {
-        $madeEntries = Push-Entries $co
         $state = Server-Json "GET" ("/agent/state?company=" + [uri]::EscapeDataString($co.Name)) $null
+        if ($state.paused) {
+            # switched off in the app (Reports, Settings): send nothing for this company
+            if ($Force -or $Verbose) { Log ("Syncing is paused in the app for " + $co.Name + " - nothing sent. Resume it in Reports, Settings.") "Yellow" }
+            continue
+        }
+        $madeEntries = Push-Entries $co
         # "Delete older vouchers" in the app sets keep_from: don't send anything before it
         $FromDate = $BaseFrom
         if ($state.keep_from -and $state.keep_from -gt $BaseFrom.ToString("yyyy-MM-dd")) {
@@ -435,5 +471,5 @@ foreach ($co in $companies) {
     }
 }
 
-try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }) }) } catch {}
+Send-Heartbeat
 exit $exitCode

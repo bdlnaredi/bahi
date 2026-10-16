@@ -30,6 +30,7 @@ Bahi is a free, self-hosted alternative to apps like Credflow and Livekeeping. A
 - **PDFs like TallyPrime prints:** Tax Invoice, Receipt/Payment/Journal voucher, and Ledger Account.
 - **Enter receipts, payments and sales orders on the phone.** They go into Tally at the next sync.
 - **Staff logins** that show each person only what you allow, with your approval for their entries.
+- **Sync your way:** automatic every few minutes, manual with a **Sync now** button, or paused.
 - **Nightly backups** on your server, the last 7 kept.
 - **Works offline:** your phone keeps the last data you opened.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.

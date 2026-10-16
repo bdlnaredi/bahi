@@ -39,7 +39,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.5"
+APP_VERSION = "2.6"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -304,7 +304,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(store.agent_stats())
         if path == "/agent/state" and method == "GET":
             return self.send_json(store.get_alt(q.get("company", "")))
+        if path == "/agent/schedule" and method == "GET":
+            return self.send_json(store.sync_due(q.get("force") == "1"))
         if path == "/agent/outbox" and method == "GET":
+            if store.is_paused(q.get("company", "")):
+                return self.send_json({"entries": [], "paused": True})
             return self.send_json({"entries": entries.outbox(q.get("company", ""))})
         if path == "/agent/outbox/result" and method == "POST":
             r = json.loads(self.body(65536) or b"{}")
@@ -327,6 +331,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/agent/commit" and method == "POST":
             meta = json.loads(self.body(1 << 20))
             run = meta.get("run", "")
+            if store.is_paused(meta.get("company", "")):     # an agent too old to know about pausing
+                shutil.rmtree(os.path.join(STAGING, run), ignore_errors=True) if RUN_RE.match(run) else None
+                return self.send_json({"error": "Syncing is paused in the app (Reports, Settings). Nothing was changed."}, 409)
             if not RUN_RE.match(run):
                 return self.send_json({"error": "bad run"}, 400)
             d = os.path.join(STAGING, run)
@@ -421,9 +428,17 @@ class Handler(BaseHTTPRequestHandler):
             users.save(u["name"], password=new)
             return self.send_json({"ok": True}, headers=self.cookie_header(users.get(u["name"])))
 
+        if path == "/api/sync/now" and method == "POST":
+            self.body(4096)
+            d = store.sync_settings()
+            if d["mode"] == "paused":
+                return self.send_json({"error": "Syncing is paused. Resume it in Settings first."}, 400)
+            store.update_sync(request=True)
+            return self.send_json({"ok": True})
+
         if path == "/api/companies":
             return self.send_json({"companies": [c for c in store.companies() if users.can_company(u, c["name"])],
-                                   "now": time.time(),
+                                   "now": time.time(), "sync": {k: v for k, v in store.sync_settings().items() if k != "companies"},
                                    "approvals": sum(entries.pending_count(c["name"]) for c in store.companies()) if u["owner"] else 0})
 
         # everything below the staff list is for the owner only, except the company screens
@@ -431,6 +446,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"error": "Only the owner can do that."}, 403)
         if not u["owner"] and re.match(r"^/api/c/\d+/(purge|delete)$", path):
             return self.send_json({"error": "Only the owner can do that."}, 403)
+
+        if path == "/api/sync" and method == "POST":
+            data = json.loads(self.body(4096) or b"{}")
+            d = store.update_sync(mode=data.get("mode"), every=data.get("every"), company=str(data.get("company") or ""),
+                                  company_paused=bool(data.get("paused")))
+            return self.send_json(d)
 
         if path == "/api/users":
             if method == "POST":

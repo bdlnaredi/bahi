@@ -136,10 +136,73 @@ def _migrate(c):
         c.execute("ALTER TABLE company ADD COLUMN keep_from TEXT DEFAULT ''")
 
 
+SYNC_FILE = os.path.join(os.path.dirname(DB_PATH), "sync.json")
+SYNC_DEFAULT = {"mode": "auto", "every": 10, "requested": 0, "last_run": 0, "companies": {}}
+EVERY = [2, 5, 10, 15, 30, 60]
+
+
+def sync_settings():
+    """How the Tally PC syncs: mode auto (every N minutes) / manual (only on "Sync now") / paused,
+    plus companies paused on their own. Kept outside the database so it survives rebuilds."""
+    try:
+        with open(SYNC_FILE) as f:
+            return {**SYNC_DEFAULT, **json.load(f)}
+    except (OSError, ValueError):
+        return json.loads(json.dumps(SYNC_DEFAULT))
+
+
+def _save_sync(d):
+    tmp = SYNC_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, SYNC_FILE)
+
+
+def update_sync(mode=None, every=None, company=None, company_paused=None, request=False):
+    with _lock:
+        d = sync_settings()
+        if mode in ("auto", "manual", "paused"):
+            d["mode"] = mode
+        if every is not None and int(every) in EVERY:
+            d["every"] = int(every)
+        if company:
+            if company_paused:
+                d["companies"][company] = time.time()
+            else:
+                d["companies"].pop(company, None)
+        if request:
+            d["requested"] = time.time()
+        _save_sync(d)
+        return d
+
+
+def sync_due(forced=False):
+    """Asked by the Tally PC every couple of minutes: should it sync now?"""
+    with _lock:
+        d = sync_settings()
+        now = time.time()
+        if d["mode"] == "paused":
+            return {"run": False, "why": "paused"}
+        asked = d["requested"] > d["last_run"]
+        due = d["mode"] == "auto" and now - d["last_run"] >= d["every"] * 60 - 20
+        if forced or asked or due:
+            d["last_run"] = now
+            _save_sync(d)
+            return {"run": True, "why": "asked" if asked else "forced" if forced else "schedule"}
+        return {"run": False, "why": "manual" if d["mode"] == "manual" else "not yet"}
+
+
+def is_paused(name):
+    d = sync_settings()
+    return d["mode"] == "paused" or name in d["companies"]
+
+
 def get_alt(name):
     with conn() as c:
         r = c.execute("SELECT alt_vch, alt_mst, from_date, last_sync, keep_from FROM company WHERE name=?", (name,)).fetchone()
-        return dict(r) if r else {}
+        out = dict(r) if r else {}
+    out["paused"] = is_paused(name)
+    return out
 
 
 def keep_from(c, cid):
@@ -323,12 +386,16 @@ def _rows(c, sql, args=()):
 
 def companies():
     with conn() as c:
-        return _rows(c, """SELECT id, name, last_sync, last_seen, from_date, to_date, unbalanced, keep_from,
+        rows = _rows(c, """SELECT id, name, last_sync, last_seen, from_date, to_date, unbalanced, keep_from,
             (SELECT MIN(date) FROM voucher v WHERE v.company_id=company.id) first_vch,
             (SELECT MAX(date) FROM voucher v WHERE v.company_id=company.id) last_vch,
             (SELECT COUNT(*) FROM ledger l WHERE l.company_id=company.id) ledgers,
             (SELECT COUNT(*) FROM voucher v WHERE v.company_id=company.id) vouchers
             FROM company WHERE last_sync IS NOT NULL ORDER BY name""")
+    p = sync_settings()
+    for r in rows:
+        r["paused"] = p["mode"] == "paused" or r["name"] in p["companies"]
+    return rows
 
 
 def fy_bounds(day=None):
