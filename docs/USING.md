@@ -131,6 +131,10 @@ Stock is the **total of all your godowns**, as in Tally's own item balance: a go
 
 Opening and closing stock, quantity and value, are **Tally's own figures** for whole months, quarters and years: the Tally PC reads each item's stock from Tally at every month-end. For a period that starts or ends in the middle of a month, Bahi starts from the nearest month-end and adds the vouchers after it, and marks the value ≈. **Excel** downloads the same table. Tap an item to see each voucher that moved it.
 
+### Stock by godown
+
+**Stock → Stock by godown** lists each godown with the value it holds; tap one to see its items. An item's page also shows **In each godown now**. Each godown's figure is the item's opening in that godown (from Tally) plus every voucher Bahi has that moved stock in or out of it, so a late transfer can make one godown negative for a while; it's shown in red rather than hidden. The total of all godowns is always Tally's own closing. Stock Bahi can't place in a godown (for example from vouchers older than your sync start date) shows as *Not split by godown*. Godown details arrive with the first full sync after the update.
+
 ## Reports
 
 <img src="images/reports.png" width="260" align="right" alt="Reports menu">
@@ -188,6 +192,21 @@ Opening and closing stock are Tally's own figures for whole months, quarters and
 - **Day** lists each day, newest first, with money in and out and the closing balance. Tap a day to see its entries, and tap an entry to open the voucher. Transfers between your own accounts are marked *transfer* and don't count as money in or out for the day.
 
 <br clear="right">
+
+## Bank reconciliation
+
+**Reports → Bank reconciliation** matches your bank statement with the bank ledger in Tally.
+
+1. In net banking, download the statement for the period as **Excel or CSV**. The `.xls` file most Indian banks give works too. A PDF statement doesn't; download Excel instead.
+2. Pick the bank ledger, choose the file, and tap **Upload and match**.
+
+Bahi pairs each statement line with a Tally entry on that ledger of the same amount and direction, up to 7 days apart (longer for an issued cheque when the cheque number appears on both sides). You then see:
+
+- **Not in bank yet:** entries in Tally the bank hasn't shown, such as cheques issued but not presented and deposits not yet credited.
+- **Not in Tally:** bank lines with no Tally entry, usually bank charges, interest and direct transfers. Enter them in Tally; after the next sync they move to Matched. If Bahi missed a pair, tap **Pair with a Tally entry**.
+- **Matched:** each pair, with the day gap.
+
+At the top is the reconciliation statement: the balance as per Tally, adjusted by the items above, gives the balance the bank should show, compared with the closing balance on the statement. Upload next month's statement to the same ledger and it adds to the earlier one; lines already there aren't counted twice.
 
 ## Follow-up list
 
@@ -310,6 +329,10 @@ The Tally PC checks with the app every 2 minutes, so **Sync now** starts within 
 
 On the Tally PC itself, `Pause-Sync.bat` stops the automatic task completely and `Resume-Sync.bat` starts it again. `Sync-Now.bat` still works when the PC is paused this way.
 
+### The Tally PC updates itself
+
+When the app is updated on the server, the Tally PC picks up the new sync files on its own at its next check and carries on; there's no zip to copy any more. Settings shows the version the Tally PC runs. To control updates by hand, untick **Update the Tally PC files automatically** in Settings.
+
 ## Interest on overdue bills
 
 Turn it on in **Reports → Settings → Interest on overdue bills** and set the rate (e.g. 18% a year) and any grace days. Bahi then works out simple interest on each overdue customer bill, from its due date (or its bill date when it has no credit period). It shows:
@@ -323,19 +346,6 @@ Nothing is posted in Tally. Raise an interest voucher in Tally yourself if you c
 ## Stock alerts
 
 On an item's page, set **Alert me on Telegram when stock falls below …**. After each sync, Telegram tells you once when an item goes below its minimum, and once when any item goes negative (all godowns together), which usually means an entry is missing. The Stock list marks these items, and **"… need attention"** at the top shows just them. The morning summary counts them too. Turn the alerts off in the Telegram settings.
-
-## GSTR-2B check
-
-**Reports → GSTR-2B check** (also from the GST summary). On the GST portal go to **Returns → GSTR-2B**, pick the month and download the **JSON** (or Excel) file, then choose it here. Bahi matches every supplier invoice and note with your purchases by supplier GSTIN and invoice number (Tally's *Supplier Invoice No.*, or the voucher number) and shows:
-
-| Tab | Meaning |
-|---|---|
-| **Not in Tally** | On the portal but not booked (or booked with a different number or GSTIN). Book them to claim the credit. |
-| **Amount differs** | Found in both, but the taxable value or a tax head differs by more than ₹1. |
-| **Not in GSTR-2B** | Purchases with GST booked in Tally for that month that the supplier hasn't reported. That credit is at risk. |
-| **Matched** | Same in both. |
-
-Uploaded months are kept; opening one again checks it against your latest books. **Excel** downloads the whole result.
 
 ## e-Invoice and e-Way Bill on invoices
 

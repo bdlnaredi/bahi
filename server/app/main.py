@@ -30,7 +30,7 @@ import notify  # noqa: E402
 import backup  # noqa: E402
 import users  # noqa: E402
 import entries  # noqa: E402
-import gstr2b  # noqa: E402
+import bankrec  # noqa: E402
 import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -40,7 +40,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.9.1"
+APP_VERSION = "3.0.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -85,6 +85,32 @@ def _secret():
         st = _stored_pw()
         # changing the password signs every other phone out
         return (f.read().strip() + (st["hash"] if st else APP_PASSWORD)).encode()
+
+
+# ---------------------------------------------------------------- Tally PC files for self-update
+AGENT_DIR = next((p for p in (os.path.join(os.path.dirname(__file__), "agent_files"),
+                              os.path.join(os.path.dirname(__file__), "..", "..", "agent")) if os.path.isdir(p)), "")
+
+
+def agent_files():
+    """{name: bytes} of the Tally PC files this server carries (.bat/.vbs with Windows line ends)."""
+    out = {}
+    if not AGENT_DIR:
+        return out
+    for n in sorted(os.listdir(AGENT_DIR)):
+        if re.match(r"^[A-Za-z0-9_.-]+\.(ps1|bat|vbs)$", n):
+            with open(os.path.join(AGENT_DIR, n), "rb") as f:
+                b = f.read()
+            if n.endswith((".bat", ".vbs")):
+                b = b.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+            out[n] = b
+    return out
+
+
+def agent_version():
+    b = agent_files().get("TallySync.ps1", b"")
+    m = re.search(rb'\$AgentVersion\s*=\s*"([^"]+)"', b)
+    return m.group(1).decode() if m else ""
 
 
 def make_session(user=None):
@@ -219,14 +245,14 @@ class Handler(BaseHTTPRequestHandler):
         co = next((c for c in store.companies() if c["id"] == cid), None)
         if not co or not users.can_company(u, co["name"]):
             return False
-        need = {"dashboard": "accounts", "daily": "sales", "group": "accounts", "stock": "stock", "stock_item": "stock",
+        need = {"dashboard": "accounts", "daily": "sales", "group": "accounts", "stock": "stock", "stock_item": "stock", "godowns": "stock",
                 "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
                 "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
-                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts"}
+                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
-                    "ledger": "ledger", "gstr2b": "gst"}.get(w, "a_items" if w.startswith("a_") else "")
+                    "ledger": "ledger"}.get(w, "a_items" if w.startswith("a_") else "")
             if not what:
                 return False
         if what in need:
@@ -305,6 +331,20 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(store.agent_stats())
         if path == "/agent/state" and method == "GET":
             return self.send_json(store.get_alt(q.get("company", "")))
+        if path == "/agent/update" and method == "GET":
+            files = agent_files()
+            return self.send_json({"version": agent_version(), "auto": store.sync_settings().get("agent_auto", True),
+                                   "files": [{"name": n, "sha256": hashlib.sha256(b).hexdigest(), "size": len(b)} for n, b in files.items()]})
+        if path == "/agent/update/file" and method == "GET":
+            b = agent_files().get(q.get("name", ""))
+            if b is None:
+                return self.send_json({"error": "not found"}, 404)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
         if path == "/agent/schedule" and method == "GET":
             return self.send_json(store.sync_due(q.get("force") == "1"))
         if path == "/agent/outbox" and method == "GET":
@@ -316,12 +356,15 @@ class Handler(BaseHTTPRequestHandler):
             entries.result(int(r.get("id", 0)), bool(r.get("ok")), str(r.get("error") or ""), bool(r.get("retry")))
             return self.send_json({"ok": True})
         if path == "/agent/heartbeat" and method == "POST":
-            store.heartbeat(json.loads(self.body(1 << 20) or b"{}").get("companies", []))
+            hb = json.loads(self.body(1 << 20) or b"{}")
+            store.heartbeat(hb.get("companies", []))
+            if hb.get("agent"):
+                store.update_sync(agent_version=str(hb["agent"])[:20])
             return self.send_json({"ok": True})
         if path == "/agent/part" and method == "POST":
             run, kind = q.get("run", ""), q.get("kind", "")
             if not RUN_RE.match(run) or kind not in ("groups", "vtypes", "ledgers", "stock", "daybook", "bills_rec", "bills_pay",
-                                                             "company", "ledger_x", "stock_x", "stockat", "einv"):
+                                                             "company", "ledger_x", "stock_x", "stockat", "einv", "stock_godown"):
                 return self.send_json({"error": "bad part"}, 400)
             if kind == "stockat":
                 day = q.get("date", "")
@@ -354,7 +397,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def commit(self, d, meta):
         parts = {"groups": [], "vtypes": [], "ledgers": [], "stock": [], "daybook": [],
-                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}, "stock_at": {}, "einv": {}}
+                 "bills_rec": None, "bills_pay": None, "company": {}, "ledger_x": {}, "stock_x": {}, "stock_at": {}, "einv": {},
+                 "stock_godown": None}
         skipped = []
         extra_fns = {"company": tp.parse_company_info, "ledger_x": tp.parse_ledger_extra, "stock_x": tp.parse_stock_extra}
         fns = {"groups": tp.parse_groups, "vtypes": tp.parse_vtypes, "ledgers": tp.parse_ledgers,
@@ -363,6 +407,12 @@ class Handler(BaseHTTPRequestHandler):
             kind = fn.split("_", 1)[1].rsplit(".", 1)[0]
             with open(os.path.join(d, fn), "rb") as f:
                 raw = f.read()
+            if kind == "stock_godown":
+                try:
+                    parts["stock_godown"] = tp.parse_stock_godowns(tp.parse_xml(raw))
+                except Exception as e:
+                    print("godown openings not usable:", e, file=sys.stderr)
+                continue
             if kind == "einv":
                 try:
                     for v in tp.parse_xml(raw).iter("VOUCHER"):
@@ -418,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
                             parts["ledger_x"], parts["stock_x"],
                             meta.get("months") if isinstance(meta.get("months"), list) else None,
                             [str(g) for g in meta["guids"]] if isinstance(meta.get("guids"), list) else None,
-                            parts["stock_at"])
+                            parts["stock_at"], parts["stock_godown"])
 
     # ------------------------------------------------------------ app endpoints
     def api(self, method, path, q):
@@ -476,7 +526,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/companies":
             return self.send_json({"companies": [c for c in store.companies() if users.can_company(u, c["name"])],
-                                   "now": time.time(), "sync": {k: v for k, v in store.sync_settings().items() if k != "companies"},
+                                   "now": time.time(), "sync": {**{k: v for k, v in store.sync_settings().items() if k != "companies"}, "agent_latest": agent_version()},
                                    "approvals": sum(entries.pending_count(c["name"]) for c in store.companies()) if u["owner"] else 0})
 
         # everything below the staff list is for the owner only, except the company screens
@@ -488,7 +538,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/sync" and method == "POST":
             data = json.loads(self.body(4096) or b"{}")
             d = store.update_sync(mode=data.get("mode"), every=data.get("every"), company=str(data.get("company") or ""),
-                                  company_paused=bool(data.get("paused")))
+                                  company_paused=bool(data.get("paused")),
+                                  agent_auto=data.get("agent_auto") if isinstance(data.get("agent_auto"), bool) else None)
             return self.send_json(d)
 
         if path == "/api/users":
@@ -560,38 +611,44 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self.send_json({"error": str(e)}, 400)
 
-        mp = re.match(r"^/api/c/(\d+)/gstr2b$", path)
+        mp = re.match(r"^/api/c/(\d+)/brs$", path)
         if mp:
             cid = int(mp.group(1))
-            if not self.allowed(cid, "gst", q, None):
+            if not self.allowed(cid, "brs", q, None):
                 return self.send_json({"error": "You don't have access to this. Ask the owner."}, 403)
             co = next((c for c in store.companies() if c["id"] == cid), None)
             if not co:
                 return self.send_json({"error": "not found"}, 404)
+            leds = bankrec.bank_ledgers(cid)
+            ledger = unquote(q.get("ledger", ""))
+            if ledger and ledger not in leds:
+                return self.send_json({"error": "That isn't a bank ledger in Tally."}, 400)
             if method == "POST":
-                raw = self.body(40 * 1024 * 1024)
+                if q.get("action") == "clear":
+                    bankrec.clear(co["name"], ledger)
+                    return self.send_json({"ok": True})
+                if q.get("action") == "pair":
+                    data = json.loads(self.body(4096) or b"{}")
+                    bankrec.pair(co["name"], ledger, int(data.get("n", -1)), data.get("vid"))
+                    return self.send_json({"ok": True})
+                raw = self.body(20 * 1024 * 1024)
                 fname = unquote(self.headers.get("X-Filename") or "")
                 try:
-                    period, gstin, docs = gstr2b.parse(raw, fname)
+                    txns = bankrec.parse(raw, fname)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
                 except Exception as e:
-                    return self.send_json({"error": f"Couldn't read that file ({type(e).__name__}). Download GSTR-2B from the portal as JSON or Excel."}, 400)
-                if not re.match(r"^\d{6}$", period or ""):
-                    period = (q.get("period") or "").strip()
-                    if not re.match(r"^\d{6}$", period):
-                        return self.send_json({"error": "Which month is this GSTR-2B for?", "need_period": True}, 400)
-                if not docs:
-                    return self.send_json({"error": "No supplier invoices found in that file."}, 400)
-                gstr2b.save(co["name"], period, gstin, docs, fname)
-                return self.send_json({"period": period, **gstr2b.check(cid, period, docs)})
-            period = q.get("period", "")
-            if period:
-                saved = gstr2b.load(co["name"], period)
-                if not saved:
-                    return self.send_json({"error": "not found"}, 404)
-                return self.send_json({**gstr2b.check(cid, period, saved["docs"]), "uploaded": saved.get("uploaded"), "file": saved.get("file")})
-            return self.send_json({"checks": gstr2b.listing(co["name"])})
+                    return self.send_json({"error": f"Couldn't read that file ({type(e).__name__}). Download the statement as Excel or CSV."}, 400)
+                added = bankrec.save(co["name"], ledger, txns, fname)
+                saved = bankrec.load(co["name"], ledger)
+                return self.send_json({**bankrec.check(cid, ledger, saved, txns[0]["date"], txns[-1]["date"]), "added": added})
+            out = {"ledgers": [{"name": n, "saved": bool(bankrec.load(co["name"], n))} for n in leds]}
+            if ledger:
+                saved = bankrec.load(co["name"], ledger)
+                if saved and saved.get("txns"):
+                    f, t = q.get("from") or None, q.get("to") or None
+                    out.update(bankrec.check(cid, ledger, saved, f, t))
+            return self.send_json(out)
 
         mp = re.match(r"^/api/c/(\d+)/stockmin$", path)
         if mp and method == "POST":
@@ -660,6 +717,8 @@ class Handler(BaseHTTPRequestHandler):
             out = store.group(cid, name)
         elif what == "stock":
             out = store.stock(cid, q.get("q", ""), f, t)
+        elif what == "godowns":
+            out = store.godown_stock(cid)
         elif what == "stock_item":
             out = store.stock_item(cid, name, f, t)
         elif what == "outstanding":

@@ -138,6 +138,9 @@ To update: **Compose Pull**, then **Compose Up**.
 | `Setup.bat` | Change the server address, token or from-date |
 | `Diagnose.bat` | Writes a short report of voucher counts, for checking a sync problem |
 | `Save-Voucher.bat` | Saves everything Tally has for one voucher into `voucher-sample.xml`, if asked for it to check a problem |
+| `Save-Stock.bat` | Saves Tally's stock figures for a date into `stock-sample.xml`, if asked for it to check a stock problem |
+
+You only copy these files once. After that the Tally PC updates them itself whenever the server is updated.
 
 ## 5. Reach the app from your phone
 

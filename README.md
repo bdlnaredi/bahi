@@ -24,7 +24,8 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **Ledgers:** sort by name, balance or recent activity. Search any ledger and see the full statement with running balance. Call, WhatsApp, or share a PDF.
 - **Vouchers:** search by party, voucher number, amount or narration. Open any voucher as an invoice with items, GST, bill references and narration.
 - **Dues:** bill-wise receivables and payables with ageing (0-30, 31-60, 61-90 and 90+ days), overdue amounts, and WhatsApp payment reminders that list the overdue bills.
-- **Stock:** quantity, rate and value of every item, plus item movements.
+- **Stock:** quantity, rate and value of every item, plus item movements, and **stock by godown**.
+- **Bank reconciliation:** upload the bank statement (Excel or CSV) and see what's matched, what the bank hasn't shown yet, and what's missing in Tally.
 - **Balance Sheet and Profit & Loss in Tally's own layout**, and a **cash and bank book** with daily opening and closing balances.
 - **Follow-up list:** overdue and due-this-week customers, with your notes and promised payment dates.
 - **Sales analysis:** customers and items against last year, item margins, month by month this year against last, and slow-moving stock.
@@ -34,8 +35,7 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **PDFs like TallyPrime prints:** Tax Invoice, Receipt/Payment/Journal voucher, and Ledger Account.
 - **Enter receipts, payments and sales orders on the phone.** They go into Tally at the next sync.
 - **Staff logins** that show each person only what you allow, with your approval for their entries.
-- **Sync your way:** automatic every few minutes, manual with a **Sync now** button, or paused.
-- **GSTR-2B check:** upload the portal file and see which supplier bills are missing, differ, or are at risk.
+- **Sync your way:** automatic every few minutes, manual with a **Sync now** button, or paused. The Tally PC **updates itself** when the server is updated.
 - **Interest on overdue bills**, **stock alerts** on Telegram, **e-invoice QR and e-way bill** on invoice PDFs, and **Hindi** in PDFs.
 - **Nightly backups** on your server, the last 7 kept.
 - **Works offline:** your phone keeps the last data you opened.

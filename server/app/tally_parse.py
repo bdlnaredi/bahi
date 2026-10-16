@@ -216,6 +216,21 @@ def parse_bill_report(root):
     return [b for b in out if b["party"] and b["amount"] > 0.005]
 
 
+def parse_stock_godowns(root):
+    """{item: [(godown, opening qty)]} from stock item masters' opening batch allocations."""
+    out = {}
+    for el in root.iter("STOCKITEM"):
+        n = name_of(el)
+        if not n:
+            continue
+        for b in el.findall("BATCHALLOCATIONS.LIST"):
+            g = (b.findtext("GODOWNNAME") or "").strip().lstrip("\x04").strip()
+            q = txt(b, "OPENINGBALANCE")
+            if g and q:
+                out.setdefault(n, []).append((g, num(q)))
+    return out
+
+
 def parse_stock(root):
     out = []
     for el in root.iter("STOCKITEM"):
@@ -272,8 +287,19 @@ def _inv_row(e, force_dir=None):
     # Invoice line made against a delivery / receipt note: Tally moved the stock on the note already
     tracked = any((t.text or "").strip().lstrip("\x04").strip().lower() not in ("", "not applicable")
                   for t in e.findall("BATCHALLOCATIONS.LIST/TRACKINGNUMBER"))
+    # where the stock went: godown and quantity of each batch allocation (same sign as the line)
+    sign = 1 if inward else -1
+    godowns = []
+    for b in e.findall("BATCHALLOCATIONS.LIST"):
+        g = (b.findtext("GODOWNNAME") or "").strip().lstrip("\x04").strip()
+        bq = txt(b, "ACTUALQTY") or txt(b, "BILLEDQTY")
+        if g:
+            godowns.append((g, sign * abs(num(bq)) if bq else None))
+    if godowns and any(q is None for _, q in godowns):
+        godowns = [(g, sign * qty / len(godowns)) for g, _ in godowns] if len(godowns) > 1 else [(godowns[0][0], sign * qty)]
     return {
         "tracked": tracked,
+        "godowns": godowns,
         "item": item,
         "qty": qty if inward else -qty,
         "unit": unit_of(qtxt) or rtxt.split("/")[-1].strip() if "/" in rtxt else unit_of(qtxt),

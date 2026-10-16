@@ -3,6 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
+$AgentVersion = "3.1"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -25,12 +26,55 @@ $Cfg = Get-Content $CfgPath -Raw | ConvertFrom-Json
 $Server = $Cfg.ServerUrl.TrimEnd("/")
 $Tally  = if ($Cfg.TallyUrl) { $Cfg.TallyUrl } else { "http://localhost:9000" }
 
+# ------------------------------------------------------------------ self-update
+# The server carries the latest Tally PC files. When its version differs from this one, download them,
+# check each file's SHA-256, replace them, and run the new version straight away.
+function Self-Update {
+    if ($env:BAHI_JUST_UPDATED -eq "1") { return }
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add("Authorization", "Bearer " + $Cfg.SyncToken)
+        $u = $wc.DownloadString($Server + "/agent/update") | ConvertFrom-Json
+    } catch { return }                                   # an older server without updates
+    if (-not $u.version -or $u.version -eq $AgentVersion -or -not $u.auto) { return }
+    $tmp = Join-Path $Here ".update"
+    try {
+        if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        foreach ($f in @($u.files)) {
+            if ($f.name -notmatch '^[A-Za-z0-9_.-]+\.(ps1|bat|vbs)$') { throw "unexpected file name" }
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("Authorization", "Bearer " + $Cfg.SyncToken)
+            $bytes = $wc.DownloadData($Server + "/agent/update/file?name=" + [uri]::EscapeDataString($f.name))
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            $hash = -join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString("x2") })
+            if ($hash -ne $f.sha256) { throw ("download of " + $f.name + " was damaged") }
+            [System.IO.File]::WriteAllBytes((Join-Path $tmp $f.name), $bytes)
+        }
+        foreach ($f in @($u.files)) { Move-Item -Force (Join-Path $tmp $f.name) (Join-Path $Here $f.name) }
+        Remove-Item $tmp -Recurse -Force
+    } catch {
+        Log ("Could not update the Tally PC files: " + $_.Exception.Message + " - carrying on with version $AgentVersion") "Yellow"
+        try { Remove-Item $tmp -Recurse -Force } catch {}
+        return
+    }
+    Log ("Tally PC files updated from version $AgentVersion to " + $u.version) "Green"
+    $env:BAHI_JUST_UPDATED = "1"
+    $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $Here "TallySync.ps1"))
+    if ($Force) { $argv += "-Force" }
+    if ($Verbose) { $argv += "-Verbose" }
+    $exe = (Get-Process -Id $PID).Path
+    & $exe @argv
+    exit $LASTEXITCODE
+}
+
 # Financial year (India): April to March
 $today = Get-Date
 $fyStartYear = if ($today.Month -ge 4) { $today.Year } else { $today.Year - 1 }
 $FromDate = if ($Cfg.FromDate) { [datetime]::ParseExact($Cfg.FromDate, "yyyy-MM-dd", $null) } else { Get-Date -Year $fyStartYear -Month 4 -Day 1 }
 $ToDate   = Get-Date -Year ($fyStartYear + 1) -Month 3 -Day 31
 $FromDate = $FromDate.Date; $ToDate = $ToDate.Date
+Self-Update
 
 function Esc([string]$s) { return [System.Security.SecurityElement]::Escape($s) }
 # Tally's own date style (1-Apr-2026) - understood by every TallyPrime release
@@ -88,6 +132,9 @@ $VchFields = @(
     "LedgerEntries.BillAllocations.Amount", "LedgerEntries.BillAllocations.BillCreditPeriod",
     "AllInventoryEntries.StockItemName", "AllInventoryEntries.ActualQty", "AllInventoryEntries.BilledQty",
     "AllInventoryEntries.BatchAllocations.TrackingNumber", "AllInventoryEntries.BatchAllocations.GodownName",
+    "AllInventoryEntries.BatchAllocations.ActualQty",
+    "InventoryEntriesIn.BatchAllocations.GodownName", "InventoryEntriesIn.BatchAllocations.ActualQty",
+    "InventoryEntriesOut.BatchAllocations.GodownName", "InventoryEntriesOut.BatchAllocations.ActualQty",
     "AllInventoryEntries.Rate", "AllInventoryEntries.Amount", "AllInventoryEntries.IsDeemedPositive",
     "AllInventoryEntries.Discount", "AllInventoryEntries.AccountingAllocations.LedgerName",
     "AllInventoryEntries.AccountingAllocations.Amount",
@@ -279,7 +326,7 @@ catch { Log ("Tally is not reachable on $Tally - is TallyPrime open? (" + $_.Exc
 if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yellow"; exit 3 }
 
 function Send-Heartbeat {
-    try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }) }) } catch {}
+    try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }); agent = $AgentVersion }) } catch {}
 }
 
 # The scheduled task runs every 2 minutes; the app decides whether it is time to sync
@@ -445,6 +492,9 @@ foreach ($co in $companies) {
             "Name, Parent, OpeningBalance, ClosingBalance, LedgerPhone, LedgerMobile, Email, PartyGSTIN, TaxType, GSTDutyHead" $co.Name))
         Send-Part $run "stock"   (Tally-Raw (Collection-Xml "TMStock" "StockItem" `
             "Name, Parent, BaseUnits, OpeningBalance, OpeningValue, ClosingBalance, ClosingValue, ClosingRate" $co.Name))
+        # each item's opening stock by godown (separate, so a Tally that doesn't give it can't stop the sync)
+        try { Send-Part $run "stock_godown" (Tally-Raw (Collection-Xml "TMStockGdn" "StockItem" "Name, BatchAllocations" $co.Name)) }
+        catch { if ($Verbose) { Log ("Godown openings not read: " + $_.Exception.Message) "Gray" } }
 
         if ($mastersChanged) {
             # Details used for printing invoices and statements (optional - skipped if Tally refuses)

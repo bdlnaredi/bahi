@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.9.1";
+const APP_VERSION = "3.0.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -174,7 +174,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", gstr2b: "reports", day: "sales", stock: "reports", groups: "reports" };
+  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
   document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
@@ -475,7 +475,7 @@ async function vStock(q = "") {
         <div class="sc"><span class="lbl">In / Out</span><b class="up">+${nfq.format(i.in_qty)}</b><b class="down">−${nfq.format(i.out_qty)}</b></div>
         <div class="sc"><span class="lbl">Closing</span><b>${qty(i.close_qty, i.unit)}</b><span class="meta">${i.close_exact ? "" : "≈ "}${money(i.close_value)}</span></div></a>`).join("")
       || '<div class="empty">No stock item matches that name.</div>'}</section>
-    <div class="actions" style="padding:0 0 4px">${excelBtn("stock", periodParams())}</div>
+    <div class="actions" style="padding:0 0 4px"><a class="btn" href="#/godowns">Stock by godown</a>${excelBtn("stock", periodParams())}</div>
     <p class="note" style="border:0">Set a minimum on an item's page to be told on Telegram when it runs low. Negative stock (all godowns together) is flagged too.</p>
     <p class="note" style="border:0;margin-top:0">Opening and closing are Tally's own figures for whole months, quarters and years, across all godowns. For other dates Bahi works them out from the nearest month-end and marks them ≈.</p>`;
   const sf = $("#sflag"); if (sf) sf.onclick = (e) => { e.preventDefault(); S.sflag = !S.sflag; vStock(S.sq || "").catch(fail); };
@@ -498,6 +498,11 @@ async function vItem(name) {
     ${can("stock") ? `<section class="page"><form class="form" id="minf" style="padding-top:12px">
       <label>Alert me on Telegram when stock falls below<span style="display:flex;gap:8px;align-items:center"><input type="number" name="min" min="0" step="any" value="${d.period.min ?? ""}" placeholder="no minimum" style="flex:1"> ${h(I.unit || "")}</span></label>
       <button class="btn" type="submit">Save minimum</button></form></section>` : ""}
+    ${d.godowns && d.godowns.length ? `<section class="page"><div class="block-title">In each godown now</div>
+      ${d.godowns.map((g) => `<div class="row"><div class="main"><div class="name">${h(g.godown)}</div></div>
+        <div class="end"><span class="amt${g.qty < 0 ? " down" : ""}">${qty(g.qty, I.unit)}</span></div></div>`).join("")}
+      <div class="row"><div class="main"><div class="name"><b>All godowns</b></div></div><div class="end"><b class="amt">${qty(I.closing_qty, I.unit)}</b></div></div>
+    </section>` : ""}
     <section class="page"><div class="block-title">Movements</div>
       ${d.moves.map((m) => `<a class="row" href="#/voucher/${m.id}"><div class="main"><div class="name">${h(m.party || m.vtype)}</div>
         <div class="meta">${fdate(m.date)}, ${h(m.vtype)} ${h(m.number)}${m.rate ? `, ₹${nf2.format(m.rate)}` : ""}</div></div>
@@ -511,6 +516,101 @@ async function vItem(name) {
     e.preventDefault();
     const r = await fetch(cpath("stockmin"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item: name, min: mf.min.value }) });
     toast(r.ok ? (mf.min.value ? `You'll get a Telegram message when ${name} falls below ${mf.min.value}.` : "Minimum removed.") : "Couldn't save.");
+  };
+}
+
+async function vGodowns(g) {
+  setTitle(true);
+  const d = await api(cpath("godowns"));
+  if (!d.split) {
+    view.innerHTML = `<h1 class="title">Stock by godown</h1><div class="empty">Your stock isn't split into godowns in Tally, or the Tally PC hasn't sent godown details yet (they come with the next full sync).</div>`;
+    return;
+  }
+  const rows = g ? d.rows.filter((r) => r.godown === g) : [];
+  view.innerHTML = `<h1 class="title">${g ? h(g) : "Stock by godown"}</h1>
+    ${g ? `<section class="page">${rows.map((r) => `<a class="row" href="#/item/${enc(r.item)}"><div class="main"><div class="name">${h(r.item)}${r.qty < 0 ? ' <span class="badge negative">negative here</span>' : ""}</div><div class="meta">${h(r.parent || "")}</div></div>
+        <div class="end"><span class="amt${r.qty < 0 ? " down" : ""}">${qty(r.qty, r.unit)}</span><div class="meta">${money(r.value)}</div></div></a>`).join("") || '<div class="empty">Nothing here.</div>'}</section>`
+    : `<section class="page">${d.godowns.map((x) => `<a class="row" href="#/godowns/${enc(x.godown)}"><div class="main"><div class="name">${h(x.godown)}</div>
+        <div class="meta">${x.items} item${x.items === 1 ? "" : "s"}${x.negative ? `, <span class="down">${x.negative} negative</span>` : ""}</div></div><div class="end"><span class="amt">${money(x.value)}</span></div></a>`).join("")}</section>`}
+    <p class="note" style="border:0">Godown figures are each item's opening in that godown plus the vouchers Bahi has. A godown can show negative when a transfer was entered late; the total of all godowns is always Tally's closing, and that is what the Stock page and alerts use.${d.godowns.some((x) => x.godown === "Not split by godown") ? " “Not split by godown” is stock Tally counts in the total but Bahi couldn't place, for example from vouchers older than the sync start." : ""}</p>`;
+}
+
+async function vBRS(ledger) {
+  setTitle(true);
+  if (S.brsLed !== ledger) { S.brsLed = ledger; S.brsFrom = S.brsTo = ""; S.brsTab = "tally"; }
+  const d = await api(cpath("brs", { ledger: ledger || "", from: S.brsFrom || "", to: S.brsTo || "" }));
+  if (!ledger) {
+    if (d.ledgers.length === 1) { location.replace("#/brs/" + enc(d.ledgers[0].name)); return; }
+    view.innerHTML = `<h1 class="title">Bank reconciliation</h1><section class="page">${d.ledgers.map((l) => `<a class="row" href="#/brs/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div><div class="meta">${l.saved ? "Statement uploaded" : "No statement yet"}</div></div><span class="chev"></span></a>`).join("") || '<div class="empty">No bank ledgers found in Tally (ledgers under Bank Accounts or Bank OD A/c).</div>'}</section>`;
+    return;
+  }
+  const amt = (a) => `<span class="amt ${a < 0 ? "down" : "up"}">${a < 0 ? "−" : "+"}${nf2.format(Math.abs(a))}</span>`;
+  const vrow = (v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div><div class="meta">${fdate(v.date)}, ${h(v.vtype)} ${h(v.number)}${v.narration ? ", " + h(v.narration.slice(0, 80)) : ""}</div></div><div class="end">${amt(v.amount)}</div></a>`;
+  const brow = (b, extra = "") => `<div class="row"><div class="main"><div class="name">${h(b.desc || "(no description)")}</div><div class="meta">${fdate(b.date)}${b.ref ? ", ref " + h(b.ref) : ""}</div>${extra}</div><div class="end">${amt(b.amount)}</div></div>`;
+  const upload = `<form class="form" id="brsf"><label>${d.matched ? "Add another statement" : "Bank statement"}<input type="file" id="brsfile" accept=".xlsx,.xls,.csv,.txt,.htm,.html" required></label>
+      <button class="btn" type="submit">Upload and match</button><p class="meta" id="brsmsg" role="status"></p></form>`;
+  if (!d.matched) {
+    view.innerHTML = `<h1 class="title">${h(ledger)}</h1><section class="page"><div class="info">
+      <div><b>1.</b> In net banking, download the account statement for the period as Excel (or CSV).</div>
+      <div><b>2.</b> Choose that file here. Bahi matches every line with the entries on this ledger in Tally.</div></div>${upload}</section>`;
+  } else {
+    const s = d.summary, tab = S.brsTab || "tally";
+    const notBank = [...d.pending, ...d.tally_only];
+    const list = tab === "tally" ? (notBank.map(vrow).join("") || '<div class="empty">Everything in Tally shows in the bank.</div>')
+      : tab === "bank" ? (d.bank_only.map((b) => brow(b, (d.candidates[b.n] || []).length ? `<button class="linkbtn" data-pair="${b.n}">Pair with a Tally entry</button>` : "")).join("") || '<div class="empty">Every bank entry is in Tally.</div>')
+      : d.matched.map((m) => `<a class="row" href="#/voucher/${m.tally.id}"><div class="main"><div class="name">${h(m.tally.party || m.tally.vtype)}</div><div class="meta">Tally ${fdate(m.tally.date)} ${h(m.tally.vtype)} ${h(m.tally.number)} · Bank ${fdate(m.bank.date)}${m.days ? ` (${m.days > 0 ? "+" : ""}${m.days} days)` : ""}${m.manual ? " · paired by you" : ""}</div><div class="meta">${h(m.bank.desc)}</div></div><div class="end">${amt(m.bank.amount)}</div></a>`).join("");
+    const line = (l, v, cls = "") => `<div class="row"><div class="main">${l}</div><div class="end"><span class="amt ${cls}">${v === null || v === undefined ? "–" : nf2.format(v)}</span></div></div>`;
+    view.innerHTML = `<h1 class="title">${h(ledger)}</h1>
+      <div class="dates" style="margin:6px 0 10px"><input type="date" id="bf" value="${d.from}" min="${d.first}" max="${d.last}" aria-label="From date"> to <input type="date" id="bt" value="${d.to}" min="${d.first}" max="${d.last}" aria-label="To date"> <button class="chip" id="bapply">Show</button></div>
+      <section class="page"><div class="block-title">Reconciliation on ${fdate(d.to)}</div>
+        ${line("Balance as per Tally", s.tally)}
+        ${line("Add: cheques issued, not yet in the bank", s.unpresented)}
+        ${line("Less: deposits not yet credited by the bank", s.uncleared)}
+        ${line("Add: credits in the bank, not in Tally", s.bank_cr)}
+        ${line("Less: debits in the bank, not in Tally", s.bank_dr)}
+        ${line("<b>Balance as per bank (worked out)</b>", s.expected)}
+        ${s.statement !== null ? line("Balance shown on the statement", s.statement) : ""}
+        ${s.diff !== null ? (Math.abs(s.diff) < 0.5 ? `<p class="note" style="border:0">The statement balance agrees.</p>` : `<p class="note od" style="border:0">Differs from the statement by ${nf2.format(s.diff)}. Usually an entry dated before ${fdate(d.from)} is still pending, or the statement doesn't start where the Tally balance does.</p>`) : ""}
+      </section>
+      <div class="toolbar" role="group" aria-label="Show">
+        <button class="chip ${tab === "tally" ? "on" : ""}" data-tab="tally">Not in bank yet <span class="cnt">${notBank.length}</span></button>
+        <button class="chip ${tab === "bank" ? "on" : ""}" data-tab="bank">Not in Tally <span class="cnt">${d.bank_only.length}</span></button>
+        <button class="chip ${tab === "matched" ? "on" : ""}" data-tab="matched">Matched <span class="cnt">${d.matched.length}</span></button></div>
+      <section class="page">${list}</section>
+      ${tab === "bank" && d.bank_only.length ? '<p class="note" style="border:0">Bank charges, interest and direct transfers usually show here. Enter them in Tally; after the next sync they move to Matched.</p>' : ""}
+      <section class="page">${upload}</section>
+      <p class="note" style="border:0">Statement ${fdate(d.first)} to ${fdate(d.last)}${d.file ? `, last file ${h(d.file)}` : ""}. Uploading the next month's statement adds to this one. <button class="linkbtn" id="brsclear">Remove statement</button></p>`;
+    view.querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => { S.brsTab = b.dataset.tab; vBRS(ledger).catch(fail); });
+    $("#bapply").onclick = () => { S.brsFrom = $("#bf").value; S.brsTo = $("#bt").value; vBRS(ledger).catch(fail); };
+    $("#brsclear").onclick = async () => {
+      if (!confirm("Remove the uploaded statement for " + ledger + "?")) return;
+      await fetch(cpath("brs", { ledger, action: "clear" }), { method: "POST" }); S.brsFrom = S.brsTo = ""; vBRS(ledger).catch(fail);
+    };
+    view.querySelectorAll("[data-pair]").forEach((b) => b.onclick = () => {
+      const n = +b.dataset.pair, bl = d.bank_only.find((x) => x.n === n);
+      const ids = d.candidates[n] || [], all = [...d.pending, ...d.tally_only];
+      const opts = ids.map((id) => all.find((v) => v.id === id)).filter(Boolean);
+      const dlg = $("#sheet");
+      dlg.innerHTML = `<h3>Pair ${nf2.format(Math.abs(bl.amount))} on ${fdate(bl.date)}</h3>${opts.map((v) => `<button class="row" data-v="${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div><div class="meta">${fdate(v.date)}, ${h(v.vtype)} ${h(v.number)}</div></div></button>`).join("") || '<div class="empty">No Tally entry with this amount is left unmatched.</div>'}
+        <div class="actions" style="padding-top:12px"><button class="btn" id="dclose">Close</button></div>`;
+      dlg.querySelectorAll("[data-v]").forEach((x) => x.onclick = async () => {
+        await fetch(cpath("brs", { ledger, action: "pair" }), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n, vid: +x.dataset.v }) });
+        dlg.close(); vBRS(ledger).catch(fail);
+      });
+      $("#dclose").onclick = () => dlg.close();
+      dlg.showModal();
+    });
+  }
+  $("#brsf").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = $("#brsfile").files[0]; if (!file) return;
+    $("#brsmsg").textContent = "Reading the statement";
+    const r = await fetch(cpath("brs", { ledger }), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $("#brsmsg").textContent = j.error || "Couldn't read that file."; return; }
+    S.brsFrom = j.from; S.brsTo = j.to; S.brsTab = "tally";
+    toast(`${j.added} new bank entries read. ${j.matched.length} matched with Tally.`);
+    vBRS(ledger).catch(fail);
   };
 }
 
@@ -545,9 +645,9 @@ function vReports() {
     ["#/pl", "Profit &amp; Loss", "Sales, purchases, expenses and profit", can("accounts")],
     ["#/bs", "Balance Sheet", "What the business owns and owes, as on today", can("accounts")],
     ["#/cashbook", "Cash and bank book", "Money in and out each day, with opening and closing balances", can("accounts")],
+    ["#/brs", "Bank reconciliation", "Match your bank statement with the bank ledger in Tally", can("accounts")],
     ["#/collect", "Follow-up list", "Who should pay you: overdue, due this week, promises", can("dues")],
     ["#/gst", "GST summary", "Output tax, input credit and net payable by month", can("accounts")],
-    ["#/gstr2b", "GSTR-2B check", "Supplier invoices on the GST portal against your purchases", can("accounts")],
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
@@ -593,8 +693,7 @@ async function vGST() {
   view.innerHTML = `<h1 class="title">GST summary</h1>${periodBar(d.from, d.to)}
     ${!d.total ? '<div class="empty">No GST ledgers found under Duties &amp; Taxes.</div>' :
       block("Whole period", d.total) + d.months.map((m) => block(mname(m.month), m)).join("") +
-      `<p class="note" style="border:0">Worked out from your vouchers, leaving out GST payments to the government and set-off entries. It's a quick check only. File your returns from Tally or the GST portal.<br>Counted: ${d.ledgers.map((l) => `${h(l.name)} (${l.side})`).join(", ")}.</p>`}
-    <section class="page"><a class="row" href="#/gstr2b"><div class="main"><div class="name">Check GSTR-2B</div><div class="meta">Upload the GSTR-2B file from the GST portal to see which supplier bills match your books</div></div><span class="chev"></span></a></section>`;
+      `<p class="note" style="border:0">Worked out from your vouchers, leaving out GST payments to the government and set-off entries. It's a quick check only. File your returns from Tally or the GST portal.<br>Counted: ${d.ledgers.map((l) => `${h(l.name)} (${l.side})`).join(", ")}.</p>`}`;
   wirePeriod(d.from, d.to);
 }
 
@@ -905,7 +1004,9 @@ async function vSettings() {
         <label><span><input type="radio" name="mode" value="paused" ${S.sync.mode === "paused" ? "checked" : ""}> Paused: send nothing from Tally</span></label>
         <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save</button>${S.sync.mode !== "paused" ? '<button class="btn" type="button" id="syncnow">Sync now</button>' : ""}</div>
         <p class="hint">${S.sync.mode === "paused" ? "The app shows the figures from the last sync. Entries made on the phone wait until you resume." :
-          "The Tally PC checks with the app every 2 minutes while it's on and Tally is open, so Sync now takes up to 2 minutes to start."}</p></form></section>
+          "The Tally PC checks with the app every 2 minutes while it's on and Tally is open, so Sync now takes up to 2 minutes to start."}</p></form>
+      <div class="info" style="padding-top:0"><div>Tally PC files: ${S.sync.agent_version ? `version ${h(S.sync.agent_version)}` : "version not reported yet"}${S.sync.agent_latest && S.sync.agent_version && S.sync.agent_latest !== S.sync.agent_version ? `. Version ${h(S.sync.agent_latest)} is ready${S.sync.agent_auto !== false ? " and installs itself at the PC's next check" : ""}.` : S.sync.agent_latest ? " (up to date)" : ""}</div>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" id="agentauto" ${S.sync.agent_auto !== false ? "checked" : ""}> Update the Tally PC files automatically when the server is updated</label></div></section>
     <section class="page" id="tgsec"><div class="block-title">Telegram summary and alerts <span>${tg.configured ? "on" : "off"}</span></div>
       ${tg.configured ? `<form class="form" id="tgf">
         <label><span><input type="checkbox" id="tgdaily" ${tg.daily ? "checked" : ""}> Daily summary at</span><input type="time" id="tgtime" value="${h(tg.time || "09:00")}"></label>
@@ -1015,6 +1116,7 @@ async function vSettings() {
     await loadCompanies(); renderCover(); vSettings().catch(fail);
   };
   if ($("#syncnow")) $("#syncnow").onclick = () => syncNow();
+  $("#agentauto").onchange = async (e) => { await post("/api/sync", { agent_auto: e.target.checked }); toast(e.target.checked ? "The Tally PC will update itself." : "Automatic updates of the Tally PC are off."); };
   view.querySelectorAll("[data-pause]").forEach((b) => b.onclick = async () => {
     await post("/api/sync", { company: b.dataset.pause, paused: !!b.dataset.on });
     toast(b.dataset.on ? "Syncing paused for this company." : "Syncing resumed for this company.");
@@ -1258,77 +1360,6 @@ async function vNewEntry(kind) {
   };
 }
 
-/* ---------------------------------------------------------------- GSTR-2B check */
-const G2 = [["missing", "Not in Tally"], ["differ", "Amount differs"], ["not_in_2b", "Not in GSTR-2B"], ["matched", "Matched"]];
-const mmyy = (p) => `${MON[+p.slice(0, 2) - 1]} ${p.slice(2)}`;
-async function vGSTR2B(period) {
-  setTitle(true);
-  if (!period) {
-    const L = await api(cpath("gstr2b"));
-    view.innerHTML = `<h1 class="title">GSTR-2B check</h1>
-      <section class="page"><div class="info">
-        <div>Compares the supplier invoices on the GST portal with the purchases booked in Tally, by supplier GSTIN and invoice number.</div>
-        <div><b>1.</b> On the GST portal: <b>Returns → GSTR-2B</b>, pick the month, <b>Download JSON</b> (or Excel).</div>
-        <div><b>2.</b> Choose that file here.</div></div>
-        <form class="form" id="g2f"><input type="file" id="g2file" accept=".json,.zip,.xlsx" required>
-          <button class="btn primary" type="submit">Check</button><div class="msg" id="g2msg" role="status"></div></form></section>
-      ${L.checks.length ? `<section class="page"><div class="block-title">Earlier checks</div>${L.checks.map((c) => `<a class="row" href="#/gstr2b/${c.period}"><div class="main"><div class="name">${mmyy(c.period)}</div><div class="meta">${c.docs} supplier documents, uploaded ${h((c.uploaded || "").replace("T", " "))}</div></div><span class="chev"></span></a>`).join("")}</section>` : ""}
-      <p class="note" style="border:0">Earlier checks are worked out again each time you open them, so bills you book in Tally later show up as matched.</p>`;
-    $("#g2f").onsubmit = async (e) => {
-      e.preventDefault();
-      const file = $("#g2file").files[0]; if (!file) return;
-      $("#g2msg").textContent = "Reading the file";
-      let r = await fetch(cpath("gstr2b"), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
-      let j = await r.json().catch(() => ({}));
-      if (!r.ok && j.need_period) {
-        const p = prompt("Which month is this for? Type it as MMYYYY, e.g. 092026");
-        if (!p) { $("#g2msg").textContent = ""; return; }
-        r = await fetch(cpath("gstr2b", { period: p.trim() }), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
-        j = await r.json().catch(() => ({}));
-      }
-      if (!r.ok) { $("#g2msg").textContent = j.error || "Couldn't read that file."; return; }
-      location.hash = `#/gstr2b/${j.period}`;
-    };
-    return;
-  }
-  const d = await api(cpath("gstr2b", { period }));
-  S.g2tab = S.g2tab || "missing";
-  const T = d.totals;
-  const tabs = `<div class="toolbar" role="tablist">${G2.map(([k, l]) => `<button class="chip ${k === S.g2tab ? "on" : ""}" data-g2="${k}">${l} <span class="cnt">${d[k].length}</span></button>`).join("")}</div>`;
-  const taxes = (x, p = "") => ["igst", "cgst", "sgst", "cess"].filter((k) => x[p + k]).map((k) => `${k.toUpperCase()} ${nf2.format(x[p + k])}`).join(", ") || "no tax";
-  const rows = {
-    missing: (x) => `<div class="row" style="cursor:default"><div class="main"><div class="name">${h(x.name || x.ctin)}</div>
-      <div class="meta">${x.kind === "note" ? (x.note_type === "D" ? "Debit note" : "Credit note") : "Invoice"} ${h(x.num)}, ${fdate(x.date)}, ${h(x.ctin)}</div>
-      <div class="meta">Taxable ${nf2.format(x.taxable)}; ${taxes(x)}${x.itc && x.itc !== "Y" && x.itc !== "Yes" ? `; ITC: ${h(x.itc)}` : ""}</div></div><div class="end">${money(x.tax)}<div class="meta">tax</div></div></div>`,
-    differ: (x) => `<a class="row" href="#/voucher/${x.vid}"><div class="main"><div class="name">${h(x.party || x.name)}</div>
-      <div class="meta">${h(x.num)}, ${fdate(x.date)}; Tally ${h(x.b_vtype)} ${h(x.b_number)}, ${fdate(x.b_date)}</div>
-      <div class="meta">Portal: taxable ${nf2.format(x.taxable)}, ${taxes(x)}</div><div class="meta">Tally: taxable ${nf2.format(x.b_taxable)}, ${taxes(x, "b_")}</div>
-      <div class="meta od">Differs in ${x.diffs.map((k) => k === "taxable" ? "taxable value" : k.toUpperCase()).join(", ")}</div></div>
-      <div class="end">${money(x.tax - x.b_tax)}<div class="meta">difference</div></div><span class="chev"></span></a>`,
-    not_in_2b: (x) => `<a class="row" href="#/voucher/${x.id}"><div class="main"><div class="name">${h(x.party)}</div>
-      <div class="meta">${h(x.vtype)} ${h(x.number)}${x.reference ? `, supplier invoice ${h(x.reference)}` : ""}, ${fdate(x.date)}, ${h(x.gstin)}</div></div>
-      <div class="end">${money(x.tax)}<div class="meta">tax</div></div><span class="chev"></span></a>`,
-    matched: (x) => `<a class="row" href="#/voucher/${x.vid}"><div class="main"><div class="name">${h(x.party || x.name)}</div>
-      <div class="meta">${h(x.num)}, ${fdate(x.date)}; Tally ${h(x.b_number)}${x.b_date.slice(0, 7) !== x.date.slice(0, 7) ? ` <span class="od">booked ${fdate(x.b_date)}</span>` : ""}</div></div>
-      <div class="end">${money(x.tax)}<div class="meta">tax</div></div><span class="chev"></span></a>`,
-  };
-  const help = { missing: "On the portal but not booked in Tally (or booked under another invoice number or GSTIN). Book them to claim the credit.",
-    differ: "Found in both, but the taxable value or tax differs by more than ₹1.",
-    not_in_2b: "Purchases booked in Tally for this month, with GST, that the supplier hasn't reported. Credit on these is at risk until the supplier files.",
-    matched: "Same supplier, invoice number and amounts in both." };
-  view.innerHTML = `<div class="crumbs"><a href="#/gstr2b">GSTR-2B check</a></div><h1 class="title">GSTR-2B for ${mmyy(d.period)}</h1>
-    <section class="page"><div class="hero"><div><div class="label">Input credit on the portal</div><div class="big">${short(T.itc_2b)}</div></div>
-      <div><div class="label">Matched with Tally</div><div class="big" style="font-size:22px">${short(T.matched)}</div></div></div>
-      <div class="tiles"><div class="tile"><div class="label">Not in Tally</div><div class="val">${short(T.missing)}</div></div>
-        <div class="tile"><div class="label">Differs</div><div class="val">${short(T.differ_2b - T.differ_books)}</div></div>
-        <div class="tile"><div class="label">At risk</div><div class="val od">${short(T.at_risk)}</div></div></div></section>
-    ${tabs}<p class="note" style="border:0;margin:0 4px 8px">${help[S.g2tab]}</p>
-    <section class="page">${d[S.g2tab].map(rows[S.g2tab]).join("") || '<div class="empty">Nothing here.</div>'}</section>
-    <div class="actions" style="padding:0 0 12px">${excelBtn("gstr2b", { period })}</div>
-    <p class="note" style="border:0">Matching uses the supplier's GSTIN and the supplier invoice number (Supplier Invoice No. in Tally, or the voucher number). Uploaded ${h((d.uploaded || "").replace("T", " "))}.</p>`;
-  view.querySelectorAll("[data-g2]").forEach((b) => b.onclick = () => { S.g2tab = b.dataset.g2; vGSTR2B(period).catch(fail); });
-}
-
 function fyStart(day) {
   const d = new Date((day || iso(new Date())) + "T00:00:00");
   const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
@@ -1535,6 +1566,8 @@ async function route() {
       case "dues": await vDues(parts[1]); break;
       case "stock": await vStock(); break;
       case "item": await vItem(parts[1]); break;
+      case "godowns": await vGodowns(parts[1]); break;
+      case "brs": await vBRS(parts[1]); break;
       case "reports": vReports(); break;
       case "daybook": await vDaybook(params.get("type") ?? ""); break;
       case "voucher": await vVoucher(parts[1]); break;
@@ -1543,7 +1576,6 @@ async function route() {
       case "cashbook": await vCashbook(); break;
       case "collect": await vCollect(); break;
       case "entries": await vEntries(); break;
-      case "gstr2b": await vGSTR2B(parts[1]); break;
       case "new": await vNewEntry(parts[1]); break;
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;

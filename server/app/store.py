@@ -9,7 +9,7 @@ from datetime import date, timedelta
 DB_PATH = os.path.join(os.environ.get("DATA_DIR", "/data"), "tally.db")
 _lock = threading.Lock()
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -50,6 +50,10 @@ CREATE INDEX IF NOT EXISTS ix_vinp_v ON vitem_np(voucher_id);
 CREATE TABLE IF NOT EXISTS vbill(voucher_id INT, ledger TEXT, name TEXT, btype TEXT, amount REAL, days INT);
 CREATE INDEX IF NOT EXISTS ix_vb_v ON vbill(voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vb_l ON vbill(ledger);
+CREATE TABLE IF NOT EXISTS vgodown(voucher_id INT, item TEXT, godown TEXT, qty REAL);
+CREATE INDEX IF NOT EXISTS ix_vg_v ON vgodown(voucher_id);
+CREATE INDEX IF NOT EXISTS ix_vg_i ON vgodown(item);
+CREATE TABLE IF NOT EXISTS stock_godown_open(company_id INT, item TEXT, godown TEXT, qty REAL);
 CREATE TABLE IF NOT EXISTS stock_at(company_id INT, day TEXT, item TEXT, qty REAL, value REAL, PRIMARY KEY(company_id, day, item));
 CREATE TABLE IF NOT EXISTS bill(company_id INT, kind TEXT, party TEXT, ref TEXT, date TEXT, due TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_b ON bill(company_id, kind, party);
@@ -142,7 +146,7 @@ def _migrate(c):
 
 
 SYNC_FILE = os.path.join(os.path.dirname(DB_PATH), "sync.json")
-SYNC_DEFAULT = {"mode": "auto", "every": 10, "requested": 0, "last_run": 0, "companies": {}}
+SYNC_DEFAULT = {"mode": "auto", "every": 10, "requested": 0, "last_run": 0, "companies": {}, "agent_auto": True}
 EVERY = [2, 5, 10, 15, 30, 60]
 
 
@@ -163,9 +167,13 @@ def _save_sync(d):
     os.replace(tmp, SYNC_FILE)
 
 
-def update_sync(mode=None, every=None, company=None, company_paused=None, request=False):
+def update_sync(mode=None, every=None, company=None, company_paused=None, request=False, agent_version=None, agent_auto=None):
     with _lock:
         d = sync_settings()
+        if agent_version:
+            d["agent_version"], d["agent_seen"] = agent_version, time.time()
+        if agent_auto is not None:
+            d["agent_auto"] = bool(agent_auto)
         if mode in ("auto", "manual", "paused"):
             d["mode"] = mode
         if every is not None and int(every) in EVERY:
@@ -227,7 +235,7 @@ def purge_before(cid, day):
     """Delete vouchers dated before `day` and stop accepting them in future syncs."""
     with _lock, conn() as c:
         old = "SELECT id FROM voucher WHERE company_id=? AND date < ?"
-        for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+        for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np", "vgodown"):
             c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, day))
         n = c.execute("DELETE FROM voucher WHERE company_id=? AND date < ?", (cid, day)).rowcount
         c.execute("UPDATE company SET keep_from=?, from_date=MAX(COALESCE(from_date,''), ?) WHERE id=?", (day, day, cid))
@@ -242,7 +250,7 @@ def delete_company(cid):
         ids = "SELECT id FROM voucher WHERE company_id=?"
         for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
             c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({ids})", (cid,))
-        for t in ("voucher", "grp", "vtype", "ledger", "stock", "bill"):
+        for t in ("voucher", "grp", "vtype", "ledger", "stock", "bill", "stock_godown_open", "stock_at"):
             c.execute(f"DELETE FROM {t} WHERE company_id=?", (cid,))
         c.execute("DELETE FROM company WHERE id=?", (cid,))
     with conn() as c:
@@ -303,7 +311,8 @@ def plan(company, d_from, d_to, tally_list):
 
 
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
-           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None, stock_at=None):
+           bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None, stock_at=None,
+           stock_godown=None):
     """Store a sync. Masters are replaced when sent (groups/types/details are kept if a partial sync left them out).
     Vouchers are replaced for the whole [d_from, d_to] range, or only for `months` (YYYY-MM) on a partial sync."""
     with _lock, conn() as c:
@@ -357,7 +366,7 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                 part = guids[i:i + 400]
                 ph = ",".join("?" for _ in part)
                 old = f"SELECT id FROM voucher WHERE company_id=? AND guid IN ({ph})"
-                for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+                for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np", "vgodown"):
                     c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", [cid] + part)
                 c.execute(f"DELETE FROM voucher WHERE company_id=? AND guid IN ({ph})", [cid] + part)
             ranges = [(d_from, d_to)]
@@ -367,7 +376,7 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             ranges = [(a, b) for a, b in ranges if a <= b]
             for a, b in ranges:
                 old = "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?"
-                for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
+                for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np", "vgodown"):
                     c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, a, b))
                 c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, a, b))
         inserted = 0
@@ -397,6 +406,10 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                             i.get("hsn") or stock_x.get(i["item"], {}).get("hsn", ""), i.get("disc", 0), i.get("descr", ""),
                             1 if i.get("tracked") else 0)
                            for i in v["items"]])
+            if not (base in NO_STOCK or status):
+                c.executemany("INSERT INTO vgodown VALUES(?,?,?,?)",
+                              [(vid, i["item"], g, q) for i in v["items"] if not i.get("tracked")
+                               for g, q in (i.get("godowns") or [("", i["qty"])])])
             if posting:
                 c.executemany("INSERT INTO vbill VALUES(?,?,?,?,?,?)",
                               [(vid, b["ledger"], b["name"], b["type"], round(b["amount"], 2), b["days"])
@@ -414,6 +427,10 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             c.execute("UPDATE company SET bills_source=? WHERE id=?", (source, cid))
         if info or not partial:
             c.execute("UPDATE company SET info=? WHERE id=?", (json.dumps(info or {}), cid))
+        if stock_godown is not None:
+            c.execute("DELETE FROM stock_godown_open WHERE company_id=?", (cid,))
+            c.executemany("INSERT INTO stock_godown_open VALUES(?,?,?,?)",
+                          [(cid, item, g, q) for item, rows in stock_godown.items() for g, q in rows])
         if not partial:
             c.execute("DELETE FROM stock_at WHERE company_id=?", (cid,))
         for day, rows in (stock_at or {}).items():
@@ -793,7 +810,53 @@ def stock_item(cid, name, d_from=None, d_to=None):
     row = _apply_tally_stock(_stock_row(dict(info), m, t, date.today().isoformat()), before_f, at_t)
     co = next((x for x in companies() if x["id"] == cid), None)
     row["min"] = stock_mins(co["name"]).get(name) if co else None
-    return {"item": dict(info), "period": row, "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
+    gd = godown_stock(cid, name)
+    return {"item": dict(info), "period": row, "godowns": gd["rows"] if gd["split"] else [], "from": f, "to": t, "inward": inward, "outward": outward, "moves": rows}
+
+
+NO_GODOWN = "Not split by godown"
+
+
+def godown_stock(cid, item=None):
+    """Stock now in each godown: each item's opening in that godown (from Tally's item master) plus every
+    synced voucher's movement in or out of it. Whatever doesn't add up to Tally's own closing for the item
+    (vouchers from before the sync start, lines Tally didn't give a godown) is shown as not split.
+    Total per item is always Tally's closing; a godown going negative is shown, not hidden."""
+    with conn() as c:
+        extra, args = ("AND name=?", [item]) if item else ("", [])
+        items = {r["name"]: r for r in _rows(c, f"""SELECT name, parent, unit, closing_qty, closing_value, closing_rate
+            FROM stock WHERE company_id=? {extra}""", [cid] + args)}
+        per = {}
+        for r in c.execute(f"SELECT item, godown, qty FROM stock_godown_open WHERE company_id=? {extra.replace('name', 'item')}",
+                           [cid] + args):
+            per.setdefault(r["item"], {}).setdefault(r["godown"], 0.0)
+            per[r["item"]][r["godown"]] += r["qty"]
+        for r in c.execute(f"""SELECT g.item, g.godown, SUM(g.qty) q FROM vgodown g JOIN voucher v ON v.id=g.voucher_id
+                WHERE v.company_id=? {extra.replace('name', 'g.item')} GROUP BY g.item, g.godown""", [cid] + args):
+            per.setdefault(r["item"], {}).setdefault(r["godown"] or NO_GODOWN, 0.0)
+            per[r["item"]][r["godown"] or NO_GODOWN] += r["q"]
+    out = []
+    for name, i in items.items():
+        gs = {g: q for g, q in per.get(name, {}).items() if abs(q) > 1e-9}
+        rest = i["closing_qty"] - sum(gs.values())
+        if abs(rest) > 1e-6:
+            gs[NO_GODOWN] = gs.get(NO_GODOWN, 0) + rest
+        rate = i["closing_rate"] or (i["closing_value"] / i["closing_qty"] if i["closing_qty"] else 0)
+        for g, q in gs.items():
+            if abs(q) > 1e-9:
+                out.append({"item": name, "parent": i["parent"], "unit": i["unit"], "godown": g,
+                            "qty": round(q, 3), "value": round(q * rate, 2)})
+    godowns = {}
+    for r in out:
+        d = godowns.setdefault(r["godown"], {"godown": r["godown"], "items": 0, "value": 0.0, "negative": 0})
+        d["items"] += 1
+        d["value"] += r["value"]
+        d["negative"] += r["qty"] < 0
+    gl = sorted(godowns.values(), key=lambda d: (d["godown"] == NO_GODOWN, d["godown"].lower()))
+    for d in gl:
+        d["value"] = round(d["value"], 2)
+    return {"godowns": gl, "rows": sorted(out, key=lambda r: (r["godown"] == NO_GODOWN, r["godown"].lower(), r["item"].lower())),
+            "split": any(d["godown"] != NO_GODOWN for d in gl)}
 
 
 BUCKETS = ["0-30 days", "31-60 days", "61-90 days", "Over 90 days", "No bill date"]
