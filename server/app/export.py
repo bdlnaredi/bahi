@@ -39,7 +39,7 @@ def build(cid, what, q):
     if what == "vouchers":
         rows, off = [], 0
         while True:
-            d = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), off)
+            d = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), off, q.get("sub", ""))
             rows += [[v["date"], v["vtype"], v["number"], v["party"], v["amount"], v.get("status") or "", v.get("narration") or ""]
                      for v in d["vouchers"]]
             off += len(d["vouchers"])
@@ -66,7 +66,7 @@ def build(cid, what, q):
                                i["close_qty"], i["rate"], i["close_value"]] for i in d["items"]])
     if what == "daily":
         kind = q.get("kind", "sales")
-        d = store.daily(cid, kind, f, t)
+        d = store.daily(cid, kind, f, t, q.get("sub", ""))
         return f"{kind} by day", _csv(f"{co} - {kind} by day {d['from']} to {d['to']}",
                                       ["Date", "Bills", "With tax", "Before tax", "Returns"],
                                       [[x["date"], x["bills"], x["total"], x["net"], x["returns"]] for x in d["days"]])

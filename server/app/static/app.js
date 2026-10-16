@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.6.3";
+const APP_VERSION = "2.6.4";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -611,37 +611,53 @@ async function pagedVouchers(el, what, params, first, emptyMsg) {
   draw();
 }
 
+/* Main voucher types (Sales, Receipt...) combine all of the company's own types under them.
+   Pick a main type, then optionally one of its own types (e.g. GST Sales) from the second row. */
+function typeChips(types, base, sub) {
+  const top = `<div class="toolbar" role="group" aria-label="Voucher type"><button class="chip ${!base ? "on" : ""}" data-t="">All</button>${types.map((t) =>
+    `<button class="chip ${t.base === base ? "on" : ""}" data-t="${h(t.base)}">${h(t.base)}${t.subs.length > 1 ? ` <span class="cnt">${t.subs.length} types</span>` : ""}</button>`).join("")}</div>`;
+  const cur = types.find((t) => t.base === base);
+  const subs = cur && cur.subs.length ? `<div class="toolbar subtypes" role="group" aria-label="${h(base)} types"><span class="sublbl">${h(base)} types:</span>
+    <button class="chip ${!sub ? "on" : ""}" data-st="">All combined</button>${cur.subs.map((x) =>
+      `<button class="chip ${x.name === sub ? "on" : ""}" data-st="${h(x.name)}">${h(x.name)} <span class="cnt">${nf0.format(x.n)}</span></button>`).join("")}</div>` : "";
+  return top + subs;
+}
+function wireTypeChips(el, onBase, onSub) {
+  el.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => onBase(b.dataset.t));
+  el.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => onSub(b.dataset.st));
+}
+
 async function vDaybook(type) {
   setTitle(true);
-  if (type !== undefined) S.dayType = type;
-  const params = { ...periodParams(), type: S.dayType };
+  if (type !== undefined && type !== S.dayType) { S.dayType = type; S.daySub = ""; }
+  const params = { ...periodParams(), type: S.dayType, sub: S.daySub || "" };
   const d = await api(cpath("daybook", params));
   view.innerHTML = `<h1 class="title">Day Book</h1>${periodBar(d.from, d.to)}
-    <div class="toolbar"><button class="chip ${!S.dayType ? "on" : ""}" data-t="">All</button>${d.types.map((t) => `<button class="chip ${t === S.dayType ? "on" : ""}" data-t="${h(t)}">${h(t)}</button>`).join("")}</div>
+    <div id="dbtypes">${typeChips(d.types, S.dayType, S.daySub)}</div>
     <section class="page" id="dblist"></section>`;
   pagedVouchers($("#dblist"), "daybook", params, d, "No vouchers in this period.");
   wirePeriod(d.from, d.to);
-  view.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => vDaybook(b.dataset.t).catch(fail));
+  wireTypeChips($("#dbtypes"), (t) => vDaybook(t).catch(fail), (st) => { S.daySub = st; vDaybook().catch(fail); });
 }
 
 let vSearchT;
 async function vVouchers() {
   setTitle(false);
   if (S.vq === undefined) S.vq = "";
-  const params = { q: S.vq, type: S.vtype || "", ...periodParams() };
+  const params = { q: S.vq, type: S.vtype || "", sub: S.vsub || "", ...periodParams() };
   const d = await api(cpath("vouchers", params));
   if (!$("#vsearch")) {
     view.innerHTML = `<input class="search" id="vsearch" type="search" inputmode="search" placeholder="Party, voucher no., amount or narration" aria-label="Search vouchers" value="${h(S.vq)}">
-      <div id="vperiod"></div><div class="toolbar" id="vtypes"></div><section class="page" id="vlist"></section><div class="actions" id="vxl" style="padding:0 0 12px"></div>`;
+      <div id="vperiod"></div><div id="vtypes"></div><section class="page" id="vlist"></section><div class="actions" id="vxl" style="padding:0 0 12px"></div>`;
     $("#vsearch").oninput = (e) => { clearTimeout(vSearchT); vSearchT = setTimeout(() => { S.vq = e.target.value; vVouchers().catch(fail); }, 250); };
   }
   $("#vperiod").innerHTML = periodBar(d.from, d.to);
-  $("#vtypes").innerHTML = `<button class="chip ${!S.vtype ? "on" : ""}" data-t="">All</button>` + d.types.map((t) => `<button class="chip ${t === S.vtype ? "on" : ""}" data-t="${h(t)}">${h(t)}</button>`).join("");
+  $("#vtypes").innerHTML = typeChips(d.types, S.vtype || "", S.vsub || "");
   $("#vxl").innerHTML = excelBtn("vouchers", params);
   pagedVouchers($("#vlist"), "vouchers", params, d,
     S.vq ? "No voucher matches that search in this period. Try All dates." : "No vouchers in this period.");
   wirePeriod(d.from, d.to);
-  $("#vtypes").querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { S.vtype = b.dataset.t; vVouchers().catch(fail); });
+  wireTypeChips($("#vtypes"), (t) => { S.vtype = t; S.vsub = ""; vVouchers().catch(fail); }, (st) => { S.vsub = st; vVouchers().catch(fail); });
 }
 
 async function vVoucher(id) {
@@ -683,9 +699,11 @@ async function vVoucher(id) {
 
 async function vSales(kind) {
   setTitle(false);
+  if ((kind || S.skind || "sales") !== S.skind) S.ssub = "";
   S.skind = kind || S.skind || "sales";
   const sales = S.skind === "sales";
-  const d = await api(cpath("daily", { kind: S.skind, ...periodParams() }));
+  const sp = { kind: S.skind, sub: S.ssub || "", ...periodParams() };
+  const d = await api(cpath("daily", sp));
   const max = Math.max(1, ...d.days.map((x) => x.total));
   let month = "", body = "";
   const mtot = {};
@@ -708,8 +726,10 @@ async function vSales(kind) {
       <a class="chip ${sales ? "on" : ""}" href="#/sales" aria-pressed="${sales}">Sales</a>
       <a class="chip ${!sales ? "on" : ""}" href="#/sales/purchase" aria-pressed="${!sales}">Purchases</a></div>
     ${periodBar(d.from, d.to)}
+    ${d.subs.length ? `<div class="toolbar subtypes" role="group" aria-label="Voucher types"><span class="sublbl">${sales ? "Sales" : "Purchase"} types:</span>
+      <button class="chip ${!S.ssub ? "on" : ""}" data-ss="">All combined</button>${d.subs.map((x) => `<button class="chip ${x === S.ssub ? "on" : ""}" data-ss="${h(x)}">${h(x)}</button>`).join("")}</div>` : ""}
     <section class="page">
-      <div class="hero"><div><div class="label">${sales ? "Sales" : "Purchases"} with tax</div><div class="big">${short(d.total)}</div></div>
+      <div class="hero"><div><div class="label">${S.ssub ? h(S.ssub) : sales ? "Sales" : "Purchases"} with tax</div><div class="big">${short(d.total)}</div></div>
         <div><div class="label">Before tax</div><div class="big" style="font-size:22px">${short(d.net)}</div></div></div>
       <div class="tiles">
         <div class="tile"><div class="label">Bills</div><div class="val">${nf0.format(d.bills)}</div></div>
@@ -719,8 +739,10 @@ async function vSales(kind) {
       ${d.best && d.best.total ? `<div class="note">Best day: <a href="#/day/${S.skind}/${d.best.date}">${fdate(d.best.date)}</a>, ${rupees(d.best.total, false)}</div>` : ""}
     </section>
     <section class="page">${body || `<div class="empty">No ${sales ? "sales" : "purchases"} in this period.</div>`}</section>
-    <div class="actions" style="padding:0 0 12px">${excelBtn("daily", { kind: S.skind, ...periodParams() })}<a class="btn" href="#/analysis">Sales analysis</a></div>`;
+    ${S.ssub ? `<p class="note" style="border:0">Showing only ${h(S.ssub)}. Returns are counted under All combined.</p>` : ""}
+    <div class="actions" style="padding:0 0 12px">${excelBtn("daily", sp)}<a class="btn" href="#/analysis">Sales analysis</a></div>`;
   wirePeriod(d.from, d.to);
+  view.querySelectorAll("[data-ss]").forEach((b) => b.onclick = () => { S.ssub = b.dataset.ss; vSales().catch(fail); });
 }
 
 async function vDay(kind, day) {
@@ -728,9 +750,10 @@ async function vDay(kind, day) {
   const sales = kind !== "purchase";
   const base = sales ? "Sales" : "Purchase", ret = sales ? "Credit Note" : "Debit Note";
   const p = { from: day, to: day };
-  const [a, r] = await Promise.all([api(cpath("vouchers", { ...p, type: base })), api(cpath("vouchers", { ...p, type: ret }))]);
+  const sub = S.skind === kind ? (S.ssub || "") : "";
+  const [a, r] = await Promise.all([api(cpath("vouchers", { ...p, type: base, sub })), sub ? Promise.resolve({ vouchers: [] }) : api(cpath("vouchers", { ...p, type: ret }))]);
   const dt = new Date(day + "T00:00:00");
-  const tot = a.vouchers.reduce((s, v) => s + v.amount, 0);
+  const tot = a.vouchers.filter((v) => !v.status).reduce((s, v) => s + v.amount, 0);   // cancelled/optional don't count
   view.innerHTML = `<div class="crumbs"><a href="#/sales${sales ? "" : "/purchase"}">${sales ? "Sales" : "Purchases"} by day</a></div>
     <h1 class="title">${dt.toLocaleDateString("en-IN", { weekday: "long" })}, ${fdate(day)}</h1>
     <p class="subtitle">${a.total} bill${a.total === 1 ? "" : "s"}${a.total <= 200 ? `, ${rupees(tot)}` : ""}</p>
@@ -838,7 +861,7 @@ async function vCheck() {
       ${d.months.map((m) => { const [yy, mm] = m.m.split("-"); return `<a class="row" href="#/vouchers" data-month="${m.m}"><div class="main name">${MON[+mm - 1]} ${yy}</div><div class="end">${nf0.format(m.n)} / ${nf0.format(m.sales)}${m.cancelled ? `<div class="meta">${m.cancelled} cancelled</div>` : ""}</div></a>`; }).join("") || '<div class="empty">No vouchers synced yet.</div>'}
     </section>
     <section class="page"><div class="block-title"><span>Vouchers synced by type</span><span>Count</span></div>
-      ${d.types.map((t) => `<div class="row" style="cursor:default"><div class="main name">${h(t.vtype)}</div><div class="end">${nf0.format(t.n)}</div></div>`).join("")}
+      ${d.types.map((t) => `<div class="row" style="cursor:default"><div class="main"><div class="name">${h(t.vtype)}</div>${t.base && t.base !== t.vtype ? `<div class="meta">counted as ${h(t.base)}</div>` : ""}</div><div class="end">${nf0.format(t.n)}</div></div>`).join("")}
     </section>`;
 }
 

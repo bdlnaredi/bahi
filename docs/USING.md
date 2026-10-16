@@ -77,6 +77,9 @@ The closing balance always matches Tally, because running balances are worked ba
 
 <br clear="right">
 
+
+**Your own voucher types.** Tally lets you make several types under one heading, for example *GST Sales* and *Counter Sales* under Sales, or *Bank Receipt* under Receipt. Bahi follows Tally: each one counts under its heading everywhere (totals, Sales by day, Profit & Loss, dues, analysis). To see just one, tap the heading (e.g. **Sales**), then pick the type in the second row. **All combined** goes back to everything. The same row appears in the Day Book and in Sales by day. **Reports → Sync check** lists each of your types and which heading it counts under.
+
 ### Opening a voucher
 
 <table><tr>

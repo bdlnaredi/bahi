@@ -477,30 +477,35 @@ def ledgers(cid, q="", sort="name"):
             FROM ledger l WHERE l.company_id=? AND l.name LIKE ? ORDER BY {order}""", (cid, f"%{q}%"))
 
 
-def daily(cid, kind="sales", d_from=None, d_to=None):
+def daily(cid, kind="sales", d_from=None, d_to=None, sub=""):
     """Day-by-day sales (or purchases): bills, value with tax, value before tax, returns."""
     base, ret, grp, sign = (("Sales", "Credit Note", "Sales Accounts", -1) if kind == "sales"
                             else ("Purchase", "Debit Note", "Purchase Accounts", 1))
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
         days = {}
-        for r in c.execute("""SELECT date, COUNT(*) n, SUM(amount) total FROM voucher
-                WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ? GROUP BY date""", (cid, base, f, t)):
+        vt = " AND vtype=?" if sub else ""
+        va = [sub] if sub else []
+        for r in c.execute(f"""SELECT date, COUNT(*) n, SUM(amount) total FROM voucher
+                WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ?{vt} GROUP BY date""", [cid, base, f, t] + va):
             days[r["date"]] = {"date": r["date"], "bills": r["n"], "total": round(r["total"] or 0, 2), "net": 0.0, "returns": 0.0}
-        for r in c.execute("""SELECT date, SUM(amount) total FROM voucher
-                WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ? GROUP BY date""", (cid, ret, f, t)):
+        for r in ([] if sub else c.execute("""SELECT date, SUM(amount) total FROM voucher
+                WHERE company_id=? AND base=? AND posting=1 AND date BETWEEN ? AND ? GROUP BY date""", (cid, ret, f, t))):
             d = days.setdefault(r["date"], {"date": r["date"], "bills": 0, "total": 0.0, "net": 0.0, "returns": 0.0})
             d["returns"] = round(r["total"] or 0, 2)
-        for r in c.execute("""SELECT v.date, SUM(vl.amount) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+        vt2 = " AND v.vtype=?" if sub else ""
+        for r in c.execute(f"""SELECT v.date, SUM(vl.amount) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
                 JOIN ledger l ON l.company_id=v.company_id AND l.name=vl.ledger
-                WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND l.chain LIKE ? GROUP BY v.date""",
-                             (cid, f, t, f"%|{grp}|%")):
+                WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND l.chain LIKE ?{vt2} GROUP BY v.date""",
+                             [cid, f, t, f"%|{grp}|%"] + va):
             d = days.setdefault(r["date"], {"date": r["date"], "bills": 0, "total": 0.0, "net": 0.0, "returns": 0.0})
             d["net"] = round(sign * (r["s"] or 0), 2)
+        subs = [r["vtype"] for r in c.execute("""SELECT vtype, COUNT(*) n FROM voucher WHERE company_id=? AND base=?
+            GROUP BY vtype ORDER BY n DESC""", (cid, base))]
     rows = sorted(days.values(), key=lambda d: d["date"], reverse=True)
     best = max(rows, key=lambda d: d["total"], default=None)
     active = [d for d in rows if d["bills"]]
-    return {"kind": kind, "from": f, "to": t, "days": rows,
+    return {"kind": kind, "from": f, "to": t, "days": rows, "sub": sub, "subs": subs if len(subs) > 1 else [],
             "total": round(sum(d["total"] for d in rows), 2), "net": round(sum(d["net"] for d in rows), 2),
             "returns": round(sum(d["returns"] for d in rows), 2), "bills": sum(d["bills"] for d in rows),
             "avg": round(sum(d["total"] for d in active) / len(active), 2) if active else 0,
@@ -745,7 +750,23 @@ def ledger_bills(c, cid, name):
 PAGE = 200
 
 
-def daybook(cid, d_from=None, d_to=None, base="", offset=0):
+def type_tree(c, cid):
+    """Voucher types as Tally groups them: each main type (Sales, Receipt...) with the company's own types under it,
+    e.g. Sales -> Sales, GST Sales, Counter Sales. Counts are over all synced vouchers."""
+    tree = {}
+    for r in c.execute("""SELECT base, vtype, COUNT(*) n FROM voucher WHERE company_id=? GROUP BY base, vtype
+                          ORDER BY base, n DESC""", (cid,)):
+        b = tree.setdefault(r["base"], {"base": r["base"], "n": 0, "subs": []})
+        b["n"] += r["n"]
+        b["subs"].append({"name": r["vtype"], "n": r["n"]})
+    out = sorted(tree.values(), key=lambda b: -b["n"])
+    for b in out:     # only worth offering when there is more than one, or the one has its own name
+        if len(b["subs"]) == 1 and b["subs"][0]["name"] == b["base"]:
+            b["subs"] = []
+    return out
+
+
+def daybook(cid, d_from=None, d_to=None, base="", offset=0, sub=""):
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
         args = [cid, f, t]
@@ -753,22 +774,26 @@ def daybook(cid, d_from=None, d_to=None, base="", offset=0):
         if base:
             extra = " AND base=?"
             args.append(base)
+        if sub:
+            extra += " AND vtype=?"
+            args.append(sub)
         rows = _rows(c, f"""SELECT id, date, vtype, base, number, party, amount, status FROM voucher
             WHERE company_id=? AND date BETWEEN ? AND ?{extra} ORDER BY date DESC, id DESC LIMIT ? OFFSET ?""",
                      args + [PAGE, int(offset)])
         total = c.execute(f"SELECT COUNT(*) n FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?{extra}", args).fetchone()["n"]
-        types = [r["base"] for r in c.execute(
-            "SELECT DISTINCT base FROM voucher WHERE company_id=? ORDER BY base", (cid,))]
-        return {"from": f, "to": t, "vouchers": rows, "types": types, "total": total, "offset": int(offset)}
+        return {"from": f, "to": t, "vouchers": rows, "types": type_tree(c, cid), "total": total, "offset": int(offset)}
 
 
-def vouchers(cid, q="", d_from=None, d_to=None, base="", offset=0):
+def vouchers(cid, q="", d_from=None, d_to=None, base="", offset=0, sub=""):
     with conn() as c:
         f, t = period(c, cid, d_from, d_to)
         where, args = ["company_id=?", "date BETWEEN ? AND ?"], [cid, f, t]
         if base:
             where.append("base=?")
             args.append(base)
+        if sub:
+            where.append("vtype=?")
+            args.append(sub)
         q = (q or "").strip()
         if q:
             like = f"%{q}%"
@@ -785,9 +810,7 @@ def vouchers(cid, q="", d_from=None, d_to=None, base="", offset=0):
             WHERE {' AND '.join(where)} ORDER BY (number = ?) DESC, date DESC, id DESC LIMIT ? OFFSET ?""",
                      args + [q, PAGE, int(offset)])
         total = c.execute(f"SELECT COUNT(*) n FROM voucher WHERE {' AND '.join(where)}", args).fetchone()["n"]
-        types = [r["base"] for r in c.execute(
-            "SELECT DISTINCT base FROM voucher WHERE company_id=? ORDER BY base", (cid,))]
-        return {"from": f, "to": t, "vouchers": rows, "types": types, "q": q, "total": total, "offset": int(offset)}
+        return {"from": f, "to": t, "vouchers": rows, "types": type_tree(c, cid), "q": q, "total": total, "offset": int(offset)}
 
 
 def _is_tax(l):
@@ -947,7 +970,7 @@ def sync_check(cid):
     with conn() as c:
         rows = _rows(c, """SELECT id, date, vtype, number, party, imbalance FROM voucher
             WHERE company_id=? AND balanced=0 ORDER BY vtype, date DESC""", (cid,))
-        counts = _rows(c, """SELECT vtype, COUNT(*) n FROM voucher WHERE company_id=? GROUP BY vtype ORDER BY n DESC""", (cid,))
+        counts = _rows(c, """SELECT vtype, MAX(base) base, COUNT(*) n FROM voucher WHERE company_id=? GROUP BY vtype ORDER BY n DESC""", (cid,))
     groups = {}
     for r in rows:
         g = groups.setdefault(r["vtype"], {"vtype": r["vtype"], "count": 0, "examples": []})

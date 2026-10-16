@@ -373,3 +373,8 @@ a.bill:active { background: var(--rule); }
   .stock-row .main { grid-column: auto; }
   .stock-row .sc .lbl { display: none; }
 }
+
+/* voucher types: the company's own types under each main type */
+.chip .cnt { font-size: 11.5px; font-weight: 600; opacity: .7; margin-left: 2px; }
+.toolbar.subtypes { margin-top: -6px; align-items: center; }
+.sublbl { font-size: 12.5px; font-weight: 700; color: var(--ink-3); white-space: nowrap; }

@@ -39,7 +39,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.6.3"
+APP_VERSION = "2.6.4"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -571,7 +571,7 @@ class Handler(BaseHTTPRequestHandler):
         elif what == "ledgers":
             out = {"ledgers": store.ledgers(cid, q.get("q", ""), q.get("sort", "name"))}
         elif what == "daily":
-            out = store.daily(cid, q.get("kind", "sales"), f, t)
+            out = store.daily(cid, q.get("kind", "sales"), f, t, unquote(q.get("sub", "")))
         elif what == "ledger":
             out = store.ledger(cid, name, f, t)
         elif what == "group":
@@ -583,7 +583,7 @@ class Handler(BaseHTTPRequestHandler):
         elif what == "outstanding":
             out = store.outstanding(cid, q.get("kind", "receivable"))
         elif what == "vouchers":
-            out = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), q.get("offset", 0))
+            out = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), q.get("offset", 0), unquote(q.get("sub", "")))
         elif what == "gst":
             out = store.gst(cid, f, t)
         elif what == "ledger_pdf":
@@ -598,7 +598,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_pdf(pdf.voucher_pdf(d), f"{v['vtype']} {v['number']}")
             out = None
         elif what == "daybook":
-            out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0))
+            out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0), unquote(q.get("sub", "")))
         elif what == "voucher" and arg:
             out = store.voucher(cid, int(arg))
         elif what == "export":
