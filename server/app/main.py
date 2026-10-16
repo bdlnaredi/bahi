@@ -39,7 +39,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "2.6.4"
+APP_VERSION = "2.7"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -626,13 +626,13 @@ class Handler(BaseHTTPRequestHandler):
         elif what == "check":
             out = store.sync_check(cid)
         elif what == "bs":
-            out = store.balance_sheet(cid)
+            out = store.tally_bs(cid)
         elif what == "cashbank":
             out = store.cash_bank(cid, f, t)
         elif what == "collections":
             out = store.collections(cid, int(q.get("days", 7) or 7))
         elif what == "pl":
-            out = store.profit_loss(cid, f, t)
+            out = store.tally_pl(cid, f, t)
         else:
             out = None
         if out is None:

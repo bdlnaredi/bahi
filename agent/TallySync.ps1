@@ -334,7 +334,7 @@ foreach ($co in $companies) {
         $fromIso = $FromDate.ToString("yyyy-MM-dd"); $toIso = $ToDate.ToString("yyyy-MM-dd")
         # Tally's company change counter says whether anything changed. "Sync now" doesn't trust it alone:
         # it always compares voucher by voucher, so entries are found even if the counter didn't move.
-        $unchanged = ($madeEntries -eq 0) -and (-not $script:Asked) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
+        $unchanged = ($madeEntries -eq 0) -and (-not $script:Asked) -and (-not $state.need_groups) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
                      ($state.alt_mst -eq $co.AltMst) -and ($state.from_date -eq $fromIso)
         # Some Tally setups don't move that counter for every entry, so even when it says "unchanged"
         # the vouchers are compared one by one every 30 minutes.
@@ -388,13 +388,13 @@ foreach ($co in $companies) {
         }
         if ($deepCheck -and -not $full -and $months.Count -eq 0) { continue }   # the 30-minute check found nothing new
         if ($deepCheck) { Log ("Found changes in " + $co.Name + " that Tally's change counter didn't show.") }
-        $mastersChanged = $full -or ($state.alt_mst -ne $co.AltMst)
+        $mastersChanged = $full -or ($state.alt_mst -ne $co.AltMst) -or [bool]$state.need_groups
         if ($full) { Log ("Syncing " + $co.Name + " (" + $fromIso + " to " + $toIso + ") - full ...") "Cyan" }
         else { Log ("Syncing " + $co.Name + " - " + $(if ($months.Count) { "changed months: " + ($months -join ", ") } else { "no voucher changes found, refreshing balances" }) + " ...") "Cyan" }
 
         # 3. Masters: ledgers and stock every time (their balances move with every entry), the rest only when changed
         if ($mastersChanged) {
-            Send-Part $run "groups"  (Tally-Raw (Collection-Xml "TMGroups" "Group" "Name, Parent" $co.Name))
+            Send-Part $run "groups"  (Tally-Raw (Collection-Xml "TMGroups" "Group" "Name, Parent, IsRevenue, AffectsGrossProfit, IsDeemedPositive" $co.Name))
             Send-Part $run "vtypes"  (Tally-Raw (Collection-Xml "TMVchTypes" "VoucherType" "Name, Parent" $co.Name))
         }
         Send-Part $run "ledgers" (Tally-Raw (Collection-Xml "TMLedgers" "Ledger" `

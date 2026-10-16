@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "2.6.4";
+const APP_VERSION = "2.7";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -1223,60 +1223,63 @@ function fyStart(day) {
   return `${y}-04-01`;
 }
 
+/* ---------------------------------------------------------------- Tally-style P&L and Balance Sheet
+   Two sides like Tally: each heading with its total on the right, details (italic) in an inner column.
+   Side by side on a computer, one under the other on a phone. Tap a heading to open its details. */
+function tamt(n) { return n < 0 ? `(-)${nf2.format(-n)}` : nf2.format(n); }
+function tallySide(title, sub, rows, total, key) {
+  const body = rows.map((g, i) => {
+    const id = `${key}${i}`;
+    const lines = (g.lines || []).map((l) => {
+      const href = l.stock ? "#/stock" : g.pl ? "" : l.group ? `#/group/${enc(l.name)}` : `#/ledger/${enc(l.name)}`;
+      const inner = `<span class="tn">${h(l.name)}</span><span class="ti">${tamt(l.amount)}</span><span class="to"></span>`;
+      return href ? `<a class="tl sub" href="${href}">${inner}</a>` : `<div class="tl sub">${inner}</div>`;
+    }).join("");
+    const label = `${h(g.name)}${g.approx ? ' <span class="approx" title="Worked out at average rates">≈</span>' : ""}`;
+    if (g.result) return `<div class="tl res"><span class="tn">${label}</span><span class="ti"></span><span class="to">${tamt(g.amount)}</span></div>`;
+    if (g.stock) return `<a class="tl grp" href="#/stock"><span class="tn">${label}</span><span class="ti"></span><span class="to">${tamt(g.amount)}</span></a>`;
+    if (g.ledger) return `<a class="tl grp" href="#/ledger/${enc(g.name)}"><span class="tn">${label}</span><span class="ti"></span><span class="to">${tamt(g.amount)}</span></a>`;
+    return `<button class="tl grp" aria-expanded="${S.tdetail ? "true" : "false"}" data-tx="${id}"><span class="tn">${label}</span><span class="ti"></span><span class="to">${tamt(g.amount)}</span></button>
+      <div class="tdet" id="${id}" ${S.tdetail ? "" : "hidden"}>${lines}</div>`;
+  }).join("");
+  return `<div class="tside"><div class="thead"><span>${title}</span><span>${sub}</span></div><div class="tbody">${body}</div>
+    <div class="ttot"><span class="tn">Total</span><span class="ti"></span><span class="to">${tamt(total)}</span></div></div>`;
+}
+function wireTally() {
+  view.querySelectorAll("[data-tx]").forEach((b) => b.onclick = () => {
+    const el = document.getElementById(b.dataset.tx); el.hidden = !el.hidden; b.setAttribute("aria-expanded", String(!el.hidden));
+  });
+  const t = $("#tdetail");
+  if (t) t.onclick = () => { S.tdetail = !S.tdetail; route(); };
+}
+const tdate = (iso) => { const [y, m, d] = iso.split("-"); return `${+d}-${MON[+m - 1]}-${y}`; };
+
 async function vPL() {
   setTitle(true);
   const d = await api(cpath("pl", periodParams()));
-  const s = d.sections;
-  const sec = (key, label, sign) => {
-    const x = s[key];
-    if (!x.ledgers.length) return "";
-    const id = "pl-" + key.replace(/\W/g, "");
-    return `<button class="pl-line" aria-expanded="false" data-x="${id}"><span>${sign < 0 ? "Less: " : ""}${label}</span>${money(x.total)}</button>
-      <div id="${id}" hidden>${x.ledgers.map((l) => `<a class="pl-line sub" style="cursor:pointer;text-decoration:none" href="#/ledger/${enc(l.name)}"><span>${h(l.name)}</span>${money(l.amount)}</a>`).join("")}</div>`;
-  };
-  const res = (label, n) => `<div class="pl-line result"><span>${n < 0 ? label.replace("profit", "loss") : label}</span><span class="amt ${n < 0 ? "loss" : ""}">${rupees(n)}</span></div>`;
-  view.innerHTML = `<h1 class="title">Profit &amp; Loss</h1>${periodBar(d.from, d.to)}
-    <section class="page">
-      ${sec("Sales Accounts", "Sales", 1)}${sec("Direct Incomes", "Direct incomes", 1)}
-      <div class="pl-line" style="cursor:default"><span>Closing stock</span>${money(d.closing_stock)}</div>
-      <div class="pl-line" style="cursor:default"><span>Less: Opening stock</span>${money(d.opening_stock)}</div>
-      ${sec("Purchase Accounts", "Purchases", -1)}${sec("Direct Expenses", "Direct expenses", -1)}
-      ${res("Gross profit", d.gross_profit)}
-      ${sec("Indirect Incomes", "Indirect incomes", 1)}${sec("Indirect Expenses", "Indirect expenses", -1)}
-      ${res("Net profit", d.net_profit)}
-      <div class="note">Tap a line to see its ledgers. Stock figures are Tally's current opening and closing stock, so profit matches Tally best when the period is the whole year.</div>
-    </section>`;
-  wirePeriod(d.from, d.to);
-  view.querySelectorAll("[data-x]").forEach((b) => b.onclick = () => {
-    const el = document.getElementById(b.dataset.x); el.hidden = !el.hidden; b.setAttribute("aria-expanded", String(!el.hidden));
-  });
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  const per = `${tdate(d.from)} to ${tdate(d.to)}`;
+  view.innerHTML = `<div class="treport-head"><div class="tco">${h(co)}</div><div class="ttitle">Profit &amp; Loss A/c</div><div class="tper">${per}</div></div>
+    ${periodBar(d.from, d.to)}
+    <div class="actions" style="padding:0 0 10px"><button class="chip ${S.tdetail ? "on" : ""}" id="tdetail">${S.tdetail ? "Detailed" : "Condensed"}: tap to switch</button></div>
+    <div class="treport">
+      <div class="tblock">${tallySide("Particulars", per, d.trading.dr, d.trading.total, "td")}${tallySide("Particulars", per, d.trading.cr, d.trading.total, "tc")}</div>
+      <div class="tblock">${tallySide("Particulars", "", d.pl.dr, d.pl.total, "pd")}${tallySide("Particulars", "", d.pl.cr, d.pl.total, "pc")}</div>
+    </div>
+    <p class="note" style="border:0">Laid out like Tally: expenses on the left, incomes on the right, Gross Profit carried down to the Nett Profit. Groups go where Tally puts them, including groups you made.${d.stock_exact ? "" : " Stock marked ≈ is valued at average rates for the dates chosen, so it can differ a little from Tally."}</p>`;
+  wirePeriod(d.from, d.to); wireTally();
 }
 
-/* ---------------------------------------------------------------- balance sheet */
 async function vBS() {
   setTitle(true);
   const d = await api(cpath("bs"));
-  let k = 0;
-  const side = (title, list) => `<section class="page"><div class="block-title"><span>${title}</span><span>₹</span></div>
-    ${list.map((g) => {
-      const id = "bs" + (k++);
-      const sub = g.lines.map((l) => {
-        const href = l.stock ? "#/stock" : g.pl ? "" : l.group ? `#/group/${enc(l.name)}` : `#/ledger/${enc(l.name)}`;
-        return href ? `<a class="pl-line sub" style="text-decoration:none" href="${href}"><span>${h(l.name)}</span>${money(l.amount)}</a>`
-          : `<div class="pl-line sub" style="cursor:default"><span>${h(l.name)}</span>${money(l.amount)}</div>`;
-      }).join("");
-      const label = g.pl ? (g.loss ? "Profit &amp; Loss A/c (loss)" : "Profit &amp; Loss A/c") : h(g.name);
-      return g.ledger ? `<a class="pl-line" style="text-decoration:none" href="#/ledger/${enc(g.name)}"><span>${label}</span>${money(g.amount)}</a>`
-        : `<button class="pl-line" aria-expanded="false" data-x="${id}"><span>${label}</span>${money(g.amount)}</button><div id="${id}" hidden>${sub}</div>`;
-    }).join("")}
-    <div class="pl-line result"><span>Total</span><span class="amt">${rupees(d.total)}</span></div></section>`;
-  const gap = Math.abs((d.pl_this_period || 0));
-  view.innerHTML = `<h1 class="title">Balance Sheet</h1><p class="subtitle">As on ${fdate(d.as_on)}, from Tally's closing balances at the last sync</p>
-    ${side("Liabilities", d.liabilities)}${side("Assets", d.assets)}
-    <p class="note" style="border:0">Tap a line to see what's in it. Profit &amp; Loss A/c is last year's balance from Tally plus this year's profit worked out so both sides match. If it looks wrong, the cause is usually an opening balance difference${d.unbalanced ? ` or the ${d.unbalanced} vouchers that didn't add up (see Sync check)` : ""}.${d.stock_in_ledgers ? " Closing stock is taken from your stock ledgers." : ""}</p>`;
-  view.querySelectorAll("[data-x]").forEach((b) => b.onclick = () => {
-    const el = document.getElementById(b.dataset.x); el.hidden = !el.hidden; b.setAttribute("aria-expanded", String(!el.hidden));
-  });
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  const at = `as at ${tdate(d.as_at)}`;
+  view.innerHTML = `<div class="treport-head"><div class="tco">${h(co)}</div><div class="ttitle">Balance Sheet</div><div class="tper">${at}</div></div>
+    <div class="actions" style="padding:0 0 10px"><button class="chip ${S.tdetail ? "on" : ""}" id="tdetail">${S.tdetail ? "Detailed" : "Condensed"}: tap to switch</button></div>
+    <div class="treport"><div class="tblock">${tallySide("Liabilities", at, d.liabilities, d.total, "bl")}${tallySide("Assets", at, d.assets, d.total, "ba")}</div></div>
+    <p class="note" style="border:0">From Tally's closing balances at the last sync. Profit &amp; Loss A/c shows this year's profit (Current Period, from ${tdate(d.period_from)}) and everything before it (Opening Balance).${d.unbalanced ? ` ${d.unbalanced} vouchers didn't add up at the last sync (see Sync check), which can make these figures a little off.` : ""}${d.stock_in_ledgers ? " Closing stock is taken from your stock ledgers." : ""}</p>`;
+  wireTally();
 }
 
 /* ---------------------------------------------------------------- cash and bank book */

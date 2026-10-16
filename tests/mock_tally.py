@@ -16,7 +16,7 @@ GROUPS = [  # name, parent
     ("Bank Accounts", "Current Assets"), ("Cash-in-Hand", "Current Assets"), ("Sundry Debtors", "Current Assets"),
     ("Stock-in-Hand", "Current Assets"), ("Sundry Creditors", "Current Liabilities"),
     ("Duties & Taxes", "Current Liabilities"), ("Bank OD A/c", "Loans (Liability)"),
-    ("Mumbai Debtors", "Sundry Debtors"),
+    ("Mumbai Debtors", "Sundry Debtors"), ("Commission Earned", ""),
 ]
 VTYPES = [("Sales", ""), ("Purchase", ""), ("Receipt", ""), ("Payment", ""), ("Journal", ""), ("Contra", ""),
           ("Credit Note", ""), ("Debit Note", ""), ("GST Sales", "Sales"),
@@ -33,6 +33,7 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Input CGST": ("Duties & Taxes", 0), "Input SGST": ("Duties & Taxes", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
     "Discount Received": ("Indirect Incomes", 0), "Capital": ("Capital Account", 0),
+    "Commission Received": ("Commission Earned", 0),
 }
 for n, g, o in DEBTORS:
     LEDGERS[n] = (g, o)
@@ -124,6 +125,8 @@ def make_vouchers():
                "items": [("Primer 4L", 30, "Nos", 800.0, 24000.0)], "ledgers": [], "nonposting": True})
     vs.append({"kind": "acct", "date": date(2026, 8, 10), "type": "Memorandum", "no": "M1", "party": "Rent",
                "ledgers": [("Rent", 5555.0), ("Cash", -5555.0)], "nonposting": True})
+    vs.append({"kind": "acct", "date": date(2026, 8, 16), "type": "Receipt", "no": "C1", "party": "Commission Received",
+               "ledgers": [("Cash", 2500.0), ("Commission Received", -2500.0)], "narration": "Commission"})
     vs.append({"kind": "acct", "date": date(2026, 9, 2), "type": "Journal", "no": "BAD1", "party": "Rent",
                "ledgers": [("Rent", 1000.0), ("Cash", -900.0)], "narration": "deliberately broken"})
     for i, v in enumerate(vs):
@@ -474,7 +477,15 @@ class H(BaseHTTPRequestHandler):
             elif ctype == "Group":
                 for n, p in GROUPS:
                     par = escape(p) if p else "&#4; Primary"
-                    out += f'<GROUP NAME="{escape(n)}"><PARENT TYPE="String">{par}</PARENT></GROUP>'
+                    top = n
+                    while dict(GROUPS).get(top):
+                        top = dict(GROUPS)[top]
+                    rev = top in ("Sales Accounts", "Purchase Accounts", "Direct Expenses", "Direct Incomes", "Indirect Expenses", "Indirect Incomes", "Commission Earned")
+                    gp = top in ("Sales Accounts", "Purchase Accounts", "Direct Expenses", "Direct Incomes")
+                    dr = top in ("Purchase Accounts", "Direct Expenses", "Indirect Expenses", "Current Assets", "Fixed Assets", "Investments")
+                    yn = lambda b: "Yes" if b else "No"
+                    out += (f'<GROUP NAME="{escape(n)}"><PARENT TYPE="String">{par}</PARENT><ISREVENUE TYPE="Logical">{yn(rev)}</ISREVENUE>'
+                            f'<AFFECTSGROSSPROFIT TYPE="Logical">{yn(gp)}</AFFECTSGROSSPROFIT><ISDEEMEDPOSITIVE TYPE="Logical">{yn(dr)}</ISDEEMEDPOSITIVE></GROUP>')
             elif ctype == "VoucherType":
                 for n, p in VTYPES:
                     out += f'<VOUCHERTYPE NAME="{escape(n)}"><PARENT TYPE="String">{escape(p)}</PARENT></VOUCHERTYPE>'

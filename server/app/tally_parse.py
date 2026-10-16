@@ -130,8 +130,16 @@ def parse_companies(root):
     return out
 
 
+def _yn(el, tag):
+    v = txt(el, tag).strip().lower()
+    return 1 if v == "yes" else 0 if v == "no" else None
+
+
 def parse_groups(root):
-    return [{"name": name_of(el), "parent": clean_parent(txt(el, "PARENT"))}
+    """Name, parent, and Tally's own nature of the group: revenue (P&L) or not, above the gross profit line,
+    and debit nature (assets / expenses)."""
+    return [{"name": name_of(el), "parent": clean_parent(txt(el, "PARENT")), "revenue": _yn(el, "ISREVENUE"),
+             "gp": _yn(el, "AFFECTSGROSSPROFIT"), "debit": _yn(el, "ISDEEMEDPOSITIVE")}
             for el in root.iter("GROUP") if name_of(el)]
 
 

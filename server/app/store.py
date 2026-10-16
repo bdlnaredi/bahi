@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS company(
   from_date TEXT, to_date TEXT, alt_vch TEXT, alt_mst TEXT, unbalanced INTEGER DEFAULT 0,
   bills_source TEXT DEFAULT 'vouchers', info TEXT DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS grp(
-  company_id INT, name TEXT, parent TEXT, chain TEXT, PRIMARY KEY(company_id, name));
+  company_id INT, name TEXT, parent TEXT, chain TEXT, revenue INT, gp INT, debit INT, PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS vtype(
   company_id INT, name TEXT, base TEXT, PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS ledger(
@@ -134,6 +134,10 @@ def _migrate(c):
     cols = [r[1] for r in c.execute("PRAGMA table_info(company)")]
     if "keep_from" not in cols:
         c.execute("ALTER TABLE company ADD COLUMN keep_from TEXT DEFAULT ''")
+    gcols = [r[1] for r in c.execute("PRAGMA table_info(grp)")]
+    for col in ("revenue", "gp", "debit"):        # Tally's nature of each group (added in 2.7)
+        if col not in gcols:
+            c.execute(f"ALTER TABLE grp ADD COLUMN {col} INT")
 
 
 SYNC_FILE = os.path.join(os.path.dirname(DB_PATH), "sync.json")
@@ -202,6 +206,10 @@ def get_alt(name):
         r = c.execute("SELECT alt_vch, alt_mst, from_date, last_sync, keep_from FROM company WHERE name=?", (name,)).fetchone()
         out = dict(r) if r else {}
     out["paused"] = is_paused(name)
+    with conn() as c:     # groups synced before Bahi knew each group's nature: ask the PC to send them once more
+        r = c.execute("""SELECT COUNT(*) n FROM grp g JOIN company co ON co.id=g.company_id
+                         WHERE co.name=? AND g.parent='' AND g.revenue IS NULL""", (name,)).fetchone()
+        out["need_groups"] = bool(r and r["n"])
     return out
 
 
@@ -288,8 +296,9 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
         if groups or not partial:
             chains = _chains(groups)
             c.execute("DELETE FROM grp WHERE company_id=?", (cid,))
-            c.executemany("INSERT OR REPLACE INTO grp VALUES(?,?,?,?)",
-                          [(cid, g["name"], g["parent"], chains[g["name"]]) for g in groups])
+            c.executemany("INSERT OR REPLACE INTO grp(company_id, name, parent, chain, revenue, gp, debit) VALUES(?,?,?,?,?,?,?)",
+                          [(cid, g["name"], g["parent"], chains[g["name"]], g.get("revenue"), g.get("gp"), g.get("debit"))
+                           for g in groups])
         else:
             chains = {r["name"]: r["chain"] for r in c.execute("SELECT name, chain FROM grp WHERE company_id=?", (cid,))}
         if vtypes or not partial:
@@ -1330,3 +1339,157 @@ def voucher_party(cid, vid):
     with conn() as c:
         r = c.execute("SELECT party FROM voucher WHERE company_id=? AND id=?", (cid, vid)).fetchone()
         return r["party"] if r else None
+
+
+
+# ---------------------------------------------------------------- Tally-style Profit & Loss and Balance Sheet
+# Where a group goes is decided the way Tally decides it, from the group's own nature:
+#   revenue  -> Profit & Loss (else Balance Sheet)
+#   gp       -> above the Gross Profit line (trading part)
+#   debit    -> left side of P&L (expenses), right side of Balance Sheet (assets)
+DEFAULT_NATURE = {
+    "Sales Accounts": (1, 1, 0), "Purchase Accounts": (1, 1, 1), "Direct Incomes": (1, 1, 0), "Direct Expenses": (1, 1, 1),
+    "Indirect Incomes": (1, 0, 0), "Indirect Expenses": (1, 0, 1),
+    "Capital Account": (0, 0, 0), "Loans (Liability)": (0, 0, 0), "Current Liabilities": (0, 0, 0), "Branch / Divisions": (0, 0, 0),
+    "Suspense A/c": (0, 0, 0), "Fixed Assets": (0, 0, 1), "Investments": (0, 0, 1), "Current Assets": (0, 0, 1),
+    "Misc. Expenses (ASSET)": (0, 0, 1),
+}
+BS_ORDER = ["Capital Account", "Loans (Liability)", "Current Liabilities", "Branch / Divisions", "Suspense A/c",
+            "Fixed Assets", "Investments", "Current Assets", "Misc. Expenses (ASSET)"]
+PL_ORDER = ["Purchase Accounts", "Direct Expenses", "Sales Accounts", "Direct Incomes", "Indirect Expenses", "Indirect Incomes"]
+
+
+def _natures(c, cid, values):
+    out = {}
+    for g in c.execute("SELECT name, revenue, gp, debit FROM grp WHERE company_id=? AND parent=''", (cid,)):
+        d = DEFAULT_NATURE.get(g["name"])
+        if g["revenue"] is not None:
+            out[g["name"]] = (g["revenue"], g["gp"] or 0, g["debit"] or 0)
+        elif d:
+            out[g["name"]] = d
+        else:      # unknown own group without Tally's flags (older agent): Balance Sheet, side by balance
+            out[g["name"]] = (0, 0, 1 if values.get(("grp", g["name"]), 0) >= 0 else 0)
+    return out
+
+
+def _tree(c, cid, values):
+    """Totals per group (all ledgers below it) and the direct children of each group."""
+    groups = {g["name"]: g["parent"] for g in c.execute("SELECT name, parent FROM grp WHERE company_id=?", (cid,))}
+    tot = {}
+    led = c.execute("SELECT name, parent, chain FROM ledger WHERE company_id=?", (cid,)).fetchall()
+    for l in led:
+        v = values.get(l["name"], 0)
+        for g in (l["chain"] or "").strip("|").split("|"):
+            if g:
+                tot[g] = tot.get(g, 0) + v
+    kids = {}
+    for g, p in groups.items():
+        if p:
+            kids.setdefault(p, []).append(("group", g))
+    for l in led:
+        if l["parent"] in groups:
+            kids.setdefault(l["parent"], []).append(("ledger", l["name"]))
+    return tot, kids, led
+
+
+def _lines(name, tot, kids, values, sign):
+    rows = []
+    for kind, n in kids.get(name, []):
+        v = (tot.get(n, 0) if kind == "group" else values.get(n, 0)) * sign
+        if abs(v) > 0.005:
+            rows.append({"name": n, "amount": round(v, 2), "group": kind == "group"})
+    rows.sort(key=lambda r: (not r["group"], -abs(r["amount"])))
+    return rows
+
+
+def _period_stock(cid, f, t):
+    """Opening stock at f and closing stock at t; exact where Tally's own figure is known."""
+    st = stock(cid, "", f, t)
+    with conn() as c:
+        master = {r["name"]: r for r in c.execute("SELECT name, opening_qty, opening_value FROM stock WHERE company_id=?", (cid,))}
+    same = st["items"] and all(abs(i["open_qty"] - (master.get(i["name"]) or {"opening_qty": 0})["opening_qty"]) < 0.001 for i in st["items"])
+    if same:     # nothing moved before f: Tally's own opening value applies
+        return round(sum(m["opening_value"] for m in master.values()), 2), True, st["total"], st["close_exact"]
+    return st["open_total"], False, st["total"], st["close_exact"]
+
+
+def tally_pl(cid, d_from=None, d_to=None):
+    with conn() as c:
+        f, t = period(c, cid, d_from, d_to)
+        mv = {r["ledger"]: r["s"] for r in c.execute("""SELECT vl.ledger, SUM(vl.amount) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+            WHERE v.company_id=? AND v.date BETWEEN ? AND ? GROUP BY vl.ledger""", (cid, f, t))}
+        tot, kids, _ = _tree(c, cid, mv)
+        nat = _natures(c, cid, {("grp", k): v for k, v in tot.items()})
+        prims = [g for g, n in nat.items() if n[0]]
+    prims.sort(key=lambda g: (PL_ORDER.index(g) if g in PL_ORDER else 50, g))
+    o_stock, o_exact, c_stock, c_exact = _period_stock(cid, f, t)
+
+    def side(gp, debit):
+        sign = 1 if debit else -1
+        return [{"name": g, "amount": round(tot.get(g, 0) * sign, 2), "lines": _lines(g, tot, kids, mv, sign)}
+                for g in prims if nat[g][1] == gp and nat[g][2] == debit and abs(tot.get(g, 0)) > 0.005]
+    tr_dr = [{"name": "Opening Stock", "amount": round(o_stock, 2), "lines": [], "stock": True, "approx": not o_exact}] + side(1, 1)
+    tr_cr = side(1, 0) + [{"name": "Closing Stock", "amount": round(c_stock, 2), "lines": [], "stock": True, "approx": not c_exact}]
+    gross = sum(x["amount"] for x in tr_cr) - sum(x["amount"] for x in tr_dr)
+    if gross >= 0:
+        tr_dr.append({"name": "Gross Profit c/o", "amount": round(gross, 2), "lines": [], "result": True})
+    else:
+        tr_cr.append({"name": "Gross Loss c/o", "amount": round(-gross, 2), "lines": [], "result": True})
+    t1 = round(max(sum(x["amount"] for x in tr_dr), sum(x["amount"] for x in tr_cr)), 2)
+    pl_dr = ([{"name": "Gross Loss b/f", "amount": round(-gross, 2), "lines": [], "result": True}] if gross < 0 else []) + side(0, 1)
+    pl_cr = ([{"name": "Gross Profit b/f", "amount": round(gross, 2), "lines": [], "result": True}] if gross >= 0 else []) + side(0, 0)
+    nett = sum(x["amount"] for x in pl_cr) - sum(x["amount"] for x in pl_dr)
+    if nett >= 0:
+        pl_dr.append({"name": "Nett Profit", "amount": round(nett, 2), "lines": [], "result": True})
+    else:
+        pl_cr.append({"name": "Nett Loss", "amount": round(-nett, 2), "lines": [], "result": True})
+    t2 = round(max(sum(x["amount"] for x in pl_dr), sum(x["amount"] for x in pl_cr)), 2)
+    return {"from": f, "to": t, "trading": {"dr": tr_dr, "cr": tr_cr, "total": t1}, "pl": {"dr": pl_dr, "cr": pl_cr, "total": t2},
+            "gross_profit": round(gross, 2), "net_profit": round(nett, 2), "stock_exact": o_exact and c_exact}
+
+
+def tally_bs(cid):
+    today = date.today().isoformat()
+    with conn() as c:
+        fs, fe = period(c, cid, None, None)
+        as_at = min(today, fe)
+        cl = {r["name"]: r["closing"] for r in c.execute("SELECT name, closing FROM ledger WHERE company_id=?", (cid,))}
+        tot, kids, led = _tree(c, cid, cl)
+        nat = _natures(c, cid, {("grp", k): v for k, v in tot.items()})
+        prims = [g for g, n in nat.items() if not n[0]]
+        stock_in_ledgers = c.execute("""SELECT COUNT(*) n FROM ledger WHERE company_id=? AND chain LIKE '%|Stock-in-Hand|%'
+            AND ABS(closing) > 0.5""", (cid,)).fetchone()["n"] > 0
+        stock_val = 0.0 if stock_in_ledgers else c.execute(
+            "SELECT COALESCE(SUM(closing_value),0) s FROM stock WHERE company_id=?", (cid,)).fetchone()["s"]
+        known = set(nat)
+        loose = [l for l in led if ((l["chain"] or "||").split("|")[1] if l["chain"] else "") not in known and abs(cl.get(l["name"], 0)) > 0.005]
+        unbalanced = c.execute("SELECT unbalanced FROM company WHERE id=?", (cid,)).fetchone()["unbalanced"]
+    prims.sort(key=lambda g: (BS_ORDER.index(g) if g in BS_ORDER else 50, g))
+    liab, assets = [], []
+    for g in prims:
+        debit = nat[g][2]
+        sign = 1 if debit else -1
+        lines = _lines(g, tot, kids, cl, sign)
+        amt = tot.get(g, 0) * sign
+        if g == "Current Assets" and stock_val:
+            lines.insert(0, {"name": "Closing Stock", "amount": round(stock_val, 2), "group": False, "stock": True})
+            amt += stock_val
+        if abs(amt) > 0.005 or lines:
+            (assets if debit else liab).append({"name": g, "amount": round(amt, 2), "lines": lines})
+    if stock_val and not any(x["name"] == "Current Assets" for x in assets):
+        assets.append({"name": "Current Assets", "amount": round(stock_val, 2),
+                       "lines": [{"name": "Closing Stock", "amount": round(stock_val, 2), "group": False, "stock": True}]})
+    for l in loose:      # ledgers outside every group, e.g. Tally's own "Profit & Loss A/c"
+        if "profit" in l["name"].lower() and "loss" in l["name"].lower():
+            continue
+        v = cl[l["name"]]
+        (assets if v >= 0 else liab).append({"name": l["name"], "amount": round(abs(v), 2), "lines": [], "ledger": True})
+    a_tot = sum(x["amount"] for x in assets)
+    l_tot = sum(x["amount"] for x in liab)
+    pl_total = a_tot - l_tot                  # what makes both sides equal
+    current = tally_pl(cid, fs, as_at)["net_profit"]
+    liab.append({"name": "Profit & Loss A/c", "amount": round(pl_total, 2), "pl": True,
+                 "lines": [{"name": "Opening Balance", "amount": round(pl_total - current, 2)},
+                           {"name": "Current Period", "amount": round(current, 2)}]})
+    return {"as_at": as_at, "period_from": fs, "liabilities": liab, "assets": assets, "total": round(a_tot, 2),
+            "stock_in_ledgers": stock_in_ledgers, "unbalanced": unbalanced}

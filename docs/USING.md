@@ -160,15 +160,22 @@ The **Sync** box shows the synced date range, the number of ledgers and vouchers
 
 > **GST summary** is a quick check worked out from your vouchers. GST payments to the government and set-off entries are left out. File your returns from Tally or the GST portal.
 
-## Balance Sheet
+## Balance Sheet and Profit & Loss
 
-<img src="images/balance-sheet.png" width="260" align="right" alt="Balance Sheet">
+<img src="images/desktop-pl.png" width="720" alt="Profit & Loss A/c in Tally's layout">
 
-Liabilities and assets from Tally's closing balances at the last sync, laid out like Tally's Balance Sheet. Tap a group to see what's in it, then tap again to open the group or ledger. Closing stock is shown under Current Assets.
+Both are laid out like Tally:
 
-**Profit & Loss A/c** is last year's balance from Tally plus this year's profit, worked out so that both sides match. If it doesn't agree with Tally, the usual reason is a difference in opening balances, or vouchers that didn't add up (see **Sync check**).
+- **Profit & Loss A/c:** Opening Stock, Purchases and Direct Expenses on the left, against Sales, Direct Incomes and Closing Stock on the right, giving **Gross Profit c/o**. Below that, Gross Profit b/f and Indirect Incomes against Indirect Expenses, giving **Nett Profit**. Pick the period at the top.
+- **Balance Sheet:** Liabilities on the left and Assets on the right, *as at* today, with equal totals. **Profit & Loss A/c** shows *Opening Balance* (everything up to last year) and *Current Period* (this year's Nett Profit). Closing Stock is under Current Assets.
 
-<br clear="right">
+On a computer the two sides are side by side. On a phone they are one under the other.
+
+**Condensed / Detailed** switches between headings only and headings with their sub-groups and ledgers (in italics), like Alt+F1 in Tally. Tap any heading to open just that one. Tap a sub-group or ledger to see it.
+
+Each group goes where Tally puts it, using the group's own settings in Tally (revenue or not, gross profit or not, debit or credit), so groups you made yourself land in the right place too.
+
+Opening and closing stock are Tally's own figures where Bahi has them. For other dates they are worked out at average rates and marked ≈.
 
 ## Cash and bank book
 

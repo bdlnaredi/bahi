@@ -1,5 +1,5 @@
 /* Bahi service worker: always try the server first, fall back to the saved copy when offline */
-const SHELL = "bahi-shell-v13", DATA = "bahi-data-v1";
+const SHELL = "bahi-shell-v14", DATA = "bahi-data-v1";
 const FILES = ["/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {

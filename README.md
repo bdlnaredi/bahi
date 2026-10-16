@@ -25,7 +25,7 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **Vouchers:** search by party, voucher number, amount or narration. Open any voucher as an invoice with items, GST, bill references and narration.
 - **Dues:** bill-wise receivables and payables with ageing (0-30, 31-60, 61-90 and 90+ days), overdue amounts, and WhatsApp payment reminders that list the overdue bills.
 - **Stock:** quantity, rate and value of every item, plus item movements.
-- **Balance Sheet** and a **cash and bank book** with daily opening and closing balances.
+- **Balance Sheet and Profit & Loss in Tally's own layout**, and a **cash and bank book** with daily opening and closing balances.
 - **Follow-up list:** overdue and due-this-week customers, with your notes and promised payment dates.
 - **Sales analysis:** customers and items against last year, item margins, month by month this year against last, and slow-moving stock.
 - **Excel downloads** of ledgers, vouchers, dues and analysis.
