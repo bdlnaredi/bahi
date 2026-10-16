@@ -265,7 +265,7 @@ try {
         elseif ($Verbose) { Log ("Not syncing now (" + $sched.why + ")") }
         exit 0
     }
-    if ($sched.why -eq "asked") { Log "Sync asked for in the app" }
+    if ($sched.why -eq "asked") { $script:Asked = $true; Log "Sync asked for in the app - checking Tally for changes ..." }
 } catch {
     # an older server without sync settings: carry on as before
 }
@@ -335,7 +335,7 @@ foreach ($co in $companies) {
         $unchanged = ($madeEntries -eq 0) -and $co.AltVch -and $co.AltMst -and ($state.alt_vch -eq $co.AltVch) -and
                      ($state.alt_mst -eq $co.AltMst) -and ($state.from_date -eq $fromIso)
         if ($unchanged -and -not $Force) {
-            if ($Verbose) { Log ("No changes in " + $co.Name) }
+            if ($Verbose -or $script:Asked) { Log ("No changes in " + $co.Name + " since the last sync - nothing to send.") "Green" }
             continue
         }
         $t0 = Get-Date
@@ -472,4 +472,5 @@ foreach ($co in $companies) {
 }
 
 Send-Heartbeat
+if ($script:Asked) { Log ("Sync finished for " + $companies.Count + " compan" + $(if ($companies.Count -eq 1) { "y" } else { "ies" }) + " open in Tally.") }
 exit $exitCode
