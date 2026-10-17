@@ -40,7 +40,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.0.2"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -575,6 +575,21 @@ class Handler(BaseHTTPRequestHandler):
                 self.body(4096)
                 backup.run()
             return self.send_json({"backups": backup.listing(), "keep": backup.KEEP, "at": backup.AT})
+        if path == "/api/backups/restore" and method == "POST":
+            name = q.get("name", "")
+            if name:
+                bp = backup.path_of(name)
+                if not bp:
+                    return self.send_json({"error": "That backup isn't on the server any more."}, 404)
+                with open(bp, "rb") as fh:
+                    raw = fh.read()
+            else:
+                raw = self.body(500 * 1024 * 1024)
+            try:
+                r = backup.restore(raw)
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            return self.send_json({"ok": True, **r})
         if path.startswith("/api/backups/"):
             p = backup.path_of(path.rsplit("/", 1)[-1])
             if not p:

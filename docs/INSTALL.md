@@ -207,11 +207,9 @@ When an update changes how data is stored, the server clears its copy and the ne
 
 ## Restoring a backup
 
-Bahi backs up every night into `/mnt/user/appdata/bahi/data/backups`. To go back to one:
+Bahi backs up every night into `/mnt/user/appdata/bahi/data/backups`. To go back to one, open **Reports → Settings → Backups** in the app and tap **Restore** next to it, or choose a downloaded backup under **Restore from a backup file**. Bahi saves the current state first, so a restore can be undone the same way.
 
-1. Stop the bahi container.
-2. Open the backup `.zip` and copy everything in it (`tally.db`, `followups.json` and any settings files) into `/mnt/user/appdata/bahi/data`, replacing the files there.
-3. Start the container, then run `Sync-Now.bat` on the Tally PC to bring it up to date.
+If the app itself won't start, do it by hand: stop the bahi container, copy everything inside the backup `.zip` into `/mnt/user/appdata/bahi/data` (replacing the files there), start the container, then run `Sync-Now.bat` on the Tally PC.
 
 You can change the backup time with the `BACKUP_TIME` variable, e.g. `BACKUP_TIME=23:30`.
 

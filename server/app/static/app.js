@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.0.1";
+const APP_VERSION = "3.0.2";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -1076,11 +1076,32 @@ async function vSettings() {
     const last = b.backups[0];
     $("#bksec").innerHTML = `<div class="block-title">Backups <span>${b.backups.length} kept</span></div>
       <div class="info"><div>${last ? `Last backup ${ago(last.time)}.` : "No backup yet."} A copy is made every night at ${h(b.at)}, and the last ${b.keep} are kept in the <code>backups</code> folder next to your data on the server.</div>
-      <div>Your books are always safe in Tally. The backup saves the synced copy, your follow-up notes and settings, so nothing is lost if the server's disk fails.</div></div>
-      ${b.backups.map((x) => `<a class="row" href="/api/backups/${enc(x.name)}" download><div class="main"><div class="name">${h(x.name)}</div><div class="meta">${(x.size / 1048576).toFixed(1)} MB</div></div><span class="chev"></span></a>`).join("")}
-      <div class="actions"><button class="btn" id="bknow">Back up now</button></div>`;
+      <div>Your books are always safe in Tally. The backup saves the synced copy, phone entries, follow-up notes, staff logins and settings, so nothing is lost if the server's disk fails. Download one now and then to keep a copy off the server.</div></div>
+      ${b.backups.map((x) => `<div class="row"><div class="main"><div class="name">${new Date(x.time * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</div><div class="meta">${x.name.includes("before-restore") ? "Saved just before a restore" : "Backup"}, ${(x.size / 1048576).toFixed(1)} MB</div></div>
+        <div class="end" style="display:flex;gap:6px"><a class="chip" href="/api/backups/${enc(x.name)}" download>Download</a><button class="chip" data-restore="${h(x.name)}">Restore</button></div></div>`).join("")}
+      <div class="actions"><button class="btn" id="bknow">Back up now</button></div>
+      <form class="form" id="rsf"><label>Restore from a backup file<input type="file" id="rsfile" accept=".zip" required></label>
+        <button class="btn" type="submit">Restore this file</button><p class="meta" id="rsmsg" role="status"></p></form>
+      <p class="note" style="border:0">Restoring puts back the synced data, phone entries, follow-up notes, staff logins, settings and the app password as they were in that backup. Bahi first saves a copy of everything as it is now, so a restore can be undone. Nothing in Tally changes, and the next sync brings in anything entered in Tally since the backup.</p>`;
     $("#bknow").onclick = async () => { $("#bknow").textContent = "Backing up"; $("#bknow").disabled = true;
       try { showBackups(await post("/api/backups", {})); toast("Backup made."); } catch (err) { toast(err.message); showBackups(); } };
+    const doRestore = async (url, body, label) => {
+      if (!confirm(`Restore ${label}?\n\nEverything in Bahi goes back to how it was in that backup. A copy of how things are now is saved first. If the backup has an older app password, you'll log in with that one.`)) return false;
+      const r = await fetch(url, { method: "POST", body });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { toast(j.error || "Couldn't restore."); return false; }
+      alert(`Restored. The way things were just before is saved as ${j.safety}.`);
+      location.hash = "#/"; location.reload();
+      return true;
+    };
+    $("#bksec").querySelectorAll("[data-restore]").forEach((btn) => btn.onclick = () =>
+      doRestore(`/api/backups/restore?name=${enc(btn.dataset.restore)}`, null, btn.dataset.restore));
+    $("#rsf").onsubmit = async (e) => {
+      e.preventDefault();
+      const f = $("#rsfile").files[0]; if (!f) return;
+      $("#rsmsg").textContent = "Checking the file";
+      if (!(await doRestore("/api/backups/restore", f, f.name))) $("#rsmsg").textContent = "";
+    };
   };
   showBackups();
   showStaff().catch(() => {});

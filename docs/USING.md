@@ -359,7 +359,14 @@ Party names, item names, addresses and narrations written in Hindi print correct
 
 The server makes a backup every night at 02:30 and keeps the last 7. **Reports → Settings → Backups** shows when the last one ran, lets you download any of them, and has a **Back up now** button.
 
-Each backup is a `.zip` file in the `backups` folder next to your data on Unraid (`/mnt/user/appdata/bahi/data/backups`). It holds the synced copy of your books, your follow-up notes and your settings. Your books themselves are always in Tally; the backup saves you a long re-sync and keeps your notes. See [restoring a backup](INSTALL.md#restoring-a-backup).
+Each backup is a `.zip` file in the `backups` folder next to your data on Unraid (`/mnt/user/appdata/bahi/data/backups`). It holds the synced copy of your books, phone entries, follow-up notes, staff logins, bank statements you uploaded, and your settings. Your books themselves are always in Tally; the backup saves you a long re-sync and keeps everything you did in the app.
+
+### Restoring
+
+- To go back to a backup on the server, tap **Restore** next to it.
+- To restore a backup you downloaded earlier (for example onto a new server), choose the file under **Restore from a backup file**.
+
+Before restoring, Bahi saves a copy of everything as it is right now (listed as *Saved just before a restore*), so if you picked the wrong one you can restore that copy and be back where you were. Restoring never touches Tally. Anything entered in Tally after the backup comes in at the next sync, and phone entries that already went into Tally aren't sent again. If the backup had a different app password, log in with that one afterwards. A backup from an older version of Bahi brings back your settings and notes; the books themselves are filled in again by the next sync.
 
 ## Ledger statement PDF
 
