@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.0.0";
+const APP_VERSION = "3.0.1";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -651,12 +651,13 @@ function vReports() {
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
-  ].filter((r) => r[3]);
+  ].filter((r) => r[3] && S.cid);
   view.innerHTML = `${S.me.owner ? "" : `<p class="subtitle" style="margin-top:4px">Logged in as ${h(S.me.name)}</p>`}
   ${S.sync.mode !== "paused" ? `<section class="page"><button class="row" id="syncrow"><div class="main"><div class="name">Sync now</div><div class="meta">${S.sync.mode === "manual" ? "Sync is manual. " : ""}Get the latest from Tally (the Tally PC must be on with Tally open)</div></div></button></section>` : ""}
-  <section class="page">
+  ${S.cid ? "" : '<section class="page"><div class="empty">No Tally data yet. Reports appear after the first sync from the Tally PC. Settings below work already.</div></section>'}
+  ${R.length ? `<section class="page">` : "<div hidden>"}
     ${R.map(([href, name, meta]) => `<a class="row" href="${href}"><div class="main"><div class="name">${name}${href === "#/entries" && S.me.owner && S.approvals ? ` <span class="badge">${S.approvals} to approve</span>` : ""}</div><div class="meta">${meta}</div></div><span class="chev"></span></a>`).join("")}
-  </section>
+  ${R.length ? "</section>" : "</div>"}
   ${c && S.me.owner ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
     <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
@@ -1550,8 +1551,13 @@ async function route() {
   const [path, qs] = location.hash.slice(1).split("?");
   const parts = (path || "/").split("/").slice(1).map(decodeURIComponent);
   const params = new URLSearchParams(qs || "");
-  if (!S.cid) {
-    view.innerHTML = '<div class="empty">No data yet. Run Setup on the Tally PC to send your first sync.</div>';
+  // pages that don't need Tally data work before the first sync too
+  if (!S.cid && !["reports", "settings"].includes(parts[0])) {
+    setTitle(false);
+    view.dataset.view = parts[0] || "home";
+    view.innerHTML = `<section class="page"><div class="empty">No Tally data yet. Run Setup on the Tally PC to send your first sync.</div>
+      ${S.me.owner ? `<a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">Sync, staff logins, Telegram, backups</div></div><span class="chev"></span></a>` : ""}
+      <a class="row" href="#/reports"><div class="main"><div class="name">Reports</div><div class="meta">Everything else in the app</div></div><span class="chev"></span></a></section>`;
     return;
   }
   view.dataset.view = parts[0] || "home";
