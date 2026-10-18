@@ -204,6 +204,11 @@ def ledger_lines(v):
     return out
 
 
+def hidden(v):
+    """HIDE_VCH=<voucher no.>: Tally counts it in balances but leaves it out of voucher exports (a lost entry)."""
+    return bool(os.environ.get("HIDE_VCH")) and v["no"] == os.environ["HIDE_VCH"]
+
+
 def live(v):
     return not v.get("cancelled") and not v.get("optional") and not v.get("nonposting")
 
@@ -479,7 +484,7 @@ class H(BaseHTTPRequestHandler):
         elif typ == "Data" and rid == "Day Book":
             if DAYBOOK_BUG:
                 f = t = m_today = max(v["date"] for v in VOUCHERS)
-            vs = "".join(xml_voucher(v) for v in VOUCHERS if f <= v["date"] <= t)
+            vs = "".join(xml_voucher(v) for v in VOUCHERS if f <= v["date"] <= t and not hidden(v))
             out = f"<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA>{vs}</DATA></BODY></ENVELOPE>"
         else:
             ctype = re.search(r"<COLLECTION[^>]*>.*?<TYPE>(.*?)</TYPE>", req, re.S).group(1)
@@ -487,7 +492,7 @@ class H(BaseHTTPRequestHandler):
             if ctype == "Voucher":
                 light = "AllLedgerEntries" not in req
                 picked = set() if os.environ.get("NO_GUID_FILTER") == "1" else set(re.findall(r'\$GUID = "([^"]+)"', req))
-                for v in VOUCHERS:
+                for v in [x for x in VOUCHERS if not hidden(x)]:
                     if picked and v["guid"] not in picked:
                         continue
                     if f <= v["date"] <= t:
@@ -506,7 +511,7 @@ class H(BaseHTTPRequestHandler):
                         f'<ADDRESS.LIST><ADDRESS>Plot 21, Wardhaman Nagar</ADDRESS><ADDRESS>Central Avenue, Nagpur 440008</ADDRESS></ADDRESS.LIST>'
                         f'<STATENAME>Maharashtra</STATENAME><EMAIL>accounts@demotraders.in</EMAIL><INCOMETAXNUMBER>AABCD1234E</INCOMETAXNUMBER>'
                         f'<GSTREGISTRATIONNUMBER>27AABCD1234E1Z9</GSTREGISTRATIONNUMBER>'
-                        f'<ALTVCHID TYPE="Number"> {431 if os.environ.get("STUCK_ALTVCH") == "1" else max(v["alterid"] for v in VOUCHERS) + EDITS[0]}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID></COMPANY>')
+                        f'<ALTVCHID TYPE="Number"> {431 if os.environ.get("STUCK_ALTVCH") == "1" else max(v["alterid"] for v in VOUCHERS) + EDITS[0]}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID><BOOKSFROM TYPE="Date">20240401</BOOKSFROM></COMPANY>')
             elif ctype == "Group":
                 for n, p in GROUPS:
                     par = escape(p) if p else "&#4; Primary"

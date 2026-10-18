@@ -380,6 +380,8 @@ The PDF follows Tally's *Ledger Account* layout:
 
 ## Good to know
 
+- **Bahi checks itself against Tally.** With every sync the Tally PC also sends each ledger's balance as Tally has it at every month-end. Bahi compares those with its own figures; if a ledger differs in some month, entries are missing (or extra) in that month, and Bahi fetches the month again by itself. **Reports → Sync check → Ledger balances against Tally** shows the result. A line that stays there after the next sync means Tally isn't sending those entries; please report it with the ledger and month shown. The ledger page also warns when its opening is affected.
+
 - **Bahi never deletes or changes anything in Tally.** Syncing only reads from Tally. The only thing ever written to Tally is a receipt, payment or sales order entered on the phone, and it is always added as a new voucher. The Tally PC checks every request just before it goes to Tally and refuses anything that would delete, alter or cancel an existing voucher or ledger, or touch masters; the server checks phone entries the same way before sending them. Changes and deletions are always done by you in Tally itself.
 
 - The Tally PC sends only the vouchers that were created, changed or deleted since the last sync, so a normal sync takes a few seconds. After a big change (more than 100 vouchers at once) it sends the affected months instead. After a server update that changes how data is stored, the next sync sends everything again.

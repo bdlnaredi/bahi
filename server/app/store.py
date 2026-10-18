@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS vgodown(voucher_id INT, item TEXT, godown TEXT, qty R
 CREATE INDEX IF NOT EXISTS ix_vg_v ON vgodown(voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vg_i ON vgodown(item);
 CREATE TABLE IF NOT EXISTS stock_godown_open(company_id INT, item TEXT, godown TEXT, qty REAL);
+CREATE TABLE IF NOT EXISTS ledger_at(company_id INT, day TEXT, ledger TEXT, closing REAL, PRIMARY KEY(company_id, day, ledger));
+CREATE TABLE IF NOT EXISTS heal(company_id INT, month TEXT, at REAL, diff REAL, PRIMARY KEY(company_id, month));
 CREATE TABLE IF NOT EXISTS stock_at(company_id INT, day TEXT, item TEXT, qty REAL, value REAL, PRIMARY KEY(company_id, day, item));
 CREATE TABLE IF NOT EXISTS bill(company_id INT, kind TEXT, party TEXT, ref TEXT, date TEXT, due TEXT, amount REAL);
 CREATE INDEX IF NOT EXISTS ix_b ON bill(company_id, kind, party);
@@ -223,6 +225,10 @@ def get_alt(name):
                                 (SELECT COUNT(*) FROM stock_at a WHERE a.company_id=co.id) snaps FROM company co WHERE co.name=?""",
                       (name,)).fetchone()
         out["need_stock"] = bool(r and r["items"] and not r["snaps"])     # stock synced before month-end stock existed
+        r = c.execute("""SELECT (SELECT COUNT(*) FROM voucher v WHERE v.company_id=co.id) vch,
+                                (SELECT COUNT(*) FROM ledger_at a WHERE a.company_id=co.id) snaps FROM company co WHERE co.name=?""",
+                      (name,)).fetchone()
+        out["need_ledgers"] = bool(r and r["vch"] and not r["snaps"])   # synced before the ledger check existed
     return out
 
 
@@ -250,7 +256,7 @@ def delete_company(cid):
         ids = "SELECT id FROM voucher WHERE company_id=?"
         for t in ("vline", "vitem", "vbill", "vline_np", "vitem_np"):
             c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({ids})", (cid,))
-        for t in ("voucher", "grp", "vtype", "ledger", "stock", "bill", "stock_godown_open", "stock_at"):
+        for t in ("voucher", "grp", "vtype", "ledger", "stock", "bill", "stock_godown_open", "stock_at", "ledger_at", "heal"):
             c.execute(f"DELETE FROM {t} WHERE company_id=?", (cid,))
         c.execute("DELETE FROM company WHERE id=?", (cid,))
     with conn() as c:
@@ -261,6 +267,81 @@ def _month_range(m, d_from, d_to):
     y, mo = int(m[:4]), int(m[5:7])
     last = (date(y + (mo == 12), mo % 12 + 1, 1) - timedelta(days=1)).isoformat()
     return max(f"{m}-01", d_from), min(last, d_to)
+
+
+TOL = 0.5          # rupees: rounding
+
+
+def _months_between(a, b):
+    """YYYY-MM of every month from day a to day b."""
+    out, y, m = [], int(a[:4]), int(a[5:7])
+    while f"{y:04d}-{m:02d}" <= b[:7]:
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def ledger_check(c, cid):
+    """Each ledger's balance as Bahi works it out (Tally's closing less the entries after a day) against Tally's
+    own balance on that day, at every month-end Bahi has. A difference that appears between two month-ends
+    means an entry in that month is missing (or extra) here. Returns the differences, per ledger and month."""
+    comp = c.execute("SELECT from_date, keep_from FROM company WHERE id=?", (cid,)).fetchone()
+    if not comp:
+        return {"checked": 0, "issues": []}
+    sync_from = max(comp["from_date"] or "", comp["keep_from"] or "") or "2000-01-01"
+    start = (date.fromisoformat(sync_from) - timedelta(days=1)).isoformat()
+    days = [r["day"] for r in c.execute("SELECT DISTINCT day FROM ledger_at WHERE company_id=? AND day>=? ORDER BY day",
+                                        (cid, start))]
+    if not days:
+        return {"checked": 0, "issues": []}
+    closing = {r["name"]: r["closing"] for r in c.execute("SELECT name, closing FROM ledger WHERE company_id=?", (cid,))}
+    diffs = {}             # ledger -> [(day, tally - bahi)]
+    used = []
+    for d in days:
+        after = {r["ledger"]: r["s"] for r in c.execute("""SELECT vl.ledger, SUM(vl.amount) s FROM vline vl
+            JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=? AND v.date>? AND v.date>=? GROUP BY vl.ledger""",
+                                                        (cid, d, sync_from))}
+        tally = {r["ledger"]: r["closing"] for r in c.execute("SELECT ledger, closing FROM ledger_at WHERE company_id=? AND day=?",
+                                                              (cid, d))}
+        # a Tally that ignores the date sends today's balances for every day: then this day tells nothing
+        moved = [n for n, s in after.items() if abs(s) > TOL and n in tally and n in closing]
+        if len(moved) >= 5 and sum(abs(tally[n] - closing[n]) <= TOL for n in moved) > 0.9 * len(moved):
+            continue
+        used.append(d)
+        for n, tv in tally.items():
+            if n in closing:
+                diffs.setdefault(n, []).append((d, tv - (closing[n] - after.get(n, 0.0))))
+    today = date.today().isoformat()
+    issues = []
+    for n, rows in diffs.items():
+        prev_day, prev = None, None
+        for d, x in rows + [(today, 0.0)]:          # today Bahi has Tally's closing by definition
+            if prev is not None and abs(x - prev) > TOL:
+                frm = (date.fromisoformat(prev_day) + timedelta(days=1)).isoformat()
+                issues.append({"ledger": n, "from": frm, "to": d, "months": _months_between(frm, d),
+                               "amount": round(prev - x, 2)})
+            elif prev is None and abs(x) > TOL and d == start:
+                pass      # the opening day itself: shows up as a change at the next month-end
+            prev_day, prev = d, x
+    issues.sort(key=lambda i: (i["from"], i["ledger"].lower()))
+    return {"checked": len(used), "ledgers": len(diffs), "issues": issues}
+
+
+_CHECK = {}
+
+
+def sync_issues(cid):
+    with conn() as c:
+        r = c.execute("SELECT last_sync FROM company WHERE id=?", (cid,)).fetchone()
+        key = (cid, r["last_sync"] if r else None)
+        if key not in _CHECK:                 # worked out once per sync
+            _CHECK.clear()
+            _CHECK[key] = ledger_check(c, cid)
+        out = json.loads(json.dumps(_CHECK[key]))
+        heals = {r["month"]: r["at"] for r in c.execute("SELECT month, at FROM heal WHERE company_id=?", (cid,))}
+    for i in out["issues"]:
+        i["refetched"] = max((heals.get(m, 0) for m in i["months"]), default=0)
+    return out
 
 
 def plan(company, d_from, d_to, tally_list):
@@ -304,7 +385,22 @@ def plan(company, d_from, d_to, tally_list):
         counts_a[d[:7]] = counts_a.get(d[:7], 0) + 1
     by_voucher = (all(g for g, a, d in in_range) and len(changed) + len(deleted) <= 100
                   and all(counts_a.get(m, 0) == counts_t.get(m, 0) for m in set(counts_a) | set(counts_t)))
-    since = min([d for g, a, d in in_range if g in set(changed)] + [stored[g][1] for g in changed if g in stored]
+    # Ledger balances that don't match Tally's at a month-end: fetch those months again (at most every 12 hours,
+    # so something Bahi can't read doesn't make every sync slow; it shows on the Sync check page instead)
+    with _lock, conn() as c:
+        cid = c.execute("SELECT id FROM company WHERE name=?", (company,)).fetchone()["id"]
+        heals = {r["month"]: r["at"] for r in c.execute("SELECT month, at FROM heal WHERE company_id=?", (cid,))}
+        redo = set()
+        for i in ledger_check(c, cid)["issues"]:
+            for m in i["months"]:
+                if d_from[:7] <= m <= d_to[:7] and time.time() - heals.get(m, 0) > 12 * 3600:
+                    redo.add(m)
+        for m in redo:
+            c.execute("INSERT OR REPLACE INTO heal VALUES(?,?,?,?)", (cid, m, time.time(), 0))
+    if redo:
+        months |= redo
+        by_voucher = False
+    since = min([m + "-01" for m in redo] + [d for g, a, d in in_range if g in set(changed)] + [stored[g][1] for g in changed if g in stored]
                 + [stored[g][1] for g in deleted] + [m + "-01" for m in months] or [""])
     return {"full": False, "months": sorted(months), "by_voucher": by_voucher, "since": since,
             "changed": changed if by_voucher else [], "deleted": deleted if by_voucher else []}
@@ -312,7 +408,7 @@ def plan(company, d_from, d_to, tally_list):
 
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
            bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None, stock_at=None,
-           stock_godown=None):
+           stock_godown=None, ledger_at=None):
     """Store a sync. Masters are replaced when sent (groups/types/details are kept if a partial sync left them out).
     Vouchers are replaced for the whole [d_from, d_to] range, or only for `months` (YYYY-MM) on a partial sync."""
     with _lock, conn() as c:
@@ -431,6 +527,11 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             c.execute("DELETE FROM stock_godown_open WHERE company_id=?", (cid,))
             c.executemany("INSERT INTO stock_godown_open VALUES(?,?,?,?)",
                           [(cid, item, g, q) for item, rows in stock_godown.items() for g, q in rows])
+        if not partial:
+            c.execute("DELETE FROM ledger_at WHERE company_id=?", (cid,))
+        for day, rows in (ledger_at or {}).items():
+            c.execute("DELETE FROM ledger_at WHERE company_id=? AND day=?", (cid, day))
+            c.executemany("INSERT OR REPLACE INTO ledger_at VALUES(?,?,?,?)", [(cid, day, n, v) for n, v in rows.items()])
         if not partial:
             c.execute("DELETE FROM stock_at WHERE company_id=?", (cid,))
         for day, rows in (stock_at or {}).items():
@@ -620,7 +721,7 @@ def ledger(cid, name, d_from=None, d_to=None):
             else:
                 cr -= r["amount"]
         kind, bills = ledger_bills(c, cid, name)
-        return {"ledger": info, "from": f, "to": t, "opening": round(opening, 2),
+        return {"mismatch": [i for i in sync_issues(cid)["issues"] if i["ledger"] == name], "ledger": info, "from": f, "to": t, "opening": round(opening, 2),
                 "debit": round(dr, 2), "credit": round(cr, 2), "closing": round(bal, 2), "entries": rows,
                 "bill_kind": kind, "bills": bills, "interest": round(sum(b.get("interest", 0) for b in bills), 2),
                 "interest_rate": interest_settings()["rate"] if interest_settings()["on"] else 0,
@@ -1241,7 +1342,8 @@ def sync_check(cid):
         months = _rows(c, """SELECT substr(date,1,7) m, COUNT(*) n, SUM(CASE WHEN base='Sales' THEN 1 ELSE 0 END) sales,
             SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) cancelled
             FROM voucher WHERE company_id=? GROUP BY m ORDER BY m DESC""", (cid,))
-    return {"unbalanced": len(rows), "groups": out, "types": counts, "months": months}
+    bal = sync_issues(cid)
+    return {"balances": bal, "unbalanced": len(rows), "groups": out, "types": counts, "months": months}
 
 
 def agent_stats():

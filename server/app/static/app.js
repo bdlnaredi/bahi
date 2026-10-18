@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.0.2";
+const APP_VERSION = "3.1.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -341,6 +341,7 @@ async function vLedger(name) {
     <div class="crumbs"><a href="#/group/${enc(L.parent)}">${h(L.parent)}</a></div>
     <h1 class="title">${h(L.name)}</h1>
     ${periodBar(d.from, d.to, "ledger")}
+    ${(d.mismatch || []).filter((i) => i.to >= d.from).length ? `<p class="note od" style="border:0">Some entries in this ledger don't match Tally yet (${d.mismatch.filter((i) => i.to >= d.from).map((i) => `${fdate(i.from)} to ${fdate(i.to)}, ${nf2.format(Math.abs(i.amount))}`).join("; ")}), so the opening shown here is off by that much. Bahi is fetching them again. <a href="#/check">Sync check</a></p>` : ""}
     <section class="page">
       ${L.gstin || L.mobile || L.phone || L.email ? `<div class="info" style="padding-top:12px">${L.gstin ? `<div>GSTIN ${h(L.gstin)}</div>` : ""}${L.mobile || L.phone ? `<div>${h(L.mobile || L.phone)}</div>` : ""}${L.email ? `<div>${h(L.email)}</div>` : ""}</div>` : ""}
       <div class="actions" style="${L.gstin || L.mobile || L.phone || L.email ? "" : "padding-top:12px"}">
@@ -975,7 +976,17 @@ function drawYears(el, rows) {
 async function vCheck() {
   setTitle(true);
   const d = await api(cpath("check"));
+  const B = d.balances || { checked: 0, issues: [] };
+  const mon = (m) => { const [yy, mm] = m.split("-"); return `${MON[+mm - 1]} ${yy}`; };
   view.innerHTML = `<h1 class="title">Sync check</h1>
+    <section class="page"><div class="block-title"><span>Ledger balances against Tally</span><span>${B.checked ? `${B.checked} month-ends` : ""}</span></div>
+      ${!B.checked ? '<div class="info">Not checked yet. The Tally PC sends Tally\'s balances at each month-end with the next sync after updating.</div>'
+        : !B.issues.length ? `<div class="info">Every ledger's balance matches Tally at every month-end (${B.ledgers} ledgers). No entries are missing.</div>`
+        : `<div class="info od">${B.issues.length} difference${B.issues.length > 1 ? "s" : ""} from Tally. Bahi fetches those months again by itself; if a line stays here after the next sync, entries in that month can't be read from Tally. Please report it.</div>
+          ${B.issues.map((i) => `<a class="row" href="#/ledger/${enc(i.ledger)}"><div class="main"><div class="name">${h(i.ledger)}</div>
+            <div class="meta">${i.months.length > 1 ? `${fdate(i.from)} to ${fdate(i.to)}` : mon(i.months[0])}: Bahi's entries differ from Tally's by this amount${i.refetched ? `. Still different after fetching that month again ${ago(i.refetched)}` : ". Fetching that month again"}</div></div>
+            <div class="end">${money(Math.abs(i.amount))}</div><span class="chev"></span></a>`).join("")}`}
+    </section>
     <p class="subtitle">${d.unbalanced ? `${d.unbalanced} vouchers had debits and credits that didn't match when they were synced. Open one to compare it with Tally, and report the voucher types below if they look wrong.` : "Every synced voucher's debits and credits match."}</p>
     ${d.groups.map((g) => `<section class="page"><div class="block-title"><span>${h(g.vtype)}</span><span>${g.count} of ${g.of}</span></div>
       ${g.examples.map((v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>

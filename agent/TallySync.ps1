@@ -3,7 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.2"
+$AgentVersion = "3.3"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -193,12 +193,17 @@ function Send-Einv($run, [string]$company, [datetime]$from, [datetime]$to, [stri
     catch { if ($Verbose) { Log ("e-invoice details not read: " + $_.Exception.Message) "Gray" } }
 }
 
-# Every stock item's quantity and value as Tally has it at the end of one day
-function StockAt-Xml([string]$company, [datetime]$day) {
-    $sv = Static-Vars $company $BaseFrom $day
-    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMStockAt</ID></HEADER>" +
+# Every stock item's (or ledger's) balance as Tally has it at the end of one day. The period starts at the
+# company's books beginning, so Tally counts everything up to that day. For the day before the books begin,
+# Tally's own opening balance is the figure (a period ending before it starts gives wrong numbers).
+function BalanceAt-Xml([string]$company, [string]$type, [datetime]$books, [datetime]$day) {
+    $opening = $day -lt $books
+    $fetch = if ($type -eq "StockItem") { if ($opening) { "Name, OpeningBalance, OpeningValue" } else { "Name, ClosingBalance, ClosingValue" } }
+             else { if ($opening) { "Name, OpeningBalance" } else { "Name, ClosingBalance" } }
+    $sv = if ($opening) { Static-Vars $company $books $books } else { Static-Vars $company $books $day }
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMAt</ID></HEADER>" +
            "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES><TDL><TDLMESSAGE>" +
-           "<COLLECTION NAME=`"TMStockAt`" ISMODIFY=`"No`"><TYPE>StockItem</TYPE><FETCH>Name, ClosingBalance, ClosingValue</FETCH></COLLECTION>" +
+           "<COLLECTION NAME=`"TMAt`" ISMODIFY=`"No`"><TYPE>$type</TYPE><FETCH>$fetch</FETCH></COLLECTION>" +
            "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
 }
 
@@ -320,7 +325,7 @@ function Send-Part([string]$run, [string]$kind, [byte[]]$data) {
 }
 
 function Read-Companies {
-    $raw = Tally-Raw (Collection-Xml "TMCompanies" "Company" "Name, AltVchId, AltMstId" "")
+    $raw = Tally-Raw (Collection-Xml "TMCompanies" "Company" "Name, AltVchId, AltMstId, BooksFrom" "")
     $text = [System.Text.Encoding]::UTF8.GetString($raw)
     $eval = [System.Text.RegularExpressions.MatchEvaluator]{ param($m) if ([int]$m.Groups[1].Value -lt 32) { "" } else { $m.Value } }
     $text = [regex]::Replace($text, '&#([0-9]+);', $eval)
@@ -330,10 +335,13 @@ function Read-Companies {
     foreach ($n in $x.SelectNodes("//COMPANY")) {
         $name = $n.GetAttribute("NAME")
         if (-not $name) { $nn = $n.SelectSingleNode("NAME"); if ($nn) { $name = $nn.InnerText } }
-        $av = $n.SelectSingleNode("ALTVCHID"); $am = $n.SelectSingleNode("ALTMSTID")
+        $av = $n.SelectSingleNode("ALTVCHID"); $am = $n.SelectSingleNode("ALTMSTID"); $bf = $n.SelectSingleNode("BOOKSFROM")
+        $books = $null
+        if ($bf) { try { $books = [datetime]::ParseExact($bf.InnerText.Trim(), "yyyyMMdd", $null) } catch {} }
         if ($name) {
             $list += [pscustomobject]@{
                 Name = $name.Trim()
+                BooksFrom = $books
                 AltVch = $(if ($av) { $av.InnerText.Trim() } else { "" })
                 AltMst = $(if ($am) { $am.InnerText.Trim() } else { "" })
             }
@@ -622,22 +630,33 @@ foreach ($co in $companies) {
         # 5. Stock as Tally has it at each month-end, so opening stock for any month or year is Tally's own figure.
         #    All months on a full sync; otherwise only from the month of the earliest change.
         $snapFrom = $null
-        if ($full -or $mastersChanged -or $state.need_stock) { $snapFrom = $FromDate.AddDays(-1) }
+        if ($full -or $mastersChanged -or $state.need_stock -or $state.need_ledgers) { $snapFrom = $FromDate.AddDays(-1) }
         elseif ($since) { try { $snapFrom = [datetime]::ParseExact($since, "yyyy-MM-dd", $null) } catch {} }
         if ($snapFrom) {
             $days = @()
             $d = (Get-Date -Year $snapFrom.Year -Month $snapFrom.Month -Day 1).AddMonths(1).AddDays(-1)   # end of that month
             if ($snapFrom -eq $FromDate.AddDays(-1)) { $days += $snapFrom }
             while ($d -lt $today.Date -and $d -le $ToDate) { if ($days -notcontains $d) { $days += $d }; $d = $d.AddDays(1).AddMonths(1).AddDays(-1) }
+            # the books' beginning; if this Tally doesn't say, the sync start (and no figure for the day before it)
+            $books = if ($co.BooksFrom) { $co.BooksFrom } else { $BaseFrom }
             $snapOk = 0
             foreach ($day in $days) {
+                if ($day -lt $books -and -not $co.BooksFrom) { continue }
+                $q = "&date=" + $day.ToString("yyyy-MM-dd") + $(if ($day -lt $books) { "&opening=1" } else { "" })
                 try {
-                    $raw = Tally-Raw (StockAt-Xml $co.Name $day)
+                    $raw = Tally-Raw (BalanceAt-Xml $co.Name "StockItem" $books $day)
                     $wc = Server-Client
                     $wc.Headers.Add("Content-Type", "application/octet-stream"); $wc.Headers.Add("X-Gzip", "1")
-                    [void]$wc.UploadData("$Server/agent/part?run=$run&kind=stockat&date=" + $day.ToString("yyyy-MM-dd"), "POST", (Gzip $raw))
+                    [void]$wc.UploadData("$Server/agent/part?run=$run&kind=stockat$q", "POST", (Gzip $raw))
                     $snapOk++
                 } catch { Log ("Could not read stock as at " + $day.ToString("d-MMM-yyyy") + ": " + (Error-Detail $_)) "Yellow"; break }
+                # each ledger's balance on the same day: lets the app check it has every entry Tally has
+                try {
+                    $raw = Tally-Raw (BalanceAt-Xml $co.Name "Ledger" $books $day)
+                    $wc = Server-Client
+                    $wc.Headers.Add("Content-Type", "application/octet-stream"); $wc.Headers.Add("X-Gzip", "1")
+                    [void]$wc.UploadData("$Server/agent/part?run=$run&kind=ledgerat$q", "POST", (Gzip $raw))
+                } catch { if ($Verbose) { Log ("Ledger balances as at " + $day.ToString("d-MMM-yyyy") + " not read: " + $_.Exception.Message) "Gray" } }
             }
             if ($snapOk -and $Verbose) { Log ("Stock read at $snapOk month-end(s)") }
         }
