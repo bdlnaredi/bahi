@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -10,7 +10,7 @@ const S = {
 };
 const can = (p) => S.me.owner || S.me.perms.includes(p);
 const canLedgers = () => can("ledgers") || can("parties");
-const ENTRY = { receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], order: ["Sales order", "e_order"] };
+const ENTRY = { receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], journal: ["Journal", "e_journal"], contra: ["Contra", "e_contra"], order: ["Sales order", "e_order"] };
 const entryKinds = () => Object.keys(ENTRY).filter((k) => can(ENTRY[k][1]));
 function applyTabs() {
   const show = { home: true, sales: can("sales"), parties: canLedgers(), vouchers: can("vouchers"), dues: can("dues"), reports: true };
@@ -450,7 +450,7 @@ async function vLedger(name) {
     <div class="crumbs"><a href="#/group/${enc(L.parent)}">${h(L.parent)}</a></div>
     <h1 class="title">${h(L.name)}</h1>
     ${periodBar(d.from, d.to, "ledger")}
-    ${(d.mismatch || []).filter((i) => i.to >= d.from).length ? `<p class="note od" style="border:0">Some entries in this ledger don't match Tally yet (${d.mismatch.filter((i) => i.to >= d.from).map((i) => `${fdate(i.from)} to ${fdate(i.to)}, ${nf2.format(Math.abs(i.amount))}`).join("; ")}), so the opening shown here is off by that much. Bahi is fetching them again. <a href="#/check">Sync check</a></p>` : ""}
+    ${d.difference ? `<p class="note od" style="border:0">Tally's closing on ${fdate(d.to)} is ${nf2.format(Math.abs(d.tally_closing))} ${d.tally_closing < 0 ? "Cr" : "Dr"}; the entries listed here add up to ${nf2.format(Math.abs(d.entries_total))} ${d.entries_total < 0 ? "Cr" : "Dr"}. The difference, ${nf2.format(Math.abs(d.difference))}, is entries in Tally that haven't reached Bahi yet; nothing has been adjusted. Bahi fetches them again by itself. <a href="#/check">Sync check</a></p>` : ""}
     <section class="page">
       ${L.gstin || L.mobile || L.phone || L.email ? `<div class="info" style="padding-top:12px">${L.gstin ? `<div>GSTIN ${h(L.gstin)}</div>` : ""}${L.mobile || L.phone ? `<div>${h(L.mobile || L.phone)}</div>` : ""}${L.email ? `<div>${h(L.email)}</div>` : ""}</div>` : ""}
       <div class="actions" style="${L.gstin || L.mobile || L.phone || L.email ? "" : "padding-top:12px"}">
@@ -1311,7 +1311,7 @@ function vMySettings() {
 }
 
 /* ---------------------------------------------------------------- staff logins (owner) */
-const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_receipt", "e_payment", "e_order"] };
+const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order"] };
 async function showStaff() {
   const d = await api("/api/users");
   const sec = $("#stsec");
@@ -1322,7 +1322,7 @@ async function showStaff() {
       <label><span><input type="checkbox" name="allco" ${!sel.length ? "checked" : ""}> All companies</span></label>
       ${S.companies.map((c) => `<label><span><input type="checkbox" name="co" value="${h(c.name)}" ${sel.includes(c.name) ? "checked" : ""}> ${h(c.name)}</span></label>`).join("")}` : "";
   const summary = (u) => u.perms.filter((p) => !p.startsWith("e_")).map((p) => ({ accounts: "money figures", sales: "sales", ledgers: "all ledgers", parties: "party ledgers", vouchers: "vouchers", dues: "dues", stock: "stock" }[p])).join(", ") +
-    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_receipt", "e_payment", "e_order"].includes(p)).map((p) => ({ e_receipt: "receipts", e_payment: "payments", e_order: "orders" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
+    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_receipt", "e_payment", "e_journal", "e_contra", "e_order"].includes(p)).map((p) => ({ e_receipt: "receipts", e_payment: "payments", e_journal: "journals", e_contra: "contras", e_order: "orders" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
   sec.innerHTML = `<div class="block-title">Staff logins <span>${d.users.length}</span></div>
     <div class="info"><div>Staff log in with their name and their own password, and see only what you tick. You always log in with the app password and see everything.</div></div>
     ${d.users.map((u, i) => `<div class="party"><button class="row" aria-expanded="false" data-su="${i}"><div class="main"><div class="name">${h(u.name)}${u.active ? "" : ' <span class="badge">switched off</span>'}</div>
@@ -1394,6 +1394,8 @@ async function vEntries() {
     <section class="page">${d.entries.map((e) => {
       const x = e.data, [st, cls] = EST[e.status] || [e.status, ""];
       const detail = e.kind === "order" ? x.items.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)}`).join("<br>")
+        : e.kind === "journal" ? x.lines.map((l) => `${l.side === "dr" ? "Dr" : "Cr"} ${h(l.ledger)} ₹${nf2.format(l.amount)}`).join("<br>")
+        : e.kind === "contra" ? `From ${h(x.account)} to ${h(x.to)}`
         : `${e.kind === "receipt" ? "Into" : "From"} ${h(x.account)}${x.bills.length ? `, against ${x.bills.map((b) => h(b.ref)).join(", ")}` : ""}`;
       const btn = [];
       if (S.me.owner && e.status === "approval") btn.push(`<button class="btn primary" data-act="approve" data-id="${e.id}">Approve</button><button class="btn" data-act="reject" data-id="${e.id}">Reject</button>`);
@@ -1421,15 +1423,19 @@ async function vNewEntry(kind) {
   setTitle(true);
   if (!ENTRY[kind] || !can(ENTRY[kind][1])) { view.innerHTML = '<div class="empty">You can\'t make this kind of entry.</div>'; return; }
   const f = await api(cpath("entry_form", { kind }));
-  const order = kind === "order", rec = kind === "receipt";
+  const order = kind === "order", rec = kind === "receipt", jv = kind === "journal", contra = kind === "contra";
   const list = (id, arr) => `<datalist id="${id}">${arr.map((x) => `<option value="${h(x)}">`).join("")}</datalist>`;
   const sel = (name, arr) => `<select name="${name}">${arr.map((x) => `<option>${h(x)}</option>`).join("")}</select>`;
   view.innerHTML = `<h1 class="title">New ${ENTRY[kind][0].toLowerCase()}</h1>
     <section class="page"><form class="form" id="ef" style="padding-top:14px" autocomplete="off">
-      ${f.vtypes.length > 1 ? `<label>Voucher type${sel("vtype", f.vtypes)}</label>` : ""}
+      <label>Voucher type${sel("vtype", f.vtypes)}${f.vtypes.length > 1 ? `<span class="hint">${f.vtypes.length} ${h(ENTRY[kind][0].toLowerCase())} types in Tally</span>` : ""}</label>
       <label>Date<input type="date" name="date" value="${f.today}" required></label>
-      <label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>
-      ${order ? `
+      ${jv ? `<div id="jlines"></div>${list("llist", f.ledgers)}<button class="btn" type="button" id="addline">+ Add line</button>
+        <div class="total">Dr <b id="jdr">₹0</b> &nbsp; Cr <b id="jcr">₹0</b> <span id="jdiff" class="od"></span></div>`
+      : contra ? `<label>From${sel("account", f.accounts)}</label><label>To${sel("to", f.accounts.slice(1).concat(f.accounts.slice(0, 1)))}</label>
+        <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`
+      : `<label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>`}
+      ${jv || contra ? "" : order ? `
         <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
         <div class="total">Total before tax <b id="otot">₹0</b></div>
         <label>Deliver by (optional)<input type="date" name="due"></label>
@@ -1438,12 +1444,31 @@ async function vNewEntry(kind) {
       : `<label>${rec ? "Into" : "From"}${sel("account", f.accounts)}</label>
         <div id="bills"></div>
         <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`}
-      <label>Narration (optional)<input name="narration" maxlength="500" placeholder="${order ? "e.g. Deliver to shop" : "e.g. Cheque no. 12345"}"></label>
+      <label>Narration (optional)<input name="narration" maxlength="500" placeholder="${order ? "e.g. Deliver to shop" : jv ? "e.g. Rent for October" : "e.g. Cheque no. 12345"}"></label>
       <button class="btn primary" type="submit">Save</button><div class="msg" id="emsg" role="status"></div>
       <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs." : "The owner approves it first, then it goes into Tally at the next sync."}</p>
     </form></section>`;
   const form = $("#ef");
-  if (order) {
+  if (jv) {
+    const tot = () => {
+      let dr = 0, cr = 0;
+      $("#jlines").querySelectorAll(".irow").forEach((r) => { const a = +r.querySelector("[name=amt]").value || 0; if (r.querySelector("[name=side]").value === "dr") dr += a; else cr += a; });
+      $("#jdr").textContent = rupees(dr); $("#jcr").textContent = rupees(cr);
+      $("#jdiff").textContent = Math.abs(dr - cr) > 0.005 ? `difference ${rupees(Math.abs(dr - cr))}` : "";
+    };
+    const add = (side) => {
+      const row = document.createElement("div"); row.className = "irow";
+      row.innerHTML = `<label>Ledger<input name="led" list="llist" placeholder="Start typing a ledger"></label>
+        <div class="two"><label>Dr / Cr<select name="side"><option value="dr" ${side === "dr" ? "selected" : ""}>Dr</option><option value="cr" ${side === "cr" ? "selected" : ""}>Cr</option></select></label>
+        <label>Amount<input name="amt" type="number" min="0" step="0.01" inputmode="decimal"></label></div>`;
+      $("#jlines").appendChild(row);
+      row.oninput = tot; row.onchange = tot;
+    };
+    $("#addline").onclick = () => add("cr");
+    add("dr"); add("cr");
+  } else if (contra) {
+    // nothing extra
+  } else if (order) {
     const items = Object.fromEntries(f.items.map((i) => [i.name, i]));
     const add = () => {
       const row = document.createElement("div"); row.className = "irow";
@@ -1488,8 +1513,12 @@ async function vNewEntry(kind) {
   }
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const body = { kind, date: form.date.value, party: form.party.value, narration: form.narration.value, vtype: form.vtype ? form.vtype.value : undefined };
-    if (order) {
+    const body = { kind, date: form.date.value, party: form.party ? form.party.value : "", narration: form.narration.value, vtype: form.vtype ? form.vtype.value : undefined };
+    if (jv) {
+      body.lines = [...$("#jlines").querySelectorAll(".irow")].map((r) => ({ ledger: r.querySelector("[name=led]").value, side: r.querySelector("[name=side]").value, amount: r.querySelector("[name=amt]").value })).filter((x) => x.ledger);
+    } else if (contra) {
+      body.account = form.account.value; body.to = form.to.value; body.amount = form.amount.value;
+    } else if (order) {
       body.items = [...$("#items").querySelectorAll(".irow")].map((r) => ({ item: r.querySelector("[name=item]").value, qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value })).filter((i) => i.item);
       body.due = form.due.value; body.sales_ledger = form.sales_ledger ? form.sales_ledger.value : undefined;
     } else {
@@ -1584,7 +1613,7 @@ async function vCashbook() {
       <div class="note">Money in and out of each account includes transfers between your own cash and bank accounts.</div></section>
     <section class="page"><div class="block-title"><span>Account</span><span>Closing</span></div>
       ${d.ledgers.map((l) => `<a class="row" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div>
-        <div class="meta">${l.kind}. Opening ${short(l.opening)}, in ${short(l.in)}, out ${short(l.out)}</div></div><div class="end">${drcr(l.closing)}</div><span class="chev"></span></a>`).join("") || '<div class="empty">No cash or bank ledgers found.</div>'}</section>
+        <div class="meta">${l.kind}. Opening ${short(l.opening)}, in ${short(l.in)}, out ${short(l.out)}${l.difference ? `. <span class="od">Entries here differ from Tally's closing by ${short(Math.abs(l.difference))}</span>` : ""}</div></div><div class="end">${drcr(l.closing)}</div><span class="chev"></span></a>`).join("") || '<div class="empty">No cash or bank ledgers found.</div>'}</section>
     <section class="page"><div class="block-title"><span>Day</span><span>In / out, closing</span></div>
       ${d.days.map((x, i) => `<div class="party"><button class="row" aria-expanded="false" data-cd="${i}"><div class="main"><div class="name">${fdate(x.date)}</div>
           <div class="meta">${x.in ? `<span class="up">+${money(x.in)}</span> ` : ""}${x.out ? `<span class="down">−${money(x.out)}</span>` : ""}${!x.in && !x.out ? "transfers only" : ""}</div></div>

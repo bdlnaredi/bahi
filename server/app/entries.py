@@ -17,8 +17,8 @@ import store
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB = os.path.join(DATA_DIR, "entries.db")
-KINDS = {"receipt": "Receipt", "payment": "Payment", "order": "Sales Order"}
-PERM = {"receipt": "e_receipt", "payment": "e_payment", "order": "e_order"}
+KINDS = {"receipt": "Receipt", "payment": "Payment", "order": "Sales Order", "journal": "Journal", "contra": "Contra"}
+PERM = {"receipt": "e_receipt", "payment": "e_payment", "order": "e_order", "journal": "e_journal", "contra": "e_contra"}
 RESEND_AFTER = 15 * 60       # an entry handed to the agent but never reported back is offered again
 
 
@@ -54,6 +54,8 @@ def form(cid, kind):
                 f"""SELECT name FROM ledger WHERE company_id=? AND NOT (chain LIKE '%|Cash-in-Hand|%' OR chain LIKE '%|Bank Accounts|%'
                     OR chain LIKE '%|Bank OD A/c|%') ORDER BY chain LIKE ? DESC, name""", (cid, f"%|{first}|%"))]
         out = {"kind": kind, "vtypes": vtypes, "accounts": cash_bank, "parties": parties, "today": date.today().isoformat()}
+        if kind == "journal":
+            out["ledgers"] = [r["name"] for r in c.execute("SELECT name FROM ledger WHERE company_id=? ORDER BY name", (cid,))]
         if kind == "order":
             # each item's last selling rate, else its stock rate
             last = {r["item"]: r["rate"] for r in c.execute(
@@ -97,10 +99,39 @@ def clean(cid, kind, d):
     vtype = d.get("vtype") or f["vtypes"][0]
     if vtype not in f["vtypes"]:
         raise ValueError("Pick a voucher type.")
+    narration = str(d.get("narration") or "").strip()[:500]
+    if kind == "journal":
+        lines = []
+        for ln in d.get("lines") or []:
+            name = str(ln.get("ledger") or "").strip()
+            if not name:
+                continue
+            if name not in f["ledgers"]:
+                raise ValueError(f"{name} isn't a ledger in Tally.")
+            side = ln.get("side")
+            if side not in ("dr", "cr"):
+                raise ValueError(f"Pick Dr or Cr for {name}.")
+            lines.append({"ledger": name, "side": side, "amount": _num(ln.get("amount"), f"amount for {name}")})
+        dr = round(sum(x["amount"] for x in lines if x["side"] == "dr"), 2)
+        cr = round(sum(x["amount"] for x in lines if x["side"] == "cr"), 2)
+        if not any(x["side"] == "dr" for x in lines) or not any(x["side"] == "cr" for x in lines):
+            raise ValueError("A journal needs at least one Dr line and one Cr line.")
+        if abs(dr - cr) > 0.005:
+            raise ValueError(f"Dr ({dr:.2f}) and Cr ({cr:.2f}) must be equal.")
+        return {"date": day, "vtype": vtype, "party": next(x["ledger"] for x in lines if x["side"] == "dr"),
+                "narration": narration, "lines": lines, "amount": dr}
+    if kind == "contra":
+        src, dst = str(d.get("account") or ""), str(d.get("to") or "")
+        if src not in f["accounts"] or dst not in f["accounts"]:
+            raise ValueError("Pick both cash or bank accounts.")
+        if src == dst:
+            raise ValueError("Pick two different accounts.")
+        return {"date": day, "vtype": vtype, "party": dst, "account": src, "to": dst, "narration": narration,
+                "amount": _num(d.get("amount"), "amount"), "bills": []}
     party = str(d.get("party") or "")
     if party not in f["parties"]:
         raise ValueError("Pick a party from the list.")
-    out = {"date": day, "vtype": vtype, "party": party, "narration": str(d.get("narration") or "").strip()[:500]}
+    out = {"date": day, "vtype": vtype, "party": party, "narration": narration}
     if kind == "order":
         items = []
         known = {i["name"]: i for i in f["items"]}
@@ -213,7 +244,18 @@ def build_xml(e):
             f'<DATE>{_d(d["date"])}</DATE><EFFECTIVEDATE>{_d(d["date"])}</EFFECTIVEDATE><VOUCHERTYPENAME>{vt}</VOUCHERTYPENAME>'
             f'<PARTYLEDGERNAME>{escape(d["party"])}</PARTYLEDGERNAME><NARRATION>{nar}</NARRATION>')
     body = ""
-    if e["kind"] in ("receipt", "payment"):
+    def line(ledger, debit, amount, party=False):
+        # Tally XML: a debit is a negative amount with ISDEEMEDPOSITIVE Yes
+        return (f'<ALLLEDGERENTRIES.LIST><LEDGERNAME>{escape(ledger)}</LEDGERNAME>'
+                f'<ISDEEMEDPOSITIVE>{"Yes" if debit else "No"}</ISDEEMEDPOSITIVE>'
+                + ('<ISPARTYLEDGER>Yes</ISPARTYLEDGER>' if party else '')
+                + f'<AMOUNT>{_amt(-amount if debit else amount)}</AMOUNT></ALLLEDGERENTRIES.LIST>')
+    if e["kind"] == "journal":
+        for x in d["lines"]:
+            body += line(x["ledger"], x["side"] == "dr", x["amount"])
+    elif e["kind"] == "contra":
+        body += line(d["to"], True, d["amount"]) + line(d["account"], False, d["amount"])
+    elif e["kind"] in ("receipt", "payment"):
         rec = e["kind"] == "receipt"
         # Tally XML: a debit is a negative amount with ISDEEMEDPOSITIVE Yes
         p_amt, a_amt = (d["amount"], -d["amount"]) if rec else (-d["amount"], d["amount"])

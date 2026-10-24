@@ -694,14 +694,9 @@ def ledger(cid, name, d_from=None, d_to=None):
         sync_from = comp["from_date"] or "2000-01-01"
         f, t = period(c, cid, d_from, d_to)
         f = max(f, sync_from)
-        total_synced = c.execute("""SELECT COALESCE(SUM(vl.amount),0) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
-            WHERE v.company_id=? AND vl.ledger=? AND v.date >= ?""", (cid, name, sync_from)).fetchone()["s"]
-        # Opening at the start of synced data = Tally's closing minus every synced movement.
-        opening_sync = info["closing"] - total_synced
-        before = c.execute("""SELECT COALESCE(SUM(vl.amount),0) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
-            WHERE v.company_id=? AND vl.ledger=? AND v.date >= ? AND v.date < ?""",
-                           (cid, name, sync_from, f)).fetchone()["s"]
-        opening = opening_sync + before
+        # Opening as Tally has it (its month-end balance plus the entries after it); nothing is adjusted
+        opening = _opening_at(c, cid, name, info["closing"], sync_from, f)
+        opening_from_tally = c.execute("SELECT 1 FROM ledger_at WHERE company_id=? LIMIT 1", (cid,)).fetchone() is not None
         rows = _rows(c, """SELECT v.id, v.date, v.vtype, v.number, v.narration, SUM(vl.amount) amount
             FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
             WHERE v.company_id=? AND vl.ledger=? AND v.date BETWEEN ? AND ?
@@ -720,9 +715,19 @@ def ledger(cid, name, d_from=None, d_to=None):
                 dr += r["amount"]
             else:
                 cr -= r["amount"]
+        # Tally's own closing for the end of the period, to show (not hide) any difference with the entries here
+        last_vch = c.execute("SELECT MAX(date) d FROM voucher WHERE company_id=?", (cid,)).fetchone()["d"] or ""
+        tally_close = _tally_at(c, cid, name, t)
+        if tally_close is None and t >= max(last_vch, date.today().isoformat()):
+            tally_close = info["closing"]
+        diff = round(tally_close - bal, 2) if tally_close is not None and opening_from_tally else 0.0
+        # closing shown is Tally's own figure whenever Tally gave one; the entries are listed exactly as they are
+        shown_close = tally_close if tally_close is not None else bal
         kind, bills = ledger_bills(c, cid, name)
         return {"mismatch": [i for i in sync_issues(cid)["issues"] if i["ledger"] == name], "ledger": info, "from": f, "to": t, "opening": round(opening, 2),
-                "debit": round(dr, 2), "credit": round(cr, 2), "closing": round(bal, 2), "entries": rows,
+                "tally_closing": None if tally_close is None else round(tally_close, 2), "difference": diff if abs(diff) > 0.5 else 0.0,
+                "debit": round(dr, 2), "credit": round(cr, 2), "closing": round(shown_close, 2), "entries_total": round(bal, 2),
+                "entries": rows,
                 "bill_kind": kind, "bills": bills, "interest": round(sum(b.get("interest", 0) for b in bills), 2),
                 "interest_rate": interest_settings()["rate"] if interest_settings()["on"] else 0,
                 "company": comp["name"], "company_info": json.loads(comp["info"] or "{}")}
@@ -1554,7 +1559,24 @@ def balance_sheet(cid):
 CASH_BANK = ("Cash-in-Hand", "Bank Accounts", "Bank OD A/c")
 
 
+def _tally_at(c, cid, name, day):
+    """Tally's own balance of a ledger at the end of `day`, when Tally sent one for that month-end, else None."""
+    r = c.execute("SELECT closing FROM ledger_at WHERE company_id=? AND ledger=? AND day=?", (cid, name, day)).fetchone()
+    return r["closing"] if r else None
+
+
 def _opening_at(c, cid, name, closing, sync_from, day):
+    """Balance at the start of `day`, from Tally's own figures: its balance at the last month-end before `day`
+    plus the entries after it, exactly as they are in Tally. Only when Tally hasn't sent month-end balances yet
+    is it worked back from Tally's closing."""
+    prev = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+    start = (date.fromisoformat(sync_from) - timedelta(days=1)).isoformat()
+    snap = c.execute("""SELECT day, closing FROM ledger_at WHERE company_id=? AND ledger=? AND day<=? AND day>=?
+        ORDER BY day DESC LIMIT 1""", (cid, name, prev, start)).fetchone()
+    if snap:
+        moved = c.execute("""SELECT COALESCE(SUM(vl.amount),0) s FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+            WHERE v.company_id=? AND vl.ledger=? AND v.date > ? AND v.date < ?""", (cid, name, snap["day"], day)).fetchone()["s"]
+        return snap["closing"] + moved
     moved = c.execute("""SELECT COALESCE(SUM(CASE WHEN v.date < ? THEN vl.amount ELSE 0 END),0) b, COALESCE(SUM(vl.amount),0) a
         FROM vline vl JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=? AND vl.ledger=? AND v.date >= ?""",
                       (day, cid, name, sync_from)).fetchone()
@@ -1582,8 +1604,15 @@ def cash_bank(cid, d_from=None, d_to=None):
                            (cid, l["name"], f, t)).fetchone()
             kind = "Cash" if "|Cash-in-Hand|" in l["chain"] else "Bank"
             if abs(op) > 0.005 or mv["i"] or mv["o"] or abs(l["closing"]) > 0.005:
+                # closing as Tally has it: its month-end figure, or its current balance for a period running to today
+                tc = _tally_at(c, cid, l["name"], t)
+                if tc is None and t >= date.today().isoformat():
+                    tc = l["closing"]
+                worked = op + mv["i"] - mv["o"]
+                cl = worked if tc is None else tc
                 out_l.append({"name": l["name"], "kind": kind, "opening": round(op, 2), "in": round(mv["i"], 2),
-                              "out": round(mv["o"], 2), "closing": round(op + mv["i"] - mv["o"], 2)})
+                              "out": round(mv["o"], 2), "closing": round(cl, 2),
+                              "difference": round(cl - worked, 2) if abs(cl - worked) > 0.5 else 0.0})
         opening = sum(x["opening"] for x in out_l)
         days = {}
         if names:
@@ -1614,7 +1643,8 @@ def cash_bank(cid, d_from=None, d_to=None):
         rows.reverse()
         return {"from": f, "to": t, "ledgers": out_l, "opening": round(opening, 2),
                 "in": round(sum(x["in"] for x in out_l), 2), "out": round(sum(x["out"] for x in out_l), 2),
-                "closing": round(bal, 2), "days": rows}
+                "closing": round(sum(x["closing"] for x in out_l), 2), "entries_total": round(bal, 2),
+                "difference": round(sum(x["difference"] for x in out_l), 2), "days": rows}
 
 
 # ---------------------------------------------------------------- collection follow-up

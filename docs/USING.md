@@ -272,9 +272,13 @@ After that you can change the time, the minimum amount, send a summary now, or t
 <td><img src="images/entries.png" width="230" alt="Entries from phone"></td>
 </tr></table>
 
-Tap **+ Receipt**, **+ Payment** or **+ Sales order** at the top of **Home**.
+Tap **+ Receipt**, **+ Payment**, **+ Journal**, **+ Contra** or **+ Sales order** at the top of **Home**.
+
+Every entry starts with **Voucher type**: a list of your own Tally voucher types of that kind (for example *Receipt* and *Bank Receipt*), so the entry goes into Tally under the type you pick.
 
 - **Receipt / Payment:** pick the date, the party (start typing a name), and the cash or bank account. For a customer or supplier, their pending bills appear: tick the bills this settles and the amount fills in. Anything left over goes *on account*. Add a narration such as the cheque or UTR number.
+- **Journal:** add lines, each a ledger with Dr or Cr and an amount. The totals show below; Dr and Cr must be equal before it saves.
+- **Contra:** money moved between your own cash and bank accounts: pick *From*, *To* and the amount.
 - **Sales order:** pick the customer, add items with quantity and rate (the rate starts at the item's last selling rate), and an optional delivery date. GST is added later, when you turn the order into an invoice in Tally.
 
 The entry does **not** go into Tally straight away. Your server keeps it, and the Tally PC adds it to Tally the next time it syncs: within 10 minutes while the PC is on and Tally is open, or at once with `Sync-Now.bat`. Each one gets *(entered on phone by …)* added to its narration, so you can spot them in Tally.
@@ -383,6 +387,8 @@ The PDF follows Tally's *Ledger Account* layout:
 **Settings → Offline copy → Save offline copy now** keeps everything on the phone, so the app works with no internet: every ledger (this month and this year), every stock item, dues, all the reports, and the last 12 months' vouchers. With **Update it by itself** ticked, the copy is refreshed every 6 hours while the app is open. When the phone is offline, a bar at the top says you're looking at the saved copy. Other periods (say, last quarter) need a connection. The copy needs the `https://` address.
 
 ## Good to know
+
+- **Balances are Tally's own.** A ledger's opening and closing, and each cash and bank account's, are the figures Tally gives at each month-end, and its current balance; nothing is worked out or adjusted to make them fit. The entries are listed exactly as they are in Tally. If the entries in a period don't add up to Tally's closing (an entry hasn't reached Bahi yet), the ledger says so in red with the amount, and Bahi fetches that month again.
 
 - **Bahi checks itself against Tally.** With every sync the Tally PC also sends each ledger's balance as Tally has it at every month-end. Bahi compares those with its own figures; if a ledger differs in some month, entries are missing (or extra) in that month, and Bahi fetches the month again by itself. **Reports → Sync check → Ledger balances against Tally** shows the result. A line that stays there after the next sync means Tally isn't sending those entries; please report it with the ledger and month shown. The ledger page also warns when its opening is affected.
 

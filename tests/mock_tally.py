@@ -20,7 +20,8 @@ GROUPS = [  # name, parent
 ]
 VTYPES = [("Sales", ""), ("Purchase", ""), ("Receipt", ""), ("Payment", ""), ("Journal", ""), ("Contra", ""),
           ("Credit Note", ""), ("Debit Note", ""), ("GST Sales", "Sales"),
-          ("Stock Journal", ""), ("Sales Order", ""), ("Memorandum", ""), ("Delivery Note", "")]
+          ("Stock Journal", ""), ("Sales Order", ""), ("Memorandum", ""), ("Delivery Note", ""),
+          ("Bank Receipt", "Receipt"), ("Adjustment Journal", "Journal")]
 
 DEBTORS = [("Sharma & Sons", "Sundry Debtors", 45000), ("Gupta Hardware", "Sundry Debtors", 0),
            ("Patel Enterprises", "Mumbai Debtors", 120000), ("Shree Ganesh Traders", "Sundry Debtors", 0),
