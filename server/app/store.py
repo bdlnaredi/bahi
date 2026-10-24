@@ -1322,6 +1322,14 @@ def profit_loss(cid, d_from=None, d_to=None):
                 "gross_profit": round(gross, 2), "net_profit": round(net, 2)}
 
 
+def voucher_ids(cid, d_from=None, d_to=None):
+    """Ids of the vouchers in a period (for downloading them to view offline)."""
+    with conn() as c:
+        f, t = period(c, cid, d_from, d_to)
+        return {"from": f, "to": t, "ids": [r[0] for r in c.execute(
+            "SELECT id FROM voucher WHERE company_id=? AND date BETWEEN ? AND ? ORDER BY date DESC, id DESC", (cid, f, t))]}
+
+
 def sync_check(cid):
     """Vouchers whose debits and credits did not add up, grouped by voucher type."""
     with conn() as c:

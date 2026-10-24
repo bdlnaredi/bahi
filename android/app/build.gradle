@@ -1,0 +1,49 @@
+plugins {
+    id "com.android.application"
+}
+
+def ver = (System.getenv("BAHI_VERSION_CODE") ?: "1").toInteger()
+
+android {
+    namespace "com.bdlnaredi.bahi"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.bdlnaredi.bahi"
+        minSdk 24
+        targetSdk 34
+        versionCode ver
+        versionName "1." + ver
+    }
+
+    signingConfigs {
+        release {
+            // the signing key comes from the build machine (GitHub Actions); it is never stored in the repository
+            def ks = System.getenv("BAHI_KEYSTORE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("BAHI_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("BAHI_KEY_ALIAS") ?: "bahi"
+                keyPassword System.getenv("BAHI_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (System.getenv("BAHI_KEYSTORE")) signingConfig signingConfigs.release
+            else signingConfig signingConfigs.debug
+        }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation "androidx.core:core:1.13.1"
+    implementation "androidx.webkit:webkit:1.11.0"
+}

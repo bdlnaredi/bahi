@@ -1,5 +1,11 @@
 /* Bahi service worker: always try the server first, fall back to the saved copy when offline */
-const SHELL = "bahi-shell-v18", DATA = "bahi-data-v1";
+const SHELL = "bahi-shell-v19", DATA = "bahi-data-v1";
+// saved data is found whatever order a screen puts its settings in (the app's "download for offline" uses the same key)
+function dataKey(u) {
+  const url = new URL(u);
+  const p = [...url.searchParams.entries()].filter(([, v]) => v !== "").sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return url.origin + url.pathname + (p.length ? "?" + new URLSearchParams(p).toString() : "");
+}
 const FILES = ["/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
@@ -33,10 +39,10 @@ self.addEventListener("fetch", (e) => {
     e.respondWith((async () => {
       try {
         const res = await fetch(req);
-        if (res.ok) (await caches.open(DATA)).put(req, res.clone());
+        if (res.ok) (await caches.open(DATA)).put(dataKey(req.url), res.clone());
         return res;
       } catch (err) {
-        const hit = await caches.match(req, { cacheName: DATA });
+        const hit = await (await caches.open(DATA)).match(dataKey(req.url));
         if (!hit) return new Response(JSON.stringify({ error: "offline" }), { status: 503, headers: { "Content-Type": "application/json" } });
         const headers = new Headers(hit.headers); headers.set("X-From-Cache", "1");
         return new Response(await hit.blob(), { status: hit.status, headers });

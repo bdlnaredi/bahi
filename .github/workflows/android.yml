@@ -1,0 +1,63 @@
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.BAHI_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/bahi.keystore"
+            echo "BAHI_KEYSTORE=$RUNNER_TEMP/bahi.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No signing key set (secret BAHI_KEYSTORE_B64). This APK can't be updated by later builds."
+          fi
+
+      - name: Build
+        env:
+          BAHI_VERSION_CODE: ${{ github.run_number }}
+          BAHI_KEYSTORE_PASSWORD: ${{ secrets.BAHI_KEYSTORE_PASSWORD }}
+        run: |
+          gradle -p android --no-daemon assembleRelease
+          cp android/app/build/outputs/apk/release/app-release.apk Bahi.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Bahi-apk
+          path: Bahi.apk
+
+      - name: Publish to the "android" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Bahi Android app 1.${{ github.run_number }}. Download Bahi.apk on your phone and tap it to install.
+
+          versionCode: ${{ github.run_number }}"
+          if gh release view android >/dev/null 2>&1; then
+            gh release edit android --title "Android app 1.${{ github.run_number }}" --notes "$notes"
+          else
+            gh release create android --title "Android app 1.${{ github.run_number }}" --notes "$notes" --latest=false
+          fi
+          gh release upload android Bahi.apk --clobber

@@ -40,7 +40,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -248,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
         need = {"dashboard": "accounts", "daily": "sales", "group": "accounts", "stock": "stock", "stock_item": "stock", "godowns": "stock",
                 "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
                 "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
-                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts"}
+                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -711,23 +711,88 @@ class Handler(BaseHTTPRequestHandler):
         if not m:
             return self.send_json({"error": "not found"}, 404)
         cid, what, arg = int(m.group(1)), m.group(2), m.group(3)
+        if what == "bulk" and method == "POST":
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            if not co or not users.can_company(u, co["name"]):
+                return self.send_json({"error": "You don't have access to this. Ask the owner."}, 403)
+            return self.bulk(cid)
         if not self.allowed(cid, what, q, arg):
             return self.send_json({"error": "You don't have access to this. Ask the owner."}, 403)
         f, t = q.get("from"), q.get("to")
         name = unquote(q.get("name", ""))
+        if what == "ledger_pdf":
+            d = store.ledger(cid, name, f, t)
+            if d:
+                return self.send_pdf(pdf.ledger_pdf(d), d["ledger"]["name"] + " ledger")
+            return self.send_json({"error": "not found"}, 404)
+        if what == "voucher_pdf" and arg:
+            d = store.voucher(cid, int(arg))
+            if d:
+                v = d["voucher"]
+                return self.send_pdf(pdf.voucher_pdf(d), f"{v['vtype']} {v['number']}")
+            return self.send_json({"error": "not found"}, 404)
+        if what == "export":
+            r = export.build(cid, q.get("what", ""), {k: unquote(v) for k, v in q.items()})
+            if r:
+                name, data = r
+                safe = re.sub(r"[^A-Za-z0-9 _.-]+", "", name).strip()[:80] or "export"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{safe}.csv"')
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            return self.send_json({"error": "not found"}, 404)
+        out = self.company_data(cid, what, arg, q)
+        if isinstance(out, tuple):
+            return self.send_json(*out)
+        if out is None:
+            return self.send_json({"error": "not found"}, 404)
+        self.send_json(out)
+
+    def bulk(self, cid):
+        """Many screens in one request, for downloading everything to view offline. Each is checked against the
+        user's permissions exactly as if it had been asked for on its own; what isn't allowed comes back empty."""
+        data = json.loads(self.body(2 * 1024 * 1024) or b"{}")
+        out = []
+        for r in (data.get("requests") or [])[:300]:
+            what, arg = str(r.get("what", "")), r.get("arg")
+            arg = str(int(arg)) if isinstance(arg, (int, str)) and str(arg).isdigit() else None
+            params = {str(k): str(v) for k, v in (r.get("params") or {}).items() if v not in (None, "")}
+            res = None
+            if re.match(r"^[a-z_]+$", what) and what not in ("bulk", "export", "ledger_pdf", "voucher_pdf", "entry_form",
+                                                               "party_bills", "entries", "entry", "brs"):
+                try:
+                    if self.allowed(cid, what, params, arg):
+                        res = self.company_data(cid, what, arg, params)
+                        if isinstance(res, tuple):
+                            res = None
+                except Exception as e:
+                    print("offline item failed:", what, e, file=sys.stderr)
+                    res = None
+            out.append(res)
+        self.send_json({"results": out})
+
+    def company_data(self, cid, what, arg, q):
+        """The data behind one screen, as the app asks for it (also used to download everything for offline)."""
+        u = self.user
+        f, t = q.get("from"), q.get("to")
+        name = unquote(q.get("name", ""))
         if what == "ledgers" and not users.can(u, "ledgers"):
             pn = store.party_names(cid)
-            return self.send_json({"ledgers": [r for r in store.ledgers(cid, q.get("q", ""), q.get("sort", "name")) if r["name"] in pn]})
+            return ({"ledgers": [r for r in store.ledgers(cid, q.get("q", ""), q.get("sort", "name")) if r["name"] in pn]})
         if what == "entry_form":
             k = q.get("kind", "")
             if k not in entries.PERM or not users.can(u, entries.PERM[k]):
-                return self.send_json({"error": "You can't make this kind of entry."}, 403)
-            return self.send_json(entries.form(cid, k))
+                return ({"error": "You can't make this kind of entry."}, 403)
+            return (entries.form(cid, k))
         if what == "party_bills":
-            return self.send_json(entries.party_bills(cid, name))
+            return (entries.party_bills(cid, name))
         if what == "entries":
             co = next((c for c in store.companies() if c["id"] == cid), None)
-            return self.send_json({"entries": entries.listing(co["name"], u) if co else []})
+            return ({"entries": entries.listing(co["name"], u) if co else []})
         if what == "dashboard":
             out = store.dashboard(cid, f, t)
         elif what == "ledgers":
@@ -750,35 +815,10 @@ class Handler(BaseHTTPRequestHandler):
             out = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), q.get("offset", 0), unquote(q.get("sub", "")))
         elif what == "gst":
             out = store.gst(cid, f, t)
-        elif what == "ledger_pdf":
-            d = store.ledger(cid, name, f, t)
-            if d:
-                return self.send_pdf(pdf.ledger_pdf(d), d["ledger"]["name"] + " ledger")
-            out = None
-        elif what == "voucher_pdf" and arg:
-            d = store.voucher(cid, int(arg))
-            if d:
-                v = d["voucher"]
-                return self.send_pdf(pdf.voucher_pdf(d), f"{v['vtype']} {v['number']}")
-            out = None
         elif what == "daybook":
             out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0), unquote(q.get("sub", "")))
         elif what == "voucher" and arg:
             out = store.voucher(cid, int(arg))
-        elif what == "export":
-            r = export.build(cid, q.get("what", ""), {k: unquote(v) for k, v in q.items()})
-            if r:
-                name, data = r
-                safe = re.sub(r"[^A-Za-z0-9 _.-]+", "", name).strip()[:80] or "export"
-                self.send_response(200)
-                self.send_header("Content-Type", "text/csv; charset=utf-8")
-                self.send_header("Content-Disposition", f'attachment; filename="{safe}.csv"')
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                return
-            out = None
         elif what == "a_parties":
             out = store.analysis_parties(cid, q.get("kind", "sales"), f, t)
         elif what == "a_items":
@@ -789,6 +829,8 @@ class Handler(BaseHTTPRequestHandler):
             out = store.slow_stock(cid, int(q.get("days", 60) or 60))
         elif what == "check":
             out = store.sync_check(cid)
+        elif what == "voucher_ids":
+            out = store.voucher_ids(cid, f, t)
         elif what == "bs":
             out = store.tally_bs(cid)
         elif what == "cashbank":
@@ -799,9 +841,7 @@ class Handler(BaseHTTPRequestHandler):
             out = store.tally_pl(cid, f, t)
         else:
             out = None
-        if out is None:
-            return self.send_json({"error": "not found"}, 404)
-        self.send_json(out)
+        return out
 
 
 def main():

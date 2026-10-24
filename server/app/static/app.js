@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -92,6 +92,111 @@ function cpath(what, params = {}) {
   const s = q.toString();
   return `/api/c/${S.cid}/${what}${s ? "?" + s : ""}`;
 }
+/* ---------------------------------------------------------------- offline copy
+   Everything the app shows, downloaded in bulk into the same saved copy the service worker serves offline. */
+function dataKey(u) {
+  const url = new URL(u, location.origin);
+  const p = [...url.searchParams.entries()].filter(([, v]) => v !== "").sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return url.origin + url.pathname + (p.length ? "?" + new URLSearchParams(p).toString() : "");
+}
+function pathFor(cid, what, params = {}, arg) {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") q.set(k, v);
+  const s = q.toString();
+  return `/api/c/${cid}/${what}${arg ? "/" + arg : ""}${s ? "?" + s : ""}`;
+}
+const OFF = { running: false };
+async function downloadOffline(onProgress = () => {}) {
+  if (OFF.running || !("caches" in window)) return null;
+  OFF.running = true;
+  try {
+    try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
+    const cache = await caches.open("bahi-data-v1");
+    let done = 0, total = 0;
+    const save = (path, data) => cache.put(dataKey(path), new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } }));
+    const uniq = (list) => [...new Map(list.map((p) => [JSON.stringify(p), p])).values()];
+    const periods = uniq([periodParams(), {}]);
+    const run = async (cid, reqs) => {
+      total += reqs.length; onProgress(done, total);
+      const results = [];
+      for (let i = 0; i < reqs.length; i += 60) {
+        const part = reqs.slice(i, i + 60);
+        const r = await fetch(pathFor(cid, "bulk"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requests: part }) });
+        if (!r.ok) throw new Error(r.status === 401 ? "login" : "Server error " + r.status);
+        const j = await r.json();
+        await Promise.all(part.map((q, k) => j.results[k] ? save(pathFor(cid, q.what, q.params, q.arg), j.results[k]) : null));
+        part.forEach((q, k) => results.push(j.results[k]));
+        done += part.length; onProgress(done, total);
+      }
+      return results;
+    };
+    await api("/api/me"); await api("/api/companies");
+    for (const c of S.companies) {
+      const core = [];
+      const add = (what, list) => list.forEach((params) => core.push({ what, params }));
+      add("dashboard", periods);
+      add("ledgers", ["name", "balance", "recent"].map((sort) => ({ sort })));
+      ["sales", "purchase"].forEach((kind) => add("daily", periods.map((p) => ({ kind, ...p }))));
+      add("outstanding", [{ kind: "receivable" }, { kind: "payable" }]);
+      add("stock", periods); add("godowns", [{}]); add("gst", periods); add("pl", periods); add("bs", [{}]);
+      add("cashbank", periods); add("collections", [{}]); add("check", [{}]); add("group", [{}]);
+      ["sales", "purchase"].forEach((kind) => add("a_parties", periods.map((p) => ({ kind, ...p }))));
+      add("a_items", periods); add("a_years", [{}]); add("a_slow", [30, 60, 90, 180].map((days) => ({ days })));
+      add("daybook", periods.map((p) => ({ type: "", ...p }))); add("vouchers", periods);
+      const yearAgo = iso(new Date(Date.now() - 365 * 864e5));
+      core.push({ what: "voucher_ids", params: { from: yearAgo, to: iso(new Date()) } });
+      const res = await run(c.id, core);
+      const ledgers = (res[1] && res[1].ledgers || []).map((l) => l.name);
+      const items = (res.find((x, i) => core[i].what === "stock") || { items: [] }).items.map((x) => x.name);
+      const ids = (res[res.length - 1] || { ids: [] }).ids;
+      const groups = ((res.find((x, i) => core[i].what === "group") || {}).groups || []).map((g) => g.name);
+      const more = [];
+      const lper = uniq([ledgerParams(), {}]);
+      ledgers.forEach((name) => lper.forEach((p) => more.push({ what: "ledger", params: { name, ...p } })));
+      items.forEach((name) => periods.forEach((p) => more.push({ what: "stock_item", params: { name, ...p } })));
+      groups.forEach((name) => more.push({ what: "group", params: { name } }));
+      ids.forEach((id) => more.push({ what: "voucher", arg: id, params: {} }));
+      await run(c.id, more);
+    }
+    const info = { at: Date.now(), items: done };
+    try { localStorage.setItem("offline", JSON.stringify(info)); } catch (e) {}
+    return info;
+  } finally { OFF.running = false; }
+}
+function androidSection() {
+  if (!window.BahiAndroid) return "";
+  return `<section class="page"><div class="block-title">Android app <span>version ${h(BahiAndroid.version())}</span></div>
+    <div class="info"><div>Server: ${h(BahiAndroid.server())}</div></div>
+    <div class="actions"><button class="btn" onclick="BahiAndroid.changeServer()">Change server address</button><button class="btn" onclick="BahiAndroid.checkUpdate()">Check for app update</button></div></section>`;
+}
+function offlineSection() {
+  const el = $("#offsec");
+  if (!el) return;
+  if (!("caches" in window)) { el.innerHTML = '<div class="block-title">Offline copy</div><div class="info">This browser can\'t keep an offline copy.</div>'; return; }
+  const o = offlineInfo();
+  el.innerHTML = `<div class="block-title">Offline copy <span>${o ? `saved ${ago(o.at / 1000)}` : "not saved yet"}</span></div>
+    <div class="info"><div>Keeps everything on this phone to view without internet: every ledger (this month and this year), stock, dues, reports and the last 12 months' vouchers.${o ? ` ${nf0.format(o.items)} screens saved.` : ""}</div><div id="offsize"></div></div>
+    <label style="display:flex;gap:8px;align-items:center;padding:0 0 8px"><input type="checkbox" id="offauto" ${offlineAuto() ? "checked" : ""}> Update it by itself every 6 hours while the app is open</label>
+    <div class="actions"><button class="btn" id="offnow">${OFF.running ? "Saving" : "Save offline copy now"}</button></div><p class="meta" id="offmsg" role="status"></p>`;
+  if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then((e) => { const x = $("#offsize"); if (x && e.usage) x.textContent = `Space used on this phone: ${(e.usage / 1048576).toFixed(1)} MB`; }).catch(() => {});
+  $("#offauto").onchange = (e) => { try { localStorage.setItem("offline_auto", e.target.checked ? "1" : "0"); } catch (err) {} };
+  $("#offnow").onclick = async () => {
+    const b = $("#offnow"); b.disabled = true; b.textContent = "Saving";
+    try {
+      await downloadOffline((d, t) => { const m = $("#offmsg"); if (m) m.textContent = `Saving ${nf0.format(d)} of ${nf0.format(t)}`; });
+      toast("Offline copy saved."); offlineSection();
+    } catch (e) { const m = $("#offmsg"); if (m) m.textContent = e.message === "login" ? "Log in again, then try." : "Couldn't finish: " + e.message; b.disabled = false; b.textContent = "Save offline copy now"; }
+  };
+}
+function offlineInfo() { try { return JSON.parse(localStorage.getItem("offline") || "null"); } catch (e) { return null; } }
+function offlineAuto() { try { return localStorage.getItem("offline_auto") !== "0"; } catch (e) { return true; } }
+// keep the offline copy fresh: in the background, at most every 6 hours, when the server can be reached
+async function autoOffline() {
+  const o = offlineInfo();
+  if (!offlineAuto() || !navigator.onLine || (o && Date.now() - o.at < 6 * 3600e3) || !S.companies.length) return;
+  try { await downloadOffline(); } catch (e) { /* tried again next time */ }
+}
+
 function periodParams() { return S.period ? { from: S.period.from, to: S.period.to } : {}; }
 
 async function loadCompanies() {
@@ -294,6 +399,10 @@ async function vParties(q) {
 }
 
 async function sharePdf(url, name) {
+  if (window.BahiAndroid) {      // the Android app downloads it and opens the phone's share sheet (WhatsApp, email...)
+    BahiAndroid.share(new URL(url, location.origin).href, name.replace(/[^\w .-]+/g, "").slice(0, 80) + ".pdf");
+    return;
+  }
   toast("Preparing PDF");
   let blob;
   try {
@@ -1038,6 +1147,8 @@ async function vSettings() {
     <section class="page" id="intsec"></section>
     <section class="page" id="stsec"></section>
     <section class="page" id="bksec"></section>
+    <section class="page" id="offsec"></section>
+    ${androidSection()}
     <section class="page"><div class="block-title">Change app password</div>
       <form id="pwf" class="form">
         <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
@@ -1115,6 +1226,7 @@ async function vSettings() {
     };
   };
   showBackups();
+  offlineSection();
   showStaff().catch(() => {});
   (async () => {
     const it = await api("/api/interest").catch(() => null);
@@ -1184,7 +1296,9 @@ function vMySettings() {
         <label>New password<input type="password" id="pw1" autocomplete="new-password" minlength="6" required></label>
         <label>New password again<input type="password" id="pw2" autocomplete="new-password" minlength="6" required></label>
         <button class="btn primary" type="submit">Change password</button><div class="msg" id="pwmsg" role="status"></div>
-        <p class="hint">Forgot it? Ask the owner to set a new one.</p></form></section>`;
+        <p class="hint">Forgot it? Ask the owner to set a new one.</p></form></section>
+    <section class="page" id="offsec"></section>${androidSection()}`;
+  offlineSection();
   $("#pwf").onsubmit = async (e) => {
     e.preventDefault();
     const msg = $("#pwmsg");
@@ -1569,7 +1683,7 @@ function showLogin(msg = "") {
 }
 function fail(e) {
   if (e && e.login) return showLogin();
-  view.innerHTML = `<div class="empty">${e && e.message === "offline" ? "Can't reach the server and nothing is saved on this phone for this screen yet. Check your internet connection." : h(e?.message || "Something went wrong.")}<br><br><button class="btn" onclick="route()">Try again</button></div>`;
+  view.innerHTML = `<div class="empty">${e && e.message === "offline" ? `Can't reach the server, and this screen isn't saved on this phone.${offlineInfo() ? ` The offline copy (saved ${ago(offlineInfo().at / 1000)}) has every ledger for this month and this year, stock, dues, reports and the last 12 months' vouchers, for the periods shown when it was saved.` : " Download the offline copy in Settings when you're connected."}` : h(e?.message || "Something went wrong.")}<br><br><button class="btn" onclick="route()">Try again</button></div>`;
 }
 let toastT;
 function toast(msg) {
@@ -1647,6 +1761,7 @@ async function start() {
   applyTabs();
   $("#tabs").hidden = false;
   route();
+  setTimeout(autoOffline, 4000);
 }
 
 try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}

@@ -10,3 +10,8 @@ agent/TallySync.deep
 agent/TallySync.noguid
 agent/voucher-sample.xml
 agent/stock-sample.xml
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.keystore
