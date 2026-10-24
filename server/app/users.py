@@ -26,6 +26,8 @@ PERMS = [
     ("e_order", "Enter sales orders"),
     ("e_journal", "Enter journals"),
     ("e_contra", "Enter contra (cash and bank transfers)"),
+    ("e_sales", "Enter sales invoices"),
+    ("e_purchase", "Enter purchases"),
     ("e_direct", "Their entries go to Tally without your approval"),
 ]
 PERM_KEYS = {k for k, _ in PERMS}

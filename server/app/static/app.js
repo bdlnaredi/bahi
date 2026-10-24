@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.3.0";
+const APP_VERSION = "3.4.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -10,7 +10,7 @@ const S = {
 };
 const can = (p) => S.me.owner || S.me.perms.includes(p);
 const canLedgers = () => can("ledgers") || can("parties");
-const ENTRY = { receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], journal: ["Journal", "e_journal"], contra: ["Contra", "e_contra"], order: ["Sales order", "e_order"] };
+const ENTRY = { sales: ["Sales invoice", "e_sales"], purchase: ["Purchase", "e_purchase"], receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], journal: ["Journal", "e_journal"], contra: ["Contra", "e_contra"], order: ["Sales order", "e_order"] };
 const entryKinds = () => Object.keys(ENTRY).filter((k) => can(ENTRY[k][1]));
 function applyTabs() {
   const show = { home: true, sales: can("sales"), parties: canLedgers(), vouchers: can("vouchers"), dues: can("dues"), reports: true };
@@ -1311,7 +1311,7 @@ function vMySettings() {
 }
 
 /* ---------------------------------------------------------------- staff logins (owner) */
-const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order"] };
+const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_sales", "e_purchase", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order"] };
 async function showStaff() {
   const d = await api("/api/users");
   const sec = $("#stsec");
@@ -1322,7 +1322,7 @@ async function showStaff() {
       <label><span><input type="checkbox" name="allco" ${!sel.length ? "checked" : ""}> All companies</span></label>
       ${S.companies.map((c) => `<label><span><input type="checkbox" name="co" value="${h(c.name)}" ${sel.includes(c.name) ? "checked" : ""}> ${h(c.name)}</span></label>`).join("")}` : "";
   const summary = (u) => u.perms.filter((p) => !p.startsWith("e_")).map((p) => ({ accounts: "money figures", sales: "sales", ledgers: "all ledgers", parties: "party ledgers", vouchers: "vouchers", dues: "dues", stock: "stock" }[p])).join(", ") +
-    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_receipt", "e_payment", "e_journal", "e_contra", "e_order"].includes(p)).map((p) => ({ e_receipt: "receipts", e_payment: "payments", e_journal: "journals", e_contra: "contras", e_order: "orders" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
+    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_sales", "e_purchase", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order"].includes(p)).map((p) => ({ e_sales: "sales invoices", e_purchase: "purchases", e_receipt: "receipts", e_payment: "payments", e_journal: "journals", e_contra: "contras", e_order: "orders" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
   sec.innerHTML = `<div class="block-title">Staff logins <span>${d.users.length}</span></div>
     <div class="info"><div>Staff log in with their name and their own password, and see only what you tick. You always log in with the app password and see everything.</div></div>
     ${d.users.map((u, i) => `<div class="party"><button class="row" aria-expanded="false" data-su="${i}"><div class="main"><div class="name">${h(u.name)}${u.active ? "" : ' <span class="badge">switched off</span>'}</div>
@@ -1393,7 +1393,8 @@ async function vEntries() {
   view.innerHTML = `<h1 class="title">Entries from phone</h1>${entryBar()}
     <section class="page">${d.entries.map((e) => {
       const x = e.data, [st, cls] = EST[e.status] || [e.status, ""];
-      const detail = e.kind === "order" ? x.items.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)}`).join("<br>")
+      const detail = e.kind === "sales" || e.kind === "purchase" ? `${x.number ? `No. ${h(x.number)}. ` : ""}` + x.lines.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)} + ${i.gst}% GST${i.godown && i.godown !== "Main Location" ? `, ${h(i.godown)}` : ""}`).join("<br>") + `<br>Total ₹${nf2.format(x.amount)}${x.igst ? " (IGST)" : ""}`
+        : e.kind === "order" ? x.items.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)}`).join("<br>")
         : e.kind === "journal" ? x.lines.map((l) => `${l.side === "dr" ? "Dr" : "Cr"} ${h(l.ledger)} ₹${nf2.format(l.amount)}`).join("<br>")
         : e.kind === "contra" ? `From ${h(x.account)} to ${h(x.to)}`
         : `${e.kind === "receipt" ? "Into" : "From"} ${h(x.account)}${x.bills.length ? `, against ${x.bills.map((b) => h(b.ref)).join(", ")}` : ""}`;
@@ -1424,18 +1425,28 @@ async function vNewEntry(kind) {
   if (!ENTRY[kind] || !can(ENTRY[kind][1])) { view.innerHTML = '<div class="empty">You can\'t make this kind of entry.</div>'; return; }
   const f = await api(cpath("entry_form", { kind }));
   const order = kind === "order", rec = kind === "receipt", jv = kind === "journal", contra = kind === "contra";
+  const inv = kind === "sales" || kind === "purchase", sale = kind === "sales";
   const list = (id, arr) => `<datalist id="${id}">${arr.map((x) => `<option value="${h(x)}">`).join("")}</datalist>`;
   const sel = (name, arr) => `<select name="${name}">${arr.map((x) => `<option>${h(x)}</option>`).join("")}</select>`;
   view.innerHTML = `<h1 class="title">New ${ENTRY[kind][0].toLowerCase()}</h1>
     <section class="page"><form class="form" id="ef" style="padding-top:14px" autocomplete="off">
       <label>Voucher type${sel("vtype", f.vtypes)}${f.vtypes.length > 1 ? `<span class="hint">${f.vtypes.length} ${h(ENTRY[kind][0].toLowerCase())} types in Tally</span>` : ""}</label>
       <label>Date<input type="date" name="date" value="${f.today}" required></label>
-      ${jv ? `<div id="jlines"></div>${list("llist", f.ledgers)}<button class="btn" type="button" id="addline">+ Add line</button>
+      ${inv ? `<label>${sale ? "Customer" : "Supplier"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>
+        ${sale ? `<label>Invoice no.<input name="number" value="${h(f.next_number[f.vtypes[0]] || "")}" placeholder="Leave empty and Tally numbers it"></label>`
+          : `<div class="two"><label>Supplier's invoice no.<input name="number" required></label><label>Invoice date<input type="date" name="ref_date" value="${f.today}" required></label></div>`}
+        <label><span><input type="checkbox" name="igst"> ${sale ? "Customer" : "Supplier"} is in another state (IGST)</span></label>
+        <p class="hint" id="pstate"></p>
+        <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
+        ${f.item_ledgers.length > 1 ? `<label>${sale ? "Sales" : "Purchase"} ledger<select name="ledger"><option value="">Automatic (by GST rate)</option>${f.item_ledgers.map((x) => `<option>${h(x)}</option>`).join("")}</select></label>` : ""}
+        ${f.round_off ? `<label><span><input type="checkbox" name="round" checked> Round off the total (${h(f.round_off)})</span></label>` : ""}
+        <div class="info" id="itot" style="padding:4px 0 8px"></div>`
+      : jv ? `<div id="jlines"></div>${list("llist", f.ledgers)}<button class="btn" type="button" id="addline">+ Add line</button>
         <div class="total">Dr <b id="jdr">₹0</b> &nbsp; Cr <b id="jcr">₹0</b> <span id="jdiff" class="od"></span></div>`
       : contra ? `<label>From${sel("account", f.accounts)}</label><label>To${sel("to", f.accounts.slice(1).concat(f.accounts.slice(0, 1)))}</label>
         <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`
       : `<label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>`}
-      ${jv || contra ? "" : order ? `
+      ${jv || contra || inv ? "" : order ? `
         <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
         <div class="total">Total before tax <b id="otot">₹0</b></div>
         <label>Deliver by (optional)<input type="date" name="due"></label>
@@ -1444,12 +1455,60 @@ async function vNewEntry(kind) {
       : `<label>${rec ? "Into" : "From"}${sel("account", f.accounts)}</label>
         <div id="bills"></div>
         <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`}
-      <label>Narration (optional)<input name="narration" maxlength="500" placeholder="${order ? "e.g. Deliver to shop" : jv ? "e.g. Rent for October" : "e.g. Cheque no. 12345"}"></label>
+      <label>Narration (optional)<input name="narration" maxlength="500" placeholder="${order ? "e.g. Deliver to shop" : inv ? "e.g. Sent with Ramesh, vehicle RJ23 GA 1234" : jv ? "e.g. Rent for October" : "e.g. Cheque no. 12345"}"></label>
       <button class="btn primary" type="submit">Save</button><div class="msg" id="emsg" role="status"></div>
       <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs." : "The owner approves it first, then it goes into Tally at the next sync."}</p>
     </form></section>`;
   const form = $("#ef");
-  if (jv) {
+  if (inv) {
+    const items = Object.fromEntries(f.items.map((i) => [i.name, i]));
+    const r2 = (x) => Math.round(x * 100) / 100;
+    const tot = () => {
+      const igst = form.igst.checked;
+      let taxable = 0, tax = 0;
+      $("#items").querySelectorAll(".irow").forEach((r) => {
+        const a = r2((+r.querySelector("[name=qty]").value || 0) * (+r.querySelector("[name=rate]").value || 0));
+        const g = +r.querySelector("[name=gst]").value || 0;
+        taxable += a; tax += a * g / 100;          // rounded once per tax ledger, as the server and Tally do
+        r.querySelector("[data-amt]").textContent = a ? `₹${nf2.format(a)} + GST ₹${nf2.format(igst ? r2(a * g / 100) : 2 * r2(a * g / 200))}` : "";
+      });
+      tax = igst ? r2(tax) : 2 * r2(tax / 2);
+      let total = r2(taxable + tax), ro = 0;
+      if (form.round && form.round.checked) { ro = r2(Math.round(total) - total); total = r2(total + ro); }
+      const ln = (l, v) => `<div style="display:flex;justify-content:space-between"><span>${l}</span><span>${v}</span></div>`;
+      $("#itot").innerHTML = ln("Taxable value", rupees(taxable)) + (igst ? ln("IGST", rupees(tax)) : ln("CGST", rupees(tax / 2)) + ln("SGST", rupees(tax / 2)))
+        + (ro ? ln("Round off", `${ro > 0 ? "+" : "−"}${nf2.format(Math.abs(ro))}`) : "") + ln("<b>Invoice total</b>", `<b>${rupees(total)}</b>`);
+    };
+    const add = () => {
+      const row = document.createElement("div"); row.className = "irow";
+      row.innerHTML = `<label>Item<input name="item" list="ilist" placeholder="Start typing an item"></label>
+        <div class="two"><label>Qty<input name="qty" type="number" min="0" step="any" inputmode="decimal"></label><label>Rate (before GST)<input name="rate" type="number" min="0" step="0.01" inputmode="decimal"></label></div>
+        <div class="two"><label>GST %<select name="gst">${f.slabs.map((g) => `<option value="${g}">${g}%</option>`).join("")}</select></label>
+          ${f.godowns.length > 1 ? `<label>Godown<select name="godown">${f.godowns.map((g) => `<option>${h(g)}</option>`).join("")}</select></label>` : `<input type="hidden" name="godown" value="${h(f.godowns[0])}">`}</div>
+        <p class="hint" data-info></p><p class="hint" data-amt></p>`;
+      $("#items").appendChild(row);
+      row.querySelector("[name=item]").onchange = (e) => {
+        const it = items[e.target.value]; const r = row.querySelector("[name=rate]");
+        row.querySelector("[data-info]").textContent = it ? `${nfq.format(it.in_hand || 0)} ${it.unit} in hand${it.hsn ? `, HSN ${it.hsn}` : ""}${it.gst === null || it.gst === undefined ? ". GST rate not known: pick it" : it.gst_from_tally ? "" : ". GST rate from earlier invoices"}` : "Pick an item from the list";
+        if (it && !r.value) r.value = it.rate || "";
+        if (it && it.gst !== null && it.gst !== undefined) row.querySelector("[name=gst]").value = String(it.gst);
+        const gd = row.querySelector("select[name=godown]"); if (it && gd) gd.value = it.godown;
+        tot();
+      };
+      row.oninput = tot; row.onchange = tot;
+    };
+    form.party.onchange = () => {
+      const p = f.party_info[form.party.value] || {};
+      const other = !!(p.state && f.company_state && p.state.toLowerCase() !== f.company_state.toLowerCase());
+      form.igst.checked = other;
+      $("#pstate").textContent = p.state ? `${p.state}${p.gstin ? `, GSTIN ${p.gstin}` : ""}` : (f.parties.includes(form.party.value) ? "State not set in Tally: tick IGST yourself if they're in another state" : "");
+      tot();
+    };
+    form.igst.onchange = tot;
+    if (form.round) form.round.onchange = tot;
+    if (form.vtype) form.vtype.onchange = () => { if (sale && f.next_number[form.vtype.value] !== undefined) form.number.value = f.next_number[form.vtype.value] || ""; };
+    $("#additem").onclick = add; add(); tot();
+  } else if (jv) {
     const tot = () => {
       let dr = 0, cr = 0;
       $("#jlines").querySelectorAll(".irow").forEach((r) => { const a = +r.querySelector("[name=amt]").value || 0; if (r.querySelector("[name=side]").value === "dr") dr += a; else cr += a; });
@@ -1514,7 +1573,12 @@ async function vNewEntry(kind) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const body = { kind, date: form.date.value, party: form.party ? form.party.value : "", narration: form.narration.value, vtype: form.vtype ? form.vtype.value : undefined };
-    if (jv) {
+    if (inv) {
+      body.number = form.number.value; body.igst = form.igst.checked; body.round = form.round ? form.round.checked : false;
+      body.ledger = form.ledger ? form.ledger.value : "";
+      if (!sale) body.ref_date = form.ref_date.value;
+      body.lines = [...$("#items").querySelectorAll(".irow")].map((r) => ({ item: r.querySelector("[name=item]").value, qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value, gst: r.querySelector("[name=gst]").value, godown: r.querySelector("[name=godown]").value })).filter((i) => i.item);
+    } else if (jv) {
       body.lines = [...$("#jlines").querySelectorAll(".irow")].map((r) => ({ ledger: r.querySelector("[name=led]").value, side: r.querySelector("[name=side]").value, amount: r.querySelector("[name=amt]").value })).filter((x) => x.ledger);
     } else if (contra) {
       body.account = form.account.value; body.to = form.to.value; body.amount = form.amount.value;

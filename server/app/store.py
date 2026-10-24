@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS ledger(
   PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS stock(
   company_id INT, name TEXT, parent TEXT, unit TEXT, opening_qty REAL, opening_value REAL,
-  closing_qty REAL, closing_value REAL, closing_rate REAL, hsn TEXT DEFAULT '', PRIMARY KEY(company_id, name));
+  closing_qty REAL, closing_value REAL, closing_rate REAL, hsn TEXT DEFAULT '', gst REAL, PRIMARY KEY(company_id, name));
 CREATE TABLE IF NOT EXISTS voucher(
   id INTEGER PRIMARY KEY, company_id INT, guid TEXT, date TEXT, vtype TEXT, base TEXT,
   number TEXT, party TEXT, narration TEXT, amount REAL, balanced INT, reference TEXT, party_gstin TEXT,
@@ -141,6 +141,8 @@ def _migrate(c):
     cols = [r[1] for r in c.execute("PRAGMA table_info(company)")]
     if "keep_from" not in cols:
         c.execute("ALTER TABLE company ADD COLUMN keep_from TEXT DEFAULT ''")
+    if "gst" not in [r[1] for r in c.execute("PRAGMA table_info(stock)")]:
+        c.execute("ALTER TABLE stock ADD COLUMN gst REAL")         # item's GST rate from Tally (added in 3.4)
     gcols = [r[1] for r in c.execute("PRAGMA table_info(grp)")]
     for col in ("revenue", "gp", "debit"):        # Tally's nature of each group (added in 2.7)
         if col not in gcols:
@@ -436,7 +438,7 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             ledger_x = {r["name"]: json.loads(r["extra"] or "{}") for r in
                         c.execute("SELECT name, extra FROM ledger WHERE company_id=?", (cid,))}
         if not stock_x and partial:
-            stock_x = {r["name"]: {"hsn": r["hsn"]} for r in c.execute("SELECT name, hsn FROM stock WHERE company_id=?", (cid,))}
+            stock_x = {r["name"]: {"hsn": r["hsn"], "gst": r["gst"]} for r in c.execute("SELECT name, hsn, gst FROM stock WHERE company_id=?", (cid,))}
         ledger_x = ledger_x or {}
         stock_x = stock_x or {}
         if ledgers or not partial:
@@ -450,9 +452,10 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                 for l in ledgers])
         if stock or not partial:
             c.execute("DELETE FROM stock WHERE company_id=?", (cid,))
-            c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?,?)", [
+            c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?,?,?)", [
                 (cid, s["name"], s["parent"], s["unit"], s["opening_qty"], s["opening_value"],
-                 s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""))
+                 s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""),
+                 stock_x.get(s["name"], {}).get("gst"))
                 for s in stock])
 
         if guids is not None:

@@ -272,11 +272,13 @@ After that you can change the time, the minimum amount, send a summary now, or t
 <td><img src="images/entries.png" width="230" alt="Entries from phone"></td>
 </tr></table>
 
-Tap **+ Receipt**, **+ Payment**, **+ Journal**, **+ Contra** or **+ Sales order** at the top of **Home**.
+Tap **+ Sales invoice**, **+ Purchase**, **+ Receipt**, **+ Payment**, **+ Journal**, **+ Contra** or **+ Sales order** at the top of **Home**.
 
 Every entry starts with **Voucher type**: a list of your own Tally voucher types of that kind (for example *Receipt* and *Bank Receipt*), so the entry goes into Tally under the type you pick.
 
 - **Receipt / Payment:** pick the date, the party (start typing a name), and the cash or bank account. For a customer or supplier, their pending bills appear: tick the bills this settles and the amount fills in. Anything left over goes *on account*. Add a narration such as the cheque or UTR number.
+- **Sales invoice:** pick the customer and add items with quantity, rate (before GST), GST rate and godown. The invoice number starts at the next number after the last one synced (clear it and Tally numbers it). The GST rate comes from the item in Tally, or from the item's earlier invoices when Tally has none set; the godown starts where most of that item is. CGST and SGST are added for a customer in your state, IGST when the customer's state in Tally is another one (you can tick or untick it). Tax goes to your own GST ledgers; the sales ledger is chosen by GST rate unless you pick one. With a Round Off ledger in Tally, the total is rounded to the rupee. Bahi works out every figure again on the server before it goes to Tally. For an e-invoice or e-way bill, generate it in Tally after the invoice arrives there.
+- **Purchase:** the same, with the supplier's invoice number and date (the bill is recorded under that number) and input tax ledgers.
 - **Journal:** add lines, each a ledger with Dr or Cr and an amount. The totals show below; Dr and Cr must be equal before it saves.
 - **Contra:** money moved between your own cash and bank accounts: pick *From*, *To* and the amount.
 - **Sales order:** pick the customer, add items with quantity and rate (the rate starts at the item's last selling rate), and an optional delivery date. GST is added later, when you turn the order into an invoice in Tally.

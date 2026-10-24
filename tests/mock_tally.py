@@ -32,6 +32,7 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Sales GST 18%": ("Sales Accounts", 0), "Purchase GST 18%": ("Purchase Accounts", 0),
     "Output CGST": ("Duties & Taxes", 0), "Output SGST": ("Duties & Taxes", 0),
     "Input CGST": ("Duties & Taxes", 0), "Input SGST": ("Duties & Taxes", 0),
+    "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
     "Discount Received": ("Indirect Incomes", 0), "Capital": ("Capital Account", 0),
     "Commission Received": ("Commission Earned", 0),
@@ -47,7 +48,9 @@ STOCK = [("PVC Pipe 1 inch", "Pipes", "Nos", 400, 120.0), ("PVC Pipe 2 inch", "P
          ("TMT Bar 12mm", "Steel", "Kg", 1500, 62.0)]
 # stock opening value is part of capital too (closing stock asset) - ignore for ledger TB in this mock
 ADDR = {"Sharma & Sons": ["12, Station Road", "Nagpur 440001"], "Patel Enterprises": ["Unit 4, Andheri Industrial Estate", "Andheri East, Mumbai 400069"],
-        "Gupta Hardware": ["Main Bazaar", "Wardha 442001"], "Krishna Agencies": ["Shop 7, Crawford Market", "Mumbai 400001"]}
+        "Gupta Hardware": ["Main Bazaar", "Wardha 442001"], "Krishna Agencies": ["Shop 7, Crawford Market", "Mumbai 400001"],
+        "Shree Ganesh Traders": ["Ring Road", "Surat 395002"]}
+STATE = {"Shree Ganesh Traders": "Gujarat"}         # everyone else is in Maharashtra, like the company
 HSN = {"PVC Pipe 1 inch": "39172390", "PVC Pipe 2 inch": "39172390", "Wall Paint 20L": "32091090", "Primer 4L": "32089090", "TMT Bar 12mm": "72142090"}
 PHONES = {"Sharma & Sons": "9876543210", "Patel Enterprises": "9123456780", "Krishna Agencies": "9988776655"}
 
@@ -378,7 +381,43 @@ def import_voucher(req):
     same = [x for x in VOUCHERS if x["type"] == vt]
     nv = {"date": d, "type": vt, "no": str(len(same) + 1), "party": party, "narration": v.findtext("NARRATION") or "",
           "guid": f"guid-imp-{len(IMPORTED) + 1}", "alterid": max(x["alterid"] for x in VOUCHERS) + 1}
-    if base == "Sales Order":
+    if base in ("Sales", "Purchase"):
+        sales = base == "Sales"
+        if v.findtext("ISINVOICE") != "Yes":
+            return err("Not an invoice")
+        items, item_ledger, taxable = [], None, 0.0
+        for ie in v.findall("ALLINVENTORYENTRIES.LIST"):
+            name = ie.findtext("STOCKITEMNAME")
+            st = next((x for x in STOCK if x[0] == name), None)
+            if not st:
+                return err(f"Stock Item '{name}' does not exist!")
+            if ie.find("BATCHALLOCATIONS.LIST/GODOWNNAME") is None:
+                return err("Godown not specified")
+            if (ie.findtext("ISDEEMEDPOSITIVE") == "Yes") == sales:
+                return err("Item entered on the wrong side")
+            for al in ie.findall("ACCOUNTINGALLOCATIONS.LIST"):
+                if al.findtext("LEDGERNAME") not in LEDGERS:
+                    return err(f"Ledger '{al.findtext('LEDGERNAME')}' does not exist!")
+                item_ledger = al.findtext("LEDGERNAME")
+            q = float(ie.findtext("ACTUALQTY").split()[0])
+            a = abs(float(ie.findtext("AMOUNT")))
+            taxable += a
+            items.append((name, q, st[2], round(a / q, 2), a))
+        lines = []
+        for le in v.findall("LEDGERENTRIES.LIST"):
+            ln = le.findtext("LEDGERNAME")
+            if ln not in LEDGERS:
+                return err(f"Ledger '{ln}' does not exist!")
+            lines.append((ln, -float(le.findtext("AMOUNT"))))
+        if party not in LEDGERS:
+            return err(f"Ledger '{party}' does not exist!")
+        # debits and credits: items sit on the sales/purchase ledger's side
+        if abs(sum(a for _, a in lines) + (-taxable if sales else taxable)) > 0.005:
+            return err("Voucher totals do not match!")
+        nv.update(kind="sales" if sales else "purchase", items=items, ledgers=lines, sales_ledger=item_ledger, taxable=round(taxable, 2))
+        if v.findtext("VOUCHERNUMBER"):
+            nv["no"] = v.findtext("VOUCHERNUMBER")
+    elif base == "Sales Order":
         items = []
         for ie in v.findall("ALLINVENTORYENTRIES.LIST"):
             name = ie.findtext("STOCKITEMNAME")
@@ -472,15 +511,19 @@ class H(BaseHTTPRequestHandler):
                                 + "<LEDGSTREGDETAILS.LIST><GSTIN>27ABCDE1234F1Z5</GSTIN></LEDGSTREGDETAILS.LIST>")
                     elif n in ADDR:                                      # older style
                         out += ("<ADDRESS.LIST>" + "".join(f"<ADDRESS>{escape(a)}</ADDRESS>" for a in ADDR[n])
-                                + "</ADDRESS.LIST><LEDSTATENAME>Maharashtra</LEDSTATENAME>")
+                                + f"</ADDRESS.LIST><LEDSTATENAME>{STATE.get(n, 'Maharashtra')}</LEDSTATENAME>")
                     if n == "HDFC Bank":
                         out += "<BANKDETAILS>50200012345678</BANKDETAILS><IFSCODE>HDFC0001234</IFSCODE><BANKBRANCHNAME>Sitabuldi, Nagpur</BANKBRANCHNAME>"
                     out += "</LEDGER></TALLYMESSAGE>"
             elif at == "Stock Items":
                 for name, grp, unit, oq, rate in STOCK:
                     tag = "HSNDETAILS.LIST" if "Paint" in name else "GSTDETAILS.LIST"
+                    # GST rate on the item itself for pipes and steel; paints get theirs from the stock group (not sent)
+                    rate = ("<STATEWISEDETAILS.LIST><STATENAME>&#4; Any</STATENAME><RATEDETAILS.LIST><GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>"
+                            "<GSTRATE> 18</GSTRATE></RATEDETAILS.LIST><RATEDETAILS.LIST><GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD><GSTRATE> 9</GSTRATE>"
+                            "</RATEDETAILS.LIST></STATEWISEDETAILS.LIST>") if tag == "GSTDETAILS.LIST" else ""
                     out += (f'<TALLYMESSAGE><STOCKITEM NAME="{escape(name)}"><{tag}><APPLICABLEFROM>20170701</APPLICABLEFROM>'
-                            f'<HSNCODE>{HSN[name]}</HSNCODE></{tag}></STOCKITEM></TALLYMESSAGE>')
+                            f'<HSNCODE>{HSN[name]}</HSNCODE>{rate}</{tag}></STOCKITEM></TALLYMESSAGE>')
             out += "</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>"
         elif typ == "Data" and rid == "Day Book":
             if DAYBOOK_BUG:
@@ -539,7 +582,7 @@ class H(BaseHTTPRequestHandler):
                             f'<CLOSINGBALANCE TYPE="Amount">{amt(bal[n])}</CLOSINGBALANCE>'
                             f'<LEDGERMOBILE TYPE="String">{ph}</LEDGERMOBILE>'
                             f'<TAXTYPE>{"GST" if "GST" in n else ""}</TAXTYPE>'
-                            f'<GSTDUTYHEAD>{"Central Tax" if "CGST" in n else "State Tax" if "SGST" in n else ""}</GSTDUTYHEAD></LEDGER>')
+                            f'<GSTDUTYHEAD>{"Central Tax" if "CGST" in n else "State Tax" if "SGST" in n else "Integrated Tax" if "IGST" in n else ""}</GSTDUTYHEAD></LEDGER>')
             elif ctype == "StockItem":
                 cl = stock_closing(t or END)
                 for name, grp, unit, oq, rate in STOCK:

@@ -13,12 +13,15 @@ from xml.sax.saxutils import escape as _esc
 def escape(t):
     return _esc(str(t), {'"': "&quot;", "'": "&apos;"})
 
+import invoice
 import store
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB = os.path.join(DATA_DIR, "entries.db")
-KINDS = {"receipt": "Receipt", "payment": "Payment", "order": "Sales Order", "journal": "Journal", "contra": "Contra"}
-PERM = {"receipt": "e_receipt", "payment": "e_payment", "order": "e_order", "journal": "e_journal", "contra": "e_contra"}
+KINDS = {"receipt": "Receipt", "payment": "Payment", "order": "Sales Order", "journal": "Journal", "contra": "Contra",
+         "sales": "Sales", "purchase": "Purchase"}
+PERM = {"receipt": "e_receipt", "payment": "e_payment", "order": "e_order", "journal": "e_journal", "contra": "e_contra",
+        "sales": "e_sales", "purchase": "e_purchase"}
 RESEND_AFTER = 15 * 60       # an entry handed to the agent but never reported back is offered again
 
 
@@ -38,6 +41,8 @@ def _row(r):
 
 # ---------------------------------------------------------------- form data
 def form(cid, kind):
+    if kind in ("sales", "purchase"):
+        return invoice.form(cid, kind)
     with store.conn() as c:
         base = KINDS[kind]
         vtypes = [r["name"] for r in c.execute("SELECT name FROM vtype WHERE company_id=? AND base=? ORDER BY name<>?, name",
@@ -100,6 +105,10 @@ def clean(cid, kind, d):
     if vtype not in f["vtypes"]:
         raise ValueError("Pick a voucher type.")
     narration = str(d.get("narration") or "").strip()[:500]
+    if kind in ("sales", "purchase"):
+        out = invoice.clean(cid, kind, d, f, _num)
+        out.update({"date": day, "vtype": vtype, "narration": narration})
+        return out
     if kind == "journal":
         lines = []
         for ln in d.get("lines") or []:
@@ -240,17 +249,23 @@ def build_xml(e):
     vt = escape(d["vtype"])
     who = "owner" if e["by"] == "Owner" else e["by"]
     nar = escape((d.get("narration") + " " if d.get("narration") else "") + f"(entered on phone by {who})")
-    head = (f'<VOUCHER VCHTYPE="{vt}" ACTION="Create" OBJVIEW="{"Invoice Voucher View" if e["kind"] == "order" else "Accounting Voucher View"}">'
+    inv = e["kind"] in ("order", "sales", "purchase")
+    head = (f'<VOUCHER VCHTYPE="{vt}" ACTION="Create" OBJVIEW="{"Invoice Voucher View" if inv else "Accounting Voucher View"}">'
             f'<DATE>{_d(d["date"])}</DATE><EFFECTIVEDATE>{_d(d["date"])}</EFFECTIVEDATE><VOUCHERTYPENAME>{vt}</VOUCHERTYPENAME>'
-            f'<PARTYLEDGERNAME>{escape(d["party"])}</PARTYLEDGERNAME><NARRATION>{nar}</NARRATION>')
+            f'<PARTYLEDGERNAME>{escape(d["party"])}</PARTYLEDGERNAME><PARTYNAME>{escape(d["party"])}</PARTYNAME><NARRATION>{nar}</NARRATION>')
     body = ""
+    if e["kind"] in ("sales", "purchase"):
+        h_, body = invoice.body_xml(e)
+        head += h_
     def line(ledger, debit, amount, party=False):
         # Tally XML: a debit is a negative amount with ISDEEMEDPOSITIVE Yes
         return (f'<ALLLEDGERENTRIES.LIST><LEDGERNAME>{escape(ledger)}</LEDGERNAME>'
                 f'<ISDEEMEDPOSITIVE>{"Yes" if debit else "No"}</ISDEEMEDPOSITIVE>'
                 + ('<ISPARTYLEDGER>Yes</ISPARTYLEDGER>' if party else '')
                 + f'<AMOUNT>{_amt(-amount if debit else amount)}</AMOUNT></ALLLEDGERENTRIES.LIST>')
-    if e["kind"] == "journal":
+    if e["kind"] in ("sales", "purchase"):
+        pass                                   # built above
+    elif e["kind"] == "journal":
         for x in d["lines"]:
             body += line(x["ledger"], x["side"] == "dr", x["amount"])
     elif e["kind"] == "contra":

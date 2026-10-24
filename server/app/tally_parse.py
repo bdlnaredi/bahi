@@ -591,7 +591,17 @@ def parse_stock_extra(root):
                 hsn = txt(b, "HSNCODE") or txt(b, "HSN")
                 if hsn:
                     break
-        out[n] = {"hsn": hsn or txt(el, "HSNCODE")}
+        # GST rate: the integrated rate in the latest GST details (CGST and SGST are half of it each)
+        gst = None
+        blocks = el.findall("GSTDETAILS.LIST")
+        if blocks:
+            b = sorted(blocks, key=lambda x: txt(x, "APPLICABLEFROM"))[-1]
+            for r in b.iter("RATEDETAILS.LIST"):
+                head = txt(r, "GSTRATEDUTYHEAD").lower()
+                if head in ("igst", "integrated tax") and txt(r, "GSTRATE"):
+                    gst = num(txt(r, "GSTRATE"))
+                    break
+        out[n] = {"hsn": hsn or txt(el, "HSNCODE"), "gst": gst}
     return out
 
 
