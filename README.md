@@ -38,7 +38,7 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **Sync your way:** automatic every few minutes, manual with a **Sync now** button, or paused. The Tally PC **updates itself** when the server is updated.
 - **Interest on overdue bills**, **stock alerts** on Telegram, **e-invoice QR and e-way bill** on invoice PDFs, and **Hindi** in PDFs.
 - **Nightly backups** on your server, the last 7 kept.
-- **Works offline:** your phone keeps the last data you opened.
+- **Android app** with a full **offline copy**: every ledger, stock item, dues, reports and the last year's vouchers on the phone, shared to WhatsApp in a tap.
 - **Never deletes or changes anything in Tally:** syncing only reads, and phone entries are only ever added as new vouchers. Every request is checked on the Tally PC before it reaches Tally.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.
 

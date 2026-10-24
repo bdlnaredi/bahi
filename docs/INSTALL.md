@@ -165,6 +165,18 @@ Install Tailscale on your phone and open `http://UNRAID-TAILSCALE-IP:8780`. You 
 
 ## 6. Install the app on your phone
 
+### Android app (recommended)
+
+1. On the phone, open **https://github.com/bdlnaredi/bahi/releases/download/android/Bahi.apk** in Chrome. It downloads `Bahi.apk`.
+2. Tap the download and **Install**. The first time, Android asks to allow installing from Chrome: tap **Settings → Allow from this source**, go back and tap **Install**.
+3. Open **Bahi**, type your server address (`https://books.yourdomain.com`) and tap **Connect**. Pass the Cloudflare email code if asked, then enter your **app password**.
+
+The app keeps an **offline copy** of everything (see Settings → Offline copy), opens PDFs and Excel files in your phone's apps, and shares invoices and ledgers straight to WhatsApp. When a new version is out, it offers to download it; install it over the old one and your login and saved data stay.
+
+Use the `https://` address: the offline copy needs it.
+
+### Or: add the web app to the home screen
+
 1. Open your Bahi address in **Chrome** on the phone, e.g. `https://books.yourdomain.com`.
 2. Pass the Cloudflare email code if asked, then enter your **app password** and tap **Open**.
 3. Tap **⋮ → Add to Home screen → Install**.
@@ -185,7 +197,7 @@ Continue with the **[user guide](USING.md)**.
 | Part | How |
 |---|---|
 | **Server** | Unraid Docker tab → **update ready** → click it. On Compose: **Compose Pull**, then **Compose Up**. |
-| **Phone app** | Updates itself the next time you open it while online. Check **Reports → Sync** for the version number. |
+| **Phone app** | The web app updates itself the next time you open it while online. The Android app offers new versions when you open it: tap **Download**, then install. Check **Reports → Sync** for the version number. |
 | **Tally PC agent** | Download the latest `agent` folder and copy the files into `C:\Bahi`, replacing the old ones. Your settings are kept. Then run `Sync-Now.bat` once. |
 
 When an update changes how data is stored, the server clears its copy and the next sync refills it automatically.

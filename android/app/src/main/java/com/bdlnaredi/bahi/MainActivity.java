@@ -165,6 +165,17 @@ public class MainActivity extends Activity {
             c.setConnectTimeout(10000);
             c.setReadTimeout(10000);
             int code = c.getResponseCode();
+            String landed = c.getURL().getHost();
+            if (landed != null && landed.endsWith("cloudflareaccess.com")) {
+                c.disconnect();
+                return null;          // Cloudflare Access login comes first; the app shows it
+            }
+            if (code == 302 || code == 303) {
+                String loc = c.getHeaderField("Location");
+                c.disconnect();
+                if (loc != null && loc.contains("cloudflareaccess.com")) return null;
+                return "That address sends the phone elsewhere (" + loc + ").";
+            }
             InputStream in = code < 400 ? c.getInputStream() : c.getErrorStream();
             String body = in == null ? "" : new String(readAll(in, 20000), "UTF-8");
             c.disconnect();
@@ -254,6 +265,12 @@ public class MainActivity extends Activity {
     /** true when the link was handled outside the app view */
     private boolean route(Uri u) {
         String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase();
+        // Cloudflare Access (the email-code login in front of the server) has to happen inside the app,
+        // so its sign-in cookie is the one the app uses
+        if ((scheme.equals("http") || scheme.equals("https")) && u.getHost() != null
+                && (u.getHost().endsWith(".cloudflareaccess.com") || u.getHost().endsWith(".cloudflare.com"))) {
+            return false;
+        }
         if ((scheme.equals("http") || scheme.equals("https")) && sameServer(u)) {
             String path = u.getPath() == null ? "" : u.getPath();
             if (path.contains("_pdf") || path.endsWith("/export") || path.startsWith("/api/backups/")) {

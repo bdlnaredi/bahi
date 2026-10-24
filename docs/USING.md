@@ -378,6 +378,10 @@ The PDF follows Tally's *Ledger Account* layout:
 - **To** entries in the Debit column and **By** entries in the Credit column, with the narration under each entry;
 - the closing balance at the end, so that both columns total the same.
 
+## Offline copy
+
+**Settings → Offline copy → Save offline copy now** keeps everything on the phone, so the app works with no internet: every ledger (this month and this year), every stock item, dues, all the reports, and the last 12 months' vouchers. With **Update it by itself** ticked, the copy is refreshed every 6 hours while the app is open. When the phone is offline, a bar at the top says you're looking at the saved copy. Other periods (say, last quarter) need a connection. The copy needs the `https://` address.
+
 ## Good to know
 
 - **Bahi checks itself against Tally.** With every sync the Tally PC also sends each ledger's balance as Tally has it at every month-end. Bahi compares those with its own figures; if a ledger differs in some month, entries are missing (or extra) in that month, and Bahi fetches the month again by itself. **Reports → Sync check → Ledger balances against Tally** shows the result. A line that stays there after the next sync means Tally isn't sending those entries; please report it with the ledger and month shown. The ledger page also warns when its opening is affected.
