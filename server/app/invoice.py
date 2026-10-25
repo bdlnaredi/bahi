@@ -134,6 +134,21 @@ def form(cid, kind):
             "round_off": round_off, "items": items, "godowns": godowns, "next_number": nums, "slabs": SLABS}
 
 
+def _rate_for(amount, qty):
+    """The rate for a typed amount: as few decimals as possible (2 to 6) so that quantity x rate gives the amount back."""
+    for dp in (2, 3, 4, 5, 6):
+        r = round(amount / qty, dp)
+        if round(qty * r, 2) == amount:
+            return r
+    return round(amount / qty, 6)
+
+
+def _fmt_rate(r):
+    s_ = f"{r:.6f}".rstrip("0")
+    whole, _, dec = s_.partition(".")
+    return whole + "." + dec.ljust(2, "0")
+
+
 def _pick_tax(f, head, rate):
     cands = [t for t in f["taxes"] if t["head"] == head]
     exact = [t for t in cands if rate in t["rates"]]
@@ -179,7 +194,13 @@ def clean(cid, kind, d, f, num):
         if name not in known:
             raise ValueError(f"{name} isn't a stock item in Tally.")
         qty = num(x.get("qty"), f"quantity of {name}")
-        rate = num(x.get("rate"), f"rate of {name}")
+        if x.get("amount") not in (None, ""):
+            # taxable amount typed in: it stays exactly as entered, and the rate is worked out from it
+            amount = num(x.get("amount"), f"amount of {name}")
+            rate = _rate_for(amount, qty)
+        else:
+            rate = num(x.get("rate"), f"rate of {name}")
+            amount = round(qty * rate, 2)
         try:
             g = float(x.get("gst"))
         except (TypeError, ValueError):
@@ -189,7 +210,6 @@ def clean(cid, kind, d, f, num):
         godown = str(x.get("godown") or known[name]["godown"])
         if godown not in f["godowns"]:
             raise ValueError(f"Pick a godown for {name}.")
-        amount = round(qty * rate, 2)
         ledger = _pick_item_ledger(f, chosen, g)
         lines.append({"item": name, "qty": qty, "unit": known[name]["unit"], "rate": rate, "amount": amount,
                       "gst": g, "godown": godown, "ledger": ledger})
@@ -271,7 +291,7 @@ def body_xml(e):
         a = -sign * l["amount"]             # sales: credit (positive in Tally); purchase: debit (negative)
         deemed = "No" if sales else "Yes"
         body += (f"<ALLINVENTORYENTRIES.LIST><STOCKITEMNAME>{escape(l['item'])}</STOCKITEMNAME>"
-                 f"<ISDEEMEDPOSITIVE>{deemed}</ISDEEMEDPOSITIVE><RATE>{l['rate']:.2f}/{escape(l['unit'])}</RATE>"
+                 f"<ISDEEMEDPOSITIVE>{deemed}</ISDEEMEDPOSITIVE><RATE>{_fmt_rate(l['rate'])}/{escape(l['unit'])}</RATE>"
                  f"<AMOUNT>{amt(-a)}</AMOUNT><ACTUALQTY>{q}</ACTUALQTY><BILLEDQTY>{q}</BILLEDQTY>"
                  f"<BATCHALLOCATIONS.LIST><GODOWNNAME>{escape(l['godown'])}</GODOWNNAME><BATCHNAME>Primary Batch</BATCHNAME>"
                  f"<AMOUNT>{amt(-a)}</AMOUNT><ACTUALQTY>{q}</ACTUALQTY><BILLEDQTY>{q}</BILLEDQTY></BATCHALLOCATIONS.LIST>"

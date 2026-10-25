@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.4.0";
+const APP_VERSION = "3.4.1";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -1467,10 +1467,10 @@ async function vNewEntry(kind) {
       const igst = form.igst.checked;
       let taxable = 0, tax = 0;
       $("#items").querySelectorAll(".irow").forEach((r) => {
-        const a = r2((+r.querySelector("[name=qty]").value || 0) * (+r.querySelector("[name=rate]").value || 0));
+        const a = r2(+r.querySelector("[name=amount]").value || 0);
         const g = +r.querySelector("[name=gst]").value || 0;
         taxable += a; tax += a * g / 100;          // rounded once per tax ledger, as the server and Tally do
-        r.querySelector("[data-amt]").textContent = a ? `₹${nf2.format(a)} + GST ₹${nf2.format(igst ? r2(a * g / 100) : 2 * r2(a * g / 200))}` : "";
+        r.querySelector("[data-amt]").textContent = a ? `GST ${g}%: ₹${nf2.format(r2(a * g / 100))}` : "";
       });
       tax = igst ? r2(tax) : 2 * r2(tax / 2);
       let total = r2(taxable + tax), ro = 0;
@@ -1482,15 +1482,29 @@ async function vNewEntry(kind) {
     const add = () => {
       const row = document.createElement("div"); row.className = "irow";
       row.innerHTML = `<label>Item<input name="item" list="ilist" placeholder="Start typing an item"></label>
-        <div class="two"><label>Qty<input name="qty" type="number" min="0" step="any" inputmode="decimal"></label><label>Rate (before GST)<input name="rate" type="number" min="0" step="0.01" inputmode="decimal"></label></div>
+        <div class="two"><label>Qty<input name="qty" type="number" min="0" step="any" inputmode="decimal"></label><label>Rate (before GST)<input name="rate" type="number" min="0" step="any" inputmode="decimal"></label></div>
+        <label>Amount (taxable value)<input name="amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Qty × rate, or type the amount and the rate is worked out"></label>
         <div class="two"><label>GST %<select name="gst">${f.slabs.map((g) => `<option value="${g}">${g}%</option>`).join("")}</select></label>
           ${f.godowns.length > 1 ? `<label>Godown<select name="godown">${f.godowns.map((g) => `<option>${h(g)}</option>`).join("")}</select></label>` : `<input type="hidden" name="godown" value="${h(f.godowns[0])}">`}</div>
         <p class="hint" data-info></p><p class="hint" data-amt></p>`;
       $("#items").appendChild(row);
+      const q = row.querySelector("[name=qty]"), rt = row.querySelector("[name=rate]"), am = row.querySelector("[name=amount]");
+      // quantity or rate typed: amount = qty x rate. Amount typed: rate = amount / qty (as Tally does)
+      const fromRate = () => { const x = (+q.value || 0) * (+rt.value || 0); am.value = q.value && rt.value ? r2(x).toFixed(2) : ""; };
+      const fromAmount = () => {
+        const a = +am.value || 0, n = +q.value || 0;
+        if (!a || !n) return;
+        let r = a / n;
+        for (const dp of [2, 3, 4, 5, 6]) { const t = +r.toFixed(dp); if (r2(n * t) === r2(a)) { r = t; break; } }
+        rt.value = String(+(+r).toFixed(6));
+      };
+      q.addEventListener("input", () => { if (rt.value) fromRate(); else fromAmount(); });
+      rt.addEventListener("input", fromRate);
+      am.addEventListener("input", fromAmount);
       row.querySelector("[name=item]").onchange = (e) => {
         const it = items[e.target.value]; const r = row.querySelector("[name=rate]");
         row.querySelector("[data-info]").textContent = it ? `${nfq.format(it.in_hand || 0)} ${it.unit} in hand${it.hsn ? `, HSN ${it.hsn}` : ""}${it.gst === null || it.gst === undefined ? ". GST rate not known: pick it" : it.gst_from_tally ? "" : ". GST rate from earlier invoices"}` : "Pick an item from the list";
-        if (it && !r.value) r.value = it.rate || "";
+        if (it && !r.value && !am.value) { r.value = it.rate || ""; fromRate(); }
         if (it && it.gst !== null && it.gst !== undefined) row.querySelector("[name=gst]").value = String(it.gst);
         const gd = row.querySelector("select[name=godown]"); if (it && gd) gd.value = it.godown;
         tot();
@@ -1577,7 +1591,7 @@ async function vNewEntry(kind) {
       body.number = form.number.value; body.igst = form.igst.checked; body.round = form.round ? form.round.checked : false;
       body.ledger = form.ledger ? form.ledger.value : "";
       if (!sale) body.ref_date = form.ref_date.value;
-      body.lines = [...$("#items").querySelectorAll(".irow")].map((r) => ({ item: r.querySelector("[name=item]").value, qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value, gst: r.querySelector("[name=gst]").value, godown: r.querySelector("[name=godown]").value })).filter((i) => i.item);
+      body.lines = [...$("#items").querySelectorAll(".irow")].map((r) => ({ item: r.querySelector("[name=item]").value, qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value, amount: r.querySelector("[name=amount]").value, gst: r.querySelector("[name=gst]").value, godown: r.querySelector("[name=godown]").value })).filter((i) => i.item);
     } else if (jv) {
       body.lines = [...$("#jlines").querySelectorAll(".irow")].map((r) => ({ ledger: r.querySelector("[name=led]").value, side: r.querySelector("[name=side]").value, amount: r.querySelector("[name=amt]").value })).filter((x) => x.ledger);
     } else if (contra) {
