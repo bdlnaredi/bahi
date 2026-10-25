@@ -533,6 +533,13 @@ class H(BaseHTTPRequestHandler):
             out = f"<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA>{vs}</DATA></BODY></ENVELOPE>"
         else:
             ctype = re.search(r"<COLLECTION[^>]*>.*?<TYPE>(.*?)</TYPE>", req, re.S).group(1)
+            # BUSY_MONTH=YYYY-MM: Tally too busy to answer the full voucher list for that month
+            if (ctype == "Voucher" and os.environ.get("BUSY_MONTH") and "AllLedgerEntries" in req and "$GUID" not in req
+                    and f and f.strftime("%Y-%m") == os.environ["BUSY_MONTH"]):
+                self.send_response(500)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA><COLLECTION>"
             if ctype == "Voucher":
                 light = "AllLedgerEntries" not in req

@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.4.2";
+const APP_VERSION = "3.4.3";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");

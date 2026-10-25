@@ -40,7 +40,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.4.2"
+APP_VERSION = "3.4.3"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -469,6 +469,9 @@ class Handler(BaseHTTPRequestHandler):
             vouchers.append(v)
         if skipped:
             raise ValueError("Some voucher data from Tally could not be read: " + skipped[0])
+        if not isinstance(meta.get("guids"), list):      # month or full sync: every month sent must be complete
+            store.check_complete(meta["company"], vouchers,
+                                 meta.get("months") if isinstance(meta.get("months"), list) else None, meta["from"], meta["to"])
         return store.ingest(meta["company"], meta["from"], meta["to"], meta.get("alt_vch", ""),
                             meta.get("alt_mst", ""), parts["groups"], parts["vtypes"],
                             parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"],

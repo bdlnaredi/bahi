@@ -3,7 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.3"
+$AgentVersion = "3.4"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -75,6 +75,16 @@ $FromDate = if ($Cfg.FromDate) { [datetime]::ParseExact($Cfg.FromDate, "yyyy-MM-
 $ToDate   = Get-Date -Year ($fyStartYear + 1) -Month 3 -Day 31
 $FromDate = $FromDate.Date; $ToDate = $ToDate.Date
 Self-Update
+
+# One sync at a time: a run that starts while another is still going (a long first sync, Sync-Now pressed)
+# leaves quietly, so Tally isn't asked for everything twice at once
+$script:Mutex = New-Object System.Threading.Mutex($false, "Local\BahiTallySync")
+$owned = $false
+try { $owned = $script:Mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) {
+    if ($Force -or $Verbose) { Log "Another sync is still running on this PC - this one is skipped." "Yellow" }
+    exit 0
+}
 
 function Esc([string]$s) { return [System.Security.SecurityElement]::Escape($s) }
 # Tally's own date style (1-Apr-2026) - understood by every TallyPrime release
@@ -491,6 +501,14 @@ foreach ($co in $companies) {
             }
         } catch { $light = $null; $expected = $null }
 
+        # Without Tally's list of vouchers nothing can be checked: try again at the next run rather than
+        # sending months that can't be counted
+        if (-not $light) {
+            Log ("Tally didn't send its list of vouchers for " + $co.Name + " (busy?). Trying again at the next sync.") "Yellow"
+            $exitCode = 1
+            continue
+        }
+
         # 2. Ask the server which months need resending
         $full = $true; $months = @(); $byVch = $false; $changed = @(); $deleted = @(); $since = ""
         if ($light -and -not $Force) {
@@ -505,7 +523,12 @@ foreach ($co in $companies) {
                 $changed = @($plan.changed | Where-Object { $_ })
                 $deleted = @($plan.deleted | Where-Object { $_ })
                 $since = [string]$plan.since
-            } catch { $full = $true }
+            } catch {
+                # the server didn't answer: don't fall back to a full resend of every month; try again next time
+                Log ("The server didn't answer which months changed (" + $_.Exception.Message + "). Trying again at the next sync.") "Yellow"
+                $exitCode = 1
+                continue
+            }
         }
         if ($deepCheck -and -not $full -and $months.Count -eq 0) { continue }   # the 30-minute check found nothing new
         if ($deepCheck) { Log ("Found changes in " + $co.Name + " that Tally's change counter didn't show.") }
@@ -593,7 +616,7 @@ foreach ($co in $companies) {
             if ($full -or ((-not $sentByVch) -and ($months -contains $m.ToString("yyyy-MM")))) { $todo += $m }
             $m = $m.AddMonths(1)
         }
-        $method = $script:VchMethod; $sentTotal = 0; $expTotal = 0; $short = @()
+        $method = $script:VchMethod; $sentTotal = 0; $expTotal = 0; $short = @(); $sentMonths = @()
         foreach ($m in $todo) {
             $mEnd = $m.AddMonths(1).AddDays(-1)
             $a = if ($m -lt $FromDate) { $FromDate } else { $m }
@@ -602,15 +625,19 @@ foreach ($co in $companies) {
             $want = if ($expected) { [int]$expected[$key] } else { -1 }
             if ($want -gt 0) { $expTotal += $want }
 
-            $best = $null; $bestIn = -1
-            foreach ($how in @($method, $(if ($method -eq "daybook") { "collection" } else { "daybook" }))) {
+            $best = $null; $bestIn = -1; $bestGood = $false
+            # Once the Day Book is known to ignore dates (it then sends Tally's current day for every month, which
+            # looks right for the current month), it is never used again. The collection is asked twice if busy.
+            $ways = if ($method -eq "collection") { @("collection", "collection") } else { @("daybook", "collection") }
+            foreach ($how in $ways) {
                 try {
                     $raw = if ($how -eq "daybook") { Tally-Raw (DayBook-Xml $co.Name $a $b) } else { Tally-Raw (VchCollection-Xml $co.Name $a $b $VchFields) }
-                } catch { continue }
+                } catch { Start-Sleep -Seconds 5; continue }
                 $c = Check-Vouchers $raw $a $b
                 $good = $c.Ok -and $c.Out -eq 0 -and ($c.In -eq 0 -or $c.Entries) -and ($want -lt 0 -or $c.In -ge $want)
                 if ($c.Ok -and $c.Entries -and $c.In -gt $bestIn) { $best = $raw; $bestIn = $c.In }
                 if ($good) {
+                    $bestGood = $true
                     $best = $raw; $bestIn = $c.In
                     if ($how -ne $method) {
                         if ($how -eq "collection") { Log ("This Tally's Day Book export ignores dates - using the voucher collection method instead") "Gray" }
@@ -619,13 +646,18 @@ foreach ($co in $companies) {
                     break
                 }
             }
-            if ($best) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn); Send-Einv $run $co.Name $a $b $null }
-            if ($want -ge 0 -and $bestIn -lt $want) { $short += ("{0}: {1} of {2}" -f $key, [math]::Max(0, $bestIn), $want) }
+            # only a complete month is sent: a short or failed month keeps what the server already has
+            if ($best -and $bestGood) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn); Send-Einv $run $co.Name $a $b $null; $sentMonths += $key }
+            else { $short += ("{0}: {1} of {2}" -f $key, [math]::Max(0, $bestIn), $want) }
         }
         if ($method -ne $script:VchMethod) { try { Set-Content $MethodFile $method } catch {} }
         $script:VchMethod = $method
         if ($expected -and $todo.Count -and $short.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in the " + $todo.Count + " month(s) sent were received") }
-        if ($short.Count -gt 0) { Log ("Warning: some months came back incomplete - " + ($short -join "; ") + ". Please report this.") "Yellow" }
+        if ($short.Count -gt 0) {
+            Log ("Some months didn't come back complete from Tally and were not sent (the app keeps what it had): " + ($short -join "; ") + ". They are tried again at the next sync.") "Yellow"
+            $exitCode = 1
+            if ($full) { continue }       # a full sync replaces everything, so it must not go ahead with a gap
+        }
 
         # 5. Stock as Tally has it at each month-end, so opening stock for any month or year is Tally's own figure.
         #    All months on a full sync; otherwise only from the month of the earliest change.
@@ -663,7 +695,8 @@ foreach ($co in $companies) {
 
         $meta = @{ run = $run; company = $co.Name; from = $fromIso; to = $toIso; alt_vch = $co.AltVch; alt_mst = $co.AltMst }
         if ($sentByVch) { $meta.guids = @($changed + $deleted) }
-        elseif (-not $full) { $meta.months = @($todo | ForEach-Object { $_.ToString("yyyy-MM") }) }
+        elseif (-not $full) { $meta.months = @($sentMonths) }
+        if ($short.Count -gt 0) { $meta.alt_vch = "" }      # not complete: the next run looks again
         $res = Server-Json "POST" "/agent/commit" $meta
         $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
         Log ("Done: " + $res.ledgers + " ledgers, " + $res.stock + " stock items, " + $res.vouchers +

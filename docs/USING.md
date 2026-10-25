@@ -391,6 +391,9 @@ The PDF follows Tally's *Ledger Account* layout:
 
 ## Good to know
 
+- **A sync never leaves a month half-filled.** The Tally PC asks Tally for each month's vouchers and checks the count against Tally's own list; a month that comes back short (Tally busy, or a Tally whose Day Book export ignores dates) isn't sent, the app keeps what it had for that month, and it is tried again two minutes later. The server checks the same again before changing anything. Only one sync runs at a time on the Tally PC.
+- **Receipt notes, delivery notes and rejections move stock only**, as in Tally: their amounts don't count in ledger balances; the purchase or sales invoice made against them does.
+
 - **Balances are Tally's own.** A ledger's opening and closing, and each cash and bank account's, are the figures Tally gives at each month-end, and its current balance; nothing is worked out or adjusted to make them fit. The entries are listed exactly as they are in Tally. If the entries in a period don't add up to Tally's closing (an entry hasn't reached Bahi yet), the ledger says so in red with the amount, and Bahi fetches that month again.
 
 - **Bahi checks itself against Tally.** With every sync the Tally PC also sends each ledger's balance as Tally has it at every month-end. Bahi compares those with its own figures; if a ledger differs in some month, entries are missing (or extra) in that month, and Bahi fetches the month again by itself. **Reports → Sync check → Ledger balances against Tally** shows the result. A line that stays there after the next sync means Tally isn't sending those entries; please report it with the ledger and month shown. The ledger page also warns when its opening is affected.
