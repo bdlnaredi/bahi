@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.4.1";
+const APP_VERSION = "3.4.2";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -1393,7 +1393,8 @@ async function vEntries() {
   view.innerHTML = `<h1 class="title">Entries from phone</h1>${entryBar()}
     <section class="page">${d.entries.map((e) => {
       const x = e.data, [st, cls] = EST[e.status] || [e.status, ""];
-      const detail = e.kind === "sales" || e.kind === "purchase" ? `${x.number ? `No. ${h(x.number)}. ` : ""}` + x.lines.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)} + ${i.gst}% GST${i.godown && i.godown !== "Main Location" ? `, ${h(i.godown)}` : ""}`).join("<br>") + `<br>Total ₹${nf2.format(x.amount)}${x.igst ? " (IGST)" : ""}`
+      const detail = e.kind === "sales" || e.kind === "purchase" ? `${x.number ? `No. ${h(x.number)}. ` : ""}` + x.lines.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)} + ${i.gst}% GST${i.godown && i.godown !== "Main Location" ? `, ${h(i.godown)}` : ""}`).join("<br>") +
+          (x.charges || []).map((c) => `<br>${h(c.ledger)}: ₹${nf2.format(c.amount)}${c.gst ? ` + ${c.gst}% GST` : ""}`).join("") + `<br>Total ₹${nf2.format(x.amount)}${x.igst ? " (IGST)" : ""}`
         : e.kind === "order" ? x.items.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)}`).join("<br>")
         : e.kind === "journal" ? x.lines.map((l) => `${l.side === "dr" ? "Dr" : "Cr"} ${h(l.ledger)} ₹${nf2.format(l.amount)}`).join("<br>")
         : e.kind === "contra" ? `From ${h(x.account)} to ${h(x.to)}`
@@ -1438,6 +1439,8 @@ async function vNewEntry(kind) {
         <label><span><input type="checkbox" name="igst"> ${sale ? "Customer" : "Supplier"} is in another state (IGST)</span></label>
         <p class="hint" id="pstate"></p>
         <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
+        <div class="block-title" style="padding:14px 0 0">Other charges</div>
+        <div id="charges"></div><button class="btn" type="button" id="addcharge">+ Add charge (labour, loading, packing, cartage…)</button>${list("clist", f.charge_ledgers)}
         ${f.item_ledgers.length > 1 ? `<label>${sale ? "Sales" : "Purchase"} ledger<select name="ledger"><option value="">Automatic (by GST rate)</option>${f.item_ledgers.map((x) => `<option>${h(x)}</option>`).join("")}</select></label>` : ""}
         ${f.round_off ? `<label><span><input type="checkbox" name="round" checked> Round off the total (${h(f.round_off)})</span></label>` : ""}
         <div class="info" id="itot" style="padding:4px 0 8px"></div>`
@@ -1472,11 +1475,17 @@ async function vNewEntry(kind) {
         taxable += a; tax += a * g / 100;          // rounded once per tax ledger, as the server and Tally do
         r.querySelector("[data-amt]").textContent = a ? `GST ${g}%: ₹${nf2.format(r2(a * g / 100))}` : "";
       });
+      let other = 0;
+      $("#charges").querySelectorAll(".crow").forEach((r) => {
+        const a = r2(+r.querySelector("[name=camt]").value || 0), g = +r.querySelector("[name=cgst]").value || 0;
+        other += a; tax += a * g / 100;
+      });
+      const itemsTotal = taxable;
       tax = igst ? r2(tax) : 2 * r2(tax / 2);
-      let total = r2(taxable + tax), ro = 0;
+      let total = r2(itemsTotal + other + tax), ro = 0;
       if (form.round && form.round.checked) { ro = r2(Math.round(total) - total); total = r2(total + ro); }
       const ln = (l, v) => `<div style="display:flex;justify-content:space-between"><span>${l}</span><span>${v}</span></div>`;
-      $("#itot").innerHTML = ln("Taxable value", rupees(taxable)) + (igst ? ln("IGST", rupees(tax)) : ln("CGST", rupees(tax / 2)) + ln("SGST", rupees(tax / 2)))
+      $("#itot").innerHTML = ln("Items", rupees(itemsTotal)) + (other ? ln("Other charges", (other < 0 ? "−" : "") + rupees(Math.abs(other))) : "") + (igst ? ln("IGST", rupees(tax)) : ln("CGST", rupees(tax / 2)) + ln("SGST", rupees(tax / 2)))
         + (ro ? ln("Round off", `${ro > 0 ? "+" : "−"}${nf2.format(Math.abs(ro))}`) : "") + ln("<b>Invoice total</b>", `<b>${rupees(total)}</b>`);
     };
     const add = () => {
@@ -1521,6 +1530,18 @@ async function vNewEntry(kind) {
     form.igst.onchange = tot;
     if (form.round) form.round.onchange = tot;
     if (form.vtype) form.vtype.onchange = () => { if (sale && f.next_number[form.vtype.value] !== undefined) form.number.value = f.next_number[form.vtype.value] || ""; };
+    const addCharge = () => {
+      const top = Math.max(0, ...[...$("#items").querySelectorAll("[name=gst]")].map((x) => +x.value || 0));
+      const row = document.createElement("div"); row.className = "irow crow";
+      row.innerHTML = `<label>Charge (ledger in Tally)<input name="cled" list="clist" placeholder="e.g. Cartage, Loading, Packing"></label>
+        <div class="two"><label>Amount<input name="camt" type="number" step="0.01" inputmode="decimal" placeholder="minus for a discount"></label>
+          <label>GST %<select name="cgst">${f.slabs.map((g) => `<option value="${g}" ${g === top ? "selected" : ""}>${g}%</option>`).join("")}</select></label></div>
+        <button class="linkbtn" type="button" data-rm>Remove</button>`;
+      row.querySelector("[data-rm]").onclick = () => { row.remove(); tot(); };
+      row.oninput = tot; row.onchange = tot;
+      $("#charges").appendChild(row);
+    };
+    $("#addcharge").onclick = addCharge;
     $("#additem").onclick = add; add(); tot();
   } else if (jv) {
     const tot = () => {
@@ -1591,6 +1612,7 @@ async function vNewEntry(kind) {
       body.number = form.number.value; body.igst = form.igst.checked; body.round = form.round ? form.round.checked : false;
       body.ledger = form.ledger ? form.ledger.value : "";
       if (!sale) body.ref_date = form.ref_date.value;
+      body.charges = [...$("#charges").querySelectorAll(".crow")].map((r) => ({ ledger: r.querySelector("[name=cled]").value, amount: r.querySelector("[name=camt]").value, gst: r.querySelector("[name=cgst]").value })).filter((c) => c.ledger);
       body.lines = [...$("#items").querySelectorAll(".irow")].map((r) => ({ item: r.querySelector("[name=item]").value, qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value, amount: r.querySelector("[name=amount]").value, gst: r.querySelector("[name=gst]").value, godown: r.querySelector("[name=godown]").value })).filter((i) => i.item);
     } else if (jv) {
       body.lines = [...$("#jlines").querySelectorAll(".irow")].map((r) => ({ ledger: r.querySelector("[name=led]").value, side: r.querySelector("[name=side]").value, amount: r.querySelector("[name=amt]").value })).filter((x) => x.ledger);

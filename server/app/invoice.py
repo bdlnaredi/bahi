@@ -76,6 +76,14 @@ def form(cid, kind):
                 pinfo[l["name"]] = {"state": x.get("state", ""), "gstin": l["gstin"] or x.get("gstin", "")}
         acct = "|Sales Accounts|" if sales else "|Purchase Accounts|"
         item_ledgers = sorted([l["name"] for l in leds if acct in l["chain"]], key=lambda n: (-used.get(n, (0, 0))[0], n.lower()))
+        # other charges on the invoice (labour, loading, packing, cartage, freight...): any ledger that isn't a
+        # party, cash/bank, tax or sales/purchase ledger. Ones used on earlier invoices first, then likely names.
+        not_charge = ("|Sundry Debtors|", "|Sundry Creditors|", "|Cash-in-Hand|", "|Bank Accounts|", "|Bank OD A/c|",
+                      "|Duties & Taxes|", "|Sales Accounts|", "|Purchase Accounts|")
+        likely = re.compile(r"labou?r|loading|unloading|pack|cartage|freight|transport|hamali|insurance|delivery|courier|"
+                            r"discount|commission|handling|carriage|octroi|mandi", re.I)
+        charge_ledgers = sorted([l["name"] for l in leds if not any(x in l["chain"] for x in not_charge)],
+                                key=lambda n: (-used.get(n, (0, 0))[0], 0 if likely.search(n) else 1, n.lower()))
         taxes = []
         for l in leds:
             if "|Duties & Taxes|" in l["chain"] and _head(l):
@@ -131,7 +139,7 @@ def form(cid, kind):
         it["godown"] = where.get(it["name"], (godowns[0],))[0] if where.get(it["name"]) else ("Main Location" if "Main Location" in godowns else godowns[0])
     return {"kind": kind, "vtypes": vtypes, "today": date.today().isoformat(), "company_state": co_state,
             "parties": [p["name"] for p in parties], "party_info": pinfo, "item_ledgers": item_ledgers, "taxes": taxes,
-            "round_off": round_off, "items": items, "godowns": godowns, "next_number": nums, "slabs": SLABS}
+            "round_off": round_off, "charge_ledgers": charge_ledgers, "items": items, "godowns": godowns, "next_number": nums, "slabs": SLABS}
 
 
 def _rate_for(amount, qty):
@@ -222,13 +230,44 @@ def clean(cid, kind, d, f, num):
                 taxes[tl] = taxes.get(tl, 0.0) + t
     if not lines:
         raise ValueError("Add at least one item.")
+    charges = []
+    for x in d.get("charges") or []:
+        led = str(x.get("ledger") or "").strip()
+        if not led:
+            continue
+        if led not in f["charge_ledgers"]:
+            raise ValueError(f"{led} isn't a ledger Bahi can put on an invoice. Pick one from the list.")
+        try:
+            a = round(float(x.get("amount")), 2)
+        except (TypeError, ValueError):
+            raise ValueError(f"Enter the amount for {led}.")
+        if not a:
+            raise ValueError(f"Enter the amount for {led}.")
+        try:
+            g = float(x.get("gst") or 0)
+        except (TypeError, ValueError):
+            raise ValueError(f"Pick the GST rate for {led}.")
+        if g not in SLABS:
+            raise ValueError(f"{g}% isn't a GST rate.")
+        charges.append({"ledger": led, "amount": a, "gst": g})       # a negative amount is a deduction (discount)
+        if g:
+            parts = [("i", g, a * g / 100)] if other_state else [("c", g / 2, a * g / 200), ("s", g / 2, a * g / 200)]
+            for head, r, t in parts:
+                tl = _pick_tax(f, head, r)
+                if not tl:
+                    raise ValueError(f"There's no {HEADS[head]} ledger under Duties & Taxes in Tally. Create one in Tally first.")
+                taxes[tl] = taxes.get(tl, 0.0) + t
     taxes = [{"ledger": k, "amount": round(v, 2)} for k, v in taxes.items() if round(v, 2)]
-    taxable = round(sum(l["amount"] for l in lines), 2)
-    total = round(taxable + sum(t["amount"] for t in taxes), 2)
+    items_total = round(sum(l["amount"] for l in lines), 2)
+    taxable = round(items_total + sum(c_["amount"] for c_ in charges if c_["gst"]), 2)
+    total = round(items_total + sum(c_["amount"] for c_ in charges) + sum(t["amount"] for t in taxes), 2)
+    if total <= 0:
+        raise ValueError("The invoice total must be more than zero.")
     rnd = 0.0
     if d.get("round") and f["round_off"]:
         rnd = round(round(total) - total, 2)
-    out = {"party": party, "lines": lines, "taxes": taxes, "igst": other_state, "taxable": taxable,
+    out = {"party": party, "lines": lines, "charges": charges, "items_total": items_total, "taxes": taxes,
+           "igst": other_state, "taxable": taxable,
            "round_off": rnd, "round_ledger": f["round_off"] if rnd else "", "amount": round(total + rnd, 2),
            "party_state": pstate, "company_state": f["company_state"],
            "party_gstin": f["party_info"].get(party, {}).get("gstin", "")}
@@ -297,6 +336,8 @@ def body_xml(e):
                  f"<AMOUNT>{amt(-a)}</AMOUNT><ACTUALQTY>{q}</ACTUALQTY><BILLEDQTY>{q}</BILLEDQTY></BATCHALLOCATIONS.LIST>"
                  f"<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME>{escape(l['ledger'])}</LEDGERNAME><ISDEEMEDPOSITIVE>{deemed}</ISDEEMEDPOSITIVE>"
                  f"<AMOUNT>{amt(-a)}</AMOUNT></ACCOUNTINGALLOCATIONS.LIST></ALLINVENTORYENTRIES.LIST>")
+    for ch in d.get("charges", []):
+        body += line("LEDGERENTRIES.LIST", ch["ledger"], -sign * ch["amount"])
     for t in d["taxes"]:
         body += line("LEDGERENTRIES.LIST", t["ledger"], -sign * t["amount"])
     if d.get("round_off"):

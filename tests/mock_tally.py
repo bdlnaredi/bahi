@@ -33,6 +33,7 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Output CGST": ("Duties & Taxes", 0), "Output SGST": ("Duties & Taxes", 0),
     "Input CGST": ("Duties & Taxes", 0), "Input SGST": ("Duties & Taxes", 0),
     "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
+    "Cartage & Loading": ("Indirect Incomes", 0), "Packing Charges": ("Indirect Expenses", 0), "Labour Charges": ("Direct Expenses", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
     "Discount Received": ("Indirect Incomes", 0), "Capital": ("Capital Account", 0),
     "Commission Received": ("Commission Earned", 0),
