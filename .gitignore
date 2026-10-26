@@ -15,3 +15,5 @@ android/build/
 android/app/build/
 android/local.properties
 *.keystore
+agent/TallySync.running
+agent/TallySync.skipped

@@ -3,7 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.4"
+$AgentVersion = "3.5"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -78,13 +78,39 @@ Self-Update
 
 # One sync at a time: a run that starts while another is still going (a long first sync, Sync-Now pressed)
 # leaves quietly, so Tally isn't asked for everything twice at once
-$script:Mutex = New-Object System.Threading.Mutex($false, "Local\BahiTallySync")
+$script:Mutex = New-Object System.Threading.Mutex($false, "Global\BahiTallySync")
+$RunFile = Join-Path $Here "TallySync.running"
 $owned = $false
 try { $owned = $script:Mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
 if (-not $owned) {
-    if ($Force -or $Verbose) { Log "Another sync is still running on this PC - this one is skipped." "Yellow" }
-    exit 0
+    # A run that has gone on far longer than any sync takes is stuck (the PC slept mid-sync, the network
+    # dropped): stop it and take over, so one stuck run can't stop syncing for good
+    $run0 = $null
+    try { $run0 = Get-Content $RunFile -Raw | ConvertFrom-Json } catch {}
+    $age = if ($run0) { ((Get-Date) - [datetime]::Parse($run0.started, [System.Globalization.CultureInfo]::InvariantCulture)).TotalMinutes } else { 0 }
+    if ($run0 -and $age -gt 90 -and [int]$run0.pid -ne $PID) {
+        Log ("The sync started " + [math]::Round($age) + " minutes ago is stuck - stopping it and starting again.") "Yellow"
+        try { Stop-Process -Id ([int]$run0.pid) -Force -ErrorAction Stop } catch {}
+        try { $owned = $script:Mutex.WaitOne(15000) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+    }
+    if (-not $owned) {
+        # say so in the log now and then (not every 2 minutes), so a long wait can be seen
+        $skipFile = Join-Path $Here "TallySync.skipped"
+        $lastSkip = 0; try { $lastSkip = [double](Get-Content $skipFile -Raw) } catch {}
+        $nowS = [double](Get-Date -UFormat %s)
+        if ($Force -or $Verbose -or ($nowS - $lastSkip -gt 1800)) {
+            $since0 = if ($run0) { " (running since " + $run0.started + ")" } else { "" }
+            Log ("Another sync is still running on this PC" + $since0 + " - this one is skipped.") "Yellow"
+            try { Set-Content $skipFile $nowS } catch {}
+        }
+        exit 0
+    }
 }
+function End-Run([int]$code) {
+    try { Remove-Item $RunFile -ErrorAction SilentlyContinue } catch {}
+    exit $code
+}
+try { @{ pid = $PID; started = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture) } | ConvertTo-Json | Set-Content $RunFile } catch {}
 
 function Esc([string]$s) { return [System.Security.SecurityElement]::Escape($s) }
 # Tally's own date style (1-Apr-2026) - understood by every TallyPrime release
@@ -362,9 +388,9 @@ function Read-Companies {
 
 # ------------------------------------------------------------------ main
 try { $companies = @(Read-Companies) }
-catch { Log ("Tally is not reachable on $Tally - is TallyPrime open? (" + $_.Exception.Message + ")") "Yellow"; exit 3 }
+catch { Log ("Tally is not reachable on $Tally - is TallyPrime open? (" + $_.Exception.Message + ")") "Yellow"; End-Run 3 }
 
-if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yellow"; exit 3 }
+if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yellow"; End-Run 3 }
 
 function Send-Heartbeat {
     try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }); agent = $AgentVersion }) } catch {}
@@ -390,7 +416,7 @@ try {
         Send-Heartbeat
         if ($sched.why -eq "paused" -and ($Force -or $Verbose)) { Log "Syncing is paused in the app (Reports, Settings). Nothing was sent." "Yellow" }
         elseif ($Verbose) { Log ("Not syncing now (" + $sched.why + ")") }
-        exit 0
+        End-Run 0
     }
     if ($sched.why -eq "asked") { $script:Asked = $true; Log "Sync asked for in the app - checking Tally for changes ..." }
 } catch {
@@ -710,4 +736,4 @@ foreach ($co in $companies) {
 
 Send-Heartbeat
 if ($script:Asked) { Log ("Sync finished for " + $companies.Count + " compan" + $(if ($companies.Count -eq 1) { "y" } else { "ies" }) + " open in Tally.") }
-exit $exitCode
+End-Run $exitCode
