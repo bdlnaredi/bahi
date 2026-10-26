@@ -100,6 +100,19 @@ To update: **Compose Pull**, then **Compose Up**.
 
 ## 4. Install the sync agent on the Tally PC
 
+### Bahi Sync app (recommended)
+
+1. On the Tally PC, download **[BahiSync.exe](https://github.com/bdlnaredi/bahi/releases/download/windows/BahiSync.exe)** and put it in a folder of its own, for example `C:\Bahi` (if you already use the batch-file setup, put it in that same folder: it picks up your settings).
+2. Double-click it. Windows may show *Windows protected your PC*: click **More info → Run anyway** (the app isn't signed with a paid certificate).
+3. The first time, it asks for the **Bahi server address** and the **sync token** (`SYNC_TOKEN` from Unraid). Tally's address and the sync start date can stay as they are. Click **Test connection**, then **Save**.
+
+Bahi Sync then sits in the system tray (bottom-right of the taskbar), starts with Windows, and checks Tally every 2 minutes. Its window shows whether Tally and the server can be reached, the last sync and the log, with **Sync now**, **Pause**, **Settings** and **Tools** (Diagnose, Save a voucher or stock figures for a problem report, a full resend, open the log or folder). Closing the window keeps it syncing; to stop, right-click the tray icon → **Exit**.
+
+It replaces the batch files and the Windows scheduled task (it removes the old task itself). The sync files inside it keep updating themselves from your server, and the app offers its own new versions in the window.
+
+### Or: the batch-file setup
+
+
 1. On the Tally PC, download **[the agent folder](https://github.com/bdlnaredi/bahi/tree/main/agent)**. The easiest way is **Code → Download ZIP** on the repository's main page, then copy the `agent` folder out of the zip.
 2. Put the files in a permanent folder, for example `C:\Bahi`. Don't run them from Downloads. The folder should contain:
    ```
