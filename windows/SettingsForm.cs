@@ -26,7 +26,7 @@ namespace BahiSync
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(560, 470);
+            ClientSize = new Size(560, 560);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             var t = new FlowLayoutPanel();

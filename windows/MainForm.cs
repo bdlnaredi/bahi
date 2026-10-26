@@ -235,7 +235,10 @@ namespace BahiSync
             if (log.TextLength > 200000) { log.Text = string.Join("\r\n", lines) + "\r\n"; log.SelectionStart = log.TextLength; log.ScrollToCaret(); }
             if (Notable.IsMatch(line))
             {
-                lastLbl.Text = "Last: " + line;
+                // the plain-words part only: Windows' technical text comes after "(Exception ..." or "Exception calling"
+                string shortLine = Regex.Replace(line, @"\s*\((Exception|The remote server|Unable to)[\s\S]*$", "");
+                if (shortLine.Length > 150) shortLine = shortLine.Substring(0, 147) + "...";
+                lastLbl.Text = "Last: " + shortLine;
                 lastLbl.ForeColor = Regex.IsMatch(line, "failed|not reachable|didn't|stuck|no company", RegexOptions.IgnoreCase) ? Color.Firebrick : Color.Black;
             }
         }
