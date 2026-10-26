@@ -2,8 +2,9 @@
 # Runs every few minutes from Windows Task Scheduler (set up by Setup.bat).
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
-param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.7"
+#         TallySync.ps1 -Now       check Tally for changes right away (the Bahi Sync app's Sync now)
+param([switch]$Force, [switch]$Verbose, [switch]$Now)
+$AgentVersion = "3.8"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -62,6 +63,7 @@ function Self-Update {
     $env:BAHI_JUST_UPDATED = "1"
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $Here "TallySync.ps1"))
     if ($Force) { $argv += "-Force" }
+    if ($Now) { $argv += "-Now" }
     if ($Verbose) { $argv += "-Verbose" }
     $exe = (Get-Process -Id $PID).Path
     # hand the one-sync-at-a-time lock to the new version before starting it
@@ -415,7 +417,7 @@ function Update-Task {
 }
 Update-Task
 try {
-    $sched = Server-Json "GET" ("/agent/schedule?force=" + $(if ($Force) { "1" } else { "0" })) $null
+    $sched = Server-Json "GET" ("/agent/schedule?force=" + $(if ($Force -or $Now) { "1" } else { "0" })) $null
     if (-not $sched.run) {
         Send-Heartbeat
         if ($sched.why -eq "paused" -and ($Force -or $Verbose)) { Log "Syncing is paused in the app (Reports, Settings). Nothing was sent." "Yellow" }
@@ -423,6 +425,7 @@ try {
         End-Run 0
     }
     if ($sched.why -eq "asked") { $script:Asked = $true; Log "Sync asked for in the app - checking Tally for changes ..." }
+    elseif ($Now) { $script:Asked = $true; Log "Sync asked for on this PC - checking Tally for changes ..." }
 } catch {
     # an older server without sync settings: carry on as before
 }

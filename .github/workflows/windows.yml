@@ -1,0 +1,59 @@
+name: Windows app
+
+on:
+  push:
+    branches: [main]
+    paths: ["windows/**", "agent/**", ".github/workflows/windows.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build BahiSync.exe
+        shell: pwsh
+        run: |
+          $n = "${{ github.run_number }}"
+          Set-Content windows/BuildInfo.cs "namespace BahiSync { static class BuildInfo { public const int Number = $n; public const string Version = `"1.$n`"; } }"
+          # the C# compiler that comes with Windows (.NET Framework 4), so nothing is downloaded
+          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          $res = @()
+          foreach ($f in "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1") { $res += "/resource:agent\$f,$f" }
+          & $csc /nologo /target:winexe /optimize+ /out:BahiSync.exe /win32icon:windows\bahi.ico `
+            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll `
+            @res windows\*.cs
+          if ($LASTEXITCODE -ne 0) { throw "compile failed" }
+          Get-Item BahiSync.exe | Format-List Name, Length
+
+      - name: Smoke test (starts, puts the sync files out, stays up)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory t | Out-Null
+          Copy-Item BahiSync.exe t\
+          $p = Start-Process -FilePath (Resolve-Path t\BahiSync.exe) -ArgumentList "--tray" -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "BahiSync.exe exited by itself (code $($p.ExitCode))" }
+          Get-ChildItem t | Format-Table Name, Length
+          foreach ($f in "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1") { if (-not (Test-Path "t\$f")) { throw "$f was not put out" } }
+          Stop-Process -Id $p.Id -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BahiSync
+          path: BahiSync.exe
+
+      - name: Publish to the "windows" release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "Bahi Sync for the Tally PC, version 1.${{ github.run_number }}. Download BahiSync.exe into the Bahi folder (for example C:\Bahi) and run it.`n`nversionCode: ${{ github.run_number }}"
+          gh release view windows *> $null
+          if ($LASTEXITCODE -eq 0) { gh release edit windows --title "Windows app 1.${{ github.run_number }}" --notes $notes }
+          else { gh release create windows --title "Windows app 1.${{ github.run_number }}" --notes $notes --latest=false }
+          gh release upload windows BahiSync.exe --clobber
