@@ -15,7 +15,8 @@ API = os.environ.get("TELEGRAM_API", "https://api.telegram.org")
 _lock = threading.Lock()
 
 DEFAULTS = {"token": "", "chat_id": "", "daily": True, "time": "09:00", "alert_min": 50000,
-            "alerts": True, "last_daily": "", "alerted": [], "stock_alerts": True, "stock_state": {}}
+            "alerts": True, "last_daily": "", "alerted": [], "stock_alerts": True, "stock_state": {}, "questions": True,
+            "offset": 0}
 
 
 def load():
@@ -37,13 +38,14 @@ def public(s):
     """Settings for the app screen - the bot token is never sent back, only whether one is set."""
     return {"configured": bool(s["token"] and s["chat_id"]), "has_token": bool(s["token"]),
             "chat_id": s["chat_id"], "daily": s["daily"], "time": s["time"],
-            "alert_min": s["alert_min"], "alerts": s["alerts"], "stock_alerts": s["stock_alerts"]}
+            "alert_min": s["alert_min"], "alerts": s["alerts"], "stock_alerts": s["stock_alerts"],
+            "questions": s.get("questions", True)}
 
 
-def _call(token, method, params):
+def _call(token, method, params, timeout=15):
     url = f"{API}/bot{token}/{method}"
     data = urllib.parse.urlencode(params).encode()
-    with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=15) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 

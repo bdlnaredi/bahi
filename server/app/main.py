@@ -27,6 +27,7 @@ import tally_parse as tp  # noqa: E402
 import pdf  # noqa: E402
 import export  # noqa: E402
 import notify  # noqa: E402
+import telebot  # noqa: E402
 import backup  # noqa: E402
 import users  # noqa: E402
 import entries  # noqa: E402
@@ -40,7 +41,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.4.4"
+APP_VERSION = "3.5.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -186,13 +187,14 @@ class Handler(BaseHTTPRequestHandler):
                 for k in ("chat_id", "time"):
                     if k in data:
                         s[k] = str(data[k]).strip()
-                for k in ("daily", "alerts", "stock_alerts"):
+                for k in ("daily", "alerts", "stock_alerts", "questions"):
                     if k in data:
                         s[k] = bool(data[k])
                 if "alert_min" in data:
                     s["alert_min"] = max(0, float(data["alert_min"] or 0))
                 if data.get("off"):
                     s["token"], s["chat_id"] = "", ""
+                s["offset"] = notify.load().get("offset", 0)      # the question listener moves this on
                 notify.save(s)
                 return self.send_json(notify.public(s))
             if path == "/api/telegram/find" and method == "POST":
@@ -867,6 +869,7 @@ def main():
     os.makedirs(STAGING, exist_ok=True)
     store.init()
     notify.start()
+    telebot.start()
     backup.start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     try:

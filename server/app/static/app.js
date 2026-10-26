@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.4.4";
+const APP_VERSION = "3.5.0";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -1136,6 +1136,7 @@ async function vSettings() {
         <label><span><input type="checkbox" id="tgdaily" ${tg.daily ? "checked" : ""}> Daily summary at</span><input type="time" id="tgtime" value="${h(tg.time || "09:00")}"></label>
         <label><span><input type="checkbox" id="tgalerts" ${tg.alerts ? "checked" : ""}> Alert me when a payment of at least</span><input type="number" id="tgmin" min="0" step="1000" value="${tg.alert_min}"></label>
         <label><span><input type="checkbox" id="tgstock" ${tg.stock_alerts !== false ? "checked" : ""}> Alert me when stock falls below its minimum or goes negative</span></label>
+        <label><span><input type="checkbox" id="tgq" ${tg.questions !== false ? "checked" : ""}> Answer ledger questions: send the bot a party's name (any spelling) and get their ledger, with a PDF on request</span></label>
         <div class="actions" style="padding:0"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" id="tgtest">Send summary now</button><button class="btn danger" type="button" id="tgoff">Turn off</button></div>
         <div class="msg" id="tgmsg" role="status"></div></form>` : `<div class="info" style="padding-top:2px">
         <div>Get yesterday's sales, collections, cash and bank and overdue dues every morning, and a message when a big payment comes in.</div></div>
@@ -1188,7 +1189,7 @@ async function vSettings() {
   if ($("#tgf")) {
     $("#tgf").onsubmit = async (e) => {
       e.preventDefault();
-      try { await post("/api/telegram", { daily: $("#tgdaily").checked, time: $("#tgtime").value, alerts: $("#tgalerts").checked, alert_min: $("#tgmin").value, stock_alerts: $("#tgstock").checked });
+      try { await post("/api/telegram", { daily: $("#tgdaily").checked, time: $("#tgtime").value, alerts: $("#tgalerts").checked, alert_min: $("#tgmin").value, stock_alerts: $("#tgstock").checked, questions: $("#tgq").checked });
         $("#tgmsg").textContent = "Saved."; } catch (err) { $("#tgmsg").textContent = err.message; }
     };
     $("#tgtest").onclick = async () => { $("#tgmsg").textContent = "Sending";

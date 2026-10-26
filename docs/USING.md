@@ -253,6 +253,7 @@ Bahi can message you on Telegram:
 
 - **Every morning** (09:00 by default): yesterday's sales, collections and payments, sales so far this month, cash and bank, and your biggest overdue parties.
 - **When a big payment comes in**: a message for every receipt above the amount you choose, soon after Tally syncs.
+- **When you ask about a party**: send the bot a party's name, or part of it, spelt any way ("sarma", "gupta hardwre", "shri ganesh"). If one ledger fits, it replies with that ledger: balance, this month's opening, debits and credits, the latest entries and pending bills (overdue first). If several fit, it lists them as buttons to pick from. Under each ledger are **This month PDF** and **This year PDF** buttons that send the statement as a PDF, ready to forward. `/summary` sends the morning summary on demand, `/help` explains. Only your own chat gets answers; anyone else who finds the bot gets nothing. Turn it off with **Answer ledger questions** in Settings.
 
 To set it up, in **Reports → Settings**:
 
