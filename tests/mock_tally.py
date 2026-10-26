@@ -544,9 +544,13 @@ class H(BaseHTTPRequestHandler):
             if ctype == "Voucher":
                 light = "AllLedgerEntries" not in req
                 picked = set() if os.environ.get("NO_GUID_FILTER") == "1" else set(re.findall(r'\$GUID = "([^"]+)"', req))
+                # EXTRA_OUT=1: the date-filtered list also carries a voucher from just before the period
+                extra_out = os.environ.get("EXTRA_OUT") == "1" and not light and not picked and f
                 for v in [x for x in VOUCHERS if not hidden(x)]:
                     if picked and v["guid"] not in picked:
                         continue
+                    if extra_out and v["date"] < f and v is max((x for x in VOUCHERS if x["date"] < f), key=lambda x: x["date"], default=None):
+                        out += xml_voucher(v).replace('<TALLYMESSAGE xmlns:UDF="TallyUDF">', "").replace("</TALLYMESSAGE>", "")
                     if f <= v["date"] <= t:
                         if light:
                             out += (f'<VOUCHER><DATE TYPE="Date">{v["date"].strftime("%Y%m%d")}</DATE><GUID>{v["guid"]}</GUID><ALTERID> {v["alterid"]}</ALTERID>'

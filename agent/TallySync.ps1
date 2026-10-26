@@ -4,7 +4,7 @@
 #         TallySync.ps1 -Force     always send everything
 #         TallySync.ps1 -Now       check Tally for changes right away (the Bahi Sync app's Sync now)
 param([switch]$Force, [switch]$Verbose, [switch]$Now)
-$AgentVersion = "3.8"
+$AgentVersion = "3.9"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -37,7 +37,9 @@ function Self-Update {
         $wc.Headers.Add("Authorization", "Bearer " + $Cfg.SyncToken)
         $u = $wc.DownloadString($Server + "/agent/update") | ConvertFrom-Json
     } catch { return }                                   # an older server without updates
-    if (-not $u.version -or $u.version -eq $AgentVersion -or -not $u.auto) { return }
+    if (-not $u.version -or -not $u.auto) { return }
+    # only ever move forward: a server not updated yet must not swap newer files back to its older ones
+    try { if ([version]$u.version -le [version]$AgentVersion) { return } } catch { if ($u.version -eq $AgentVersion) { return } }
     $tmp = Join-Path $Here (".update-" + $PID)          # this run's own folder
     try {
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
@@ -505,10 +507,10 @@ foreach ($co in $companies) {
         $deepCheck = $false
         if ($unchanged -and -not $Force) {
             $last = 0; try { $last = [double]$deep[$deepKey] } catch {}
-            $now = [double](Get-Date -UFormat %s)
-            if ($now - $last -lt 1800) { continue }
+            $nowSec = [double](Get-Date -UFormat %s)
+            if ($nowSec - $last -lt 1800) { continue }
             $deepCheck = $true
-            $deep[$deepKey] = $now
+            $deep[$deepKey] = $nowSec
             try { $deep | ConvertTo-Json | Set-Content $deepFile } catch {}
         }
         $t0 = Get-Date
@@ -658,7 +660,7 @@ foreach ($co in $companies) {
             $want = if ($expected) { [int]$expected[$key] } else { -1 }
             if ($want -gt 0) { $expTotal += $want }
 
-            $best = $null; $bestIn = -1; $bestGood = $false
+            $best = $null; $bestIn = -1; $bestGood = $false; $why = ""
             # Once the Day Book is known to ignore dates (it then sends Tally's current day for every month, which
             # looks right for the current month), it is never used again. The collection is asked twice if busy.
             $ways = if ($method -eq "collection") { @("collection", "collection") } else { @("daybook", "collection") }
@@ -667,7 +669,11 @@ foreach ($co in $companies) {
                     $raw = if ($how -eq "daybook") { Tally-Raw (DayBook-Xml $co.Name $a $b) } else { Tally-Raw (VchCollection-Xml $co.Name $a $b $VchFields) }
                 } catch { Start-Sleep -Seconds 5; continue }
                 $c = Check-Vouchers $raw $a $b
-                $good = $c.Ok -and $c.Out -eq 0 -and ($c.In -eq 0 -or $c.Entries) -and ($want -lt 0 -or $c.In -ge $want)
+                # The Day Book must not send other days (that is how a Day Book ignoring dates shows); the
+                # date-filtered collection may carry other bits, and the server keeps only this month's vouchers
+                $outOk = ($how -ne "daybook") -or ($c.Out -eq 0)
+                $good = $c.Ok -and $outOk -and ($c.In -eq 0 -or $c.Entries) -and ($want -lt 0 -or $c.In -ge $want)
+                if (-not $good) { $why = "{0}: got {1}, outside the month {2}, entries {3}" -f $how, $c.In, $c.Out, $(if ($c.Entries) { "yes" } else { "no" }) }
                 if ($c.Ok -and $c.Entries -and $c.In -gt $bestIn) { $best = $raw; $bestIn = $c.In }
                 if ($good) {
                     $bestGood = $true
@@ -681,7 +687,7 @@ foreach ($co in $companies) {
             }
             # only a complete month is sent: a short or failed month keeps what the server already has
             if ($best -and $bestGood) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn); Send-Einv $run $co.Name $a $b $null; $sentMonths += $key }
-            else { $short += ("{0}: {1} of {2}" -f $key, [math]::Max(0, $bestIn), $want) }
+            else { $short += ("{0}: {1} of {2}{3}" -f $key, [math]::Max(0, $bestIn), $want, $(if ($why) { " (" + $why + ")" } else { "" })) }
         }
         if ($method -ne $script:VchMethod) { try { Set-Content $MethodFile $method } catch {} }
         $script:VchMethod = $method
