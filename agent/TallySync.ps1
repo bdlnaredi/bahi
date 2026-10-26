@@ -3,7 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.5"
+$AgentVersion = "3.6"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -37,7 +37,7 @@ function Self-Update {
         $u = $wc.DownloadString($Server + "/agent/update") | ConvertFrom-Json
     } catch { return }                                   # an older server without updates
     if (-not $u.version -or $u.version -eq $AgentVersion -or -not $u.auto) { return }
-    $tmp = Join-Path $Here ".update"
+    $tmp = Join-Path $Here (".update-" + $PID)          # this run's own folder
     try {
         if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
         New-Item -ItemType Directory -Path $tmp -Force | Out-Null
@@ -64,6 +64,9 @@ function Self-Update {
     if ($Force) { $argv += "-Force" }
     if ($Verbose) { $argv += "-Verbose" }
     $exe = (Get-Process -Id $PID).Path
+    # hand the one-sync-at-a-time lock to the new version before starting it
+    try { Remove-Item $RunFile -ErrorAction SilentlyContinue } catch {}
+    try { $script:Mutex.ReleaseMutex() } catch {}
     & $exe @argv
     exit $LASTEXITCODE
 }
@@ -74,7 +77,6 @@ $fyStartYear = if ($today.Month -ge 4) { $today.Year } else { $today.Year - 1 }
 $FromDate = if ($Cfg.FromDate) { [datetime]::ParseExact($Cfg.FromDate, "yyyy-MM-dd", $null) } else { Get-Date -Year $fyStartYear -Month 4 -Day 1 }
 $ToDate   = Get-Date -Year ($fyStartYear + 1) -Month 3 -Day 31
 $FromDate = $FromDate.Date; $ToDate = $ToDate.Date
-Self-Update
 
 # One sync at a time: a run that starts while another is still going (a long first sync, Sync-Now pressed)
 # leaves quietly, so Tally isn't asked for everything twice at once
@@ -111,6 +113,8 @@ function End-Run([int]$code) {
     exit $code
 }
 try { @{ pid = $PID; started = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture) } | ConvertTo-Json | Set-Content $RunFile } catch {}
+# updating the files happens only here, inside the lock, so two runs can't update at the same time
+Self-Update
 
 function Esc([string]$s) { return [System.Security.SecurityElement]::Escape($s) }
 # Tally's own date style (1-Apr-2026) - understood by every TallyPrime release

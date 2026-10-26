@@ -17,3 +17,4 @@ android/local.properties
 *.keystore
 agent/TallySync.running
 agent/TallySync.skipped
+agent/.update-*/
