@@ -60,11 +60,15 @@ jobs:
           "2026-10-26 18:54:15  Syncing SHIV SHAKTI BHANDAR - changed months: 2026-10 ...`r`n2026-10-26 18:56:09  Done: 659 ledgers, 11 stock items, 38095 vouchers in 500 s" | Set-Content s2\TallySync.log
           $p = Start-Process -FilePath (Resolve-Path s2\BahiSync.exe) -PassThru; Start-Sleep -Seconds 12; Shot "2-main"; Stop-Process -Id $p.Id -Force
 
-      - uses: actions/upload-artifact@v4
+      - name: Keep the screenshots on a draft release (not shown publicly)
         continue-on-error: true
-        with:
-          name: screenshots
-          path: shots/
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ci-screenshots *> $null
+          if ($LASTEXITCODE -ne 0) { gh release create ci-screenshots --draft --title "CI screenshots" --notes "Screenshots from the Windows build, for checking the layout." }
+          gh release upload ci-screenshots (Get-ChildItem shots\*.png).FullName --clobber
 
       - uses: actions/upload-artifact@v4
         with:
