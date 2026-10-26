@@ -40,7 +40,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.4.3"
+APP_VERSION = "3.4.4"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -469,17 +469,28 @@ class Handler(BaseHTTPRequestHandler):
             vouchers.append(v)
         if skipped:
             raise ValueError("Some voucher data from Tally could not be read: " + skipped[0])
-        if not isinstance(meta.get("guids"), list):      # month or full sync: every month sent must be complete
-            store.check_complete(meta["company"], vouchers,
-                                 meta.get("months") if isinstance(meta.get("months"), list) else None, meta["from"], meta["to"])
-        return store.ingest(meta["company"], meta["from"], meta["to"], meta.get("alt_vch", ""),
+        months = meta.get("months") if isinstance(meta.get("months"), list) else None
+        held = []
+        if not isinstance(meta.get("guids"), list):      # month or full sync: a month that would lose vouchers keeps its copy
+            held = store.check_complete(meta["company"], vouchers, months, meta["from"], meta["to"])
+        if held:
+            keep = {h.split(":")[0] for h in held}
+            if months is None:                            # a full sync becomes every month except those
+                months = [m for m in store.month_list(meta["from"], meta["to"]) if m not in keep]
+            else:
+                months = [m for m in months if m not in keep]
+            meta["alt_vch"] = ""                          # not complete: the Tally PC looks again next time
+        res = store.ingest(meta["company"], meta["from"], meta["to"], meta.get("alt_vch", ""),
                             meta.get("alt_mst", ""), parts["groups"], parts["vtypes"],
                             parts["ledgers"], parts["stock"], vouchers, parts["bills_rec"], parts["bills_pay"],
                             parts["company"].get(meta["company"]) or next(iter(parts["company"].values()), {}),
                             parts["ledger_x"], parts["stock_x"],
-                            meta.get("months") if isinstance(meta.get("months"), list) else None,
+                            months,
                             [str(g) for g in meta["guids"]] if isinstance(meta.get("guids"), list) else None,
                             parts["stock_at"], parts["stock_godown"], parts["ledger_at"])
+        if held:
+            res["held"] = "; ".join(held)
+        return res
 
     # ------------------------------------------------------------ app endpoints
     def api(self, method, path, q):

@@ -1,6 +1,6 @@
 /* Bahi — phone app for Tally data synced to your server */
 "use strict";
-const APP_VERSION = "3.4.3";
+const APP_VERSION = "3.4.4";
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
@@ -1096,6 +1096,9 @@ async function vCheck() {
             <div class="meta">${i.months.length > 1 ? `${fdate(i.from)} to ${fdate(i.to)}` : mon(i.months[0])}: Bahi's entries differ from Tally's by this amount${i.refetched ? `. Still different after fetching that month again ${ago(i.refetched)}` : ". Fetching that month again"}</div></div>
             <div class="end">${money(Math.abs(i.amount))}</div><span class="chev"></span></a>`).join("")}`}
     </section>
+    ${(d.unsent || []).length ? `<section class="page"><div class="block-title"><span>Listed by Tally but not sent</span><span>${d.unsent.length}</span></div>
+      <div class="info">Tally's voucher list has ${d.unsent.length === 1 ? "this voucher" : "these vouchers"}, but Tally doesn't send ${d.unsent.length === 1 ? "it" : "them"} when asked (usually a deleted or damaged voucher in Tally). ${d.unsent.length === 1 ? "It doesn't" : "They don't"} hold up syncing. To check, open the Day Book in Tally for the date shown.</div>
+      ${d.unsent.map((u) => `<div class="row" style="cursor:default"><div class="main"><div class="name">${fdate(u.date)}</div><div class="meta">Tally ID ${h(u.guid)}</div></div></div>`).join("")}</section>` : ""}
     <p class="subtitle">${d.unbalanced ? `${d.unbalanced} vouchers had debits and credits that didn't match when they were synced. Open one to compare it with Tally, and report the voucher types below if they look wrong.` : "Every synced voucher's debits and credits match."}</p>
     ${d.groups.map((g) => `<section class="page"><div class="block-title"><span>${h(g.vtype)}</span><span>${g.count} of ${g.of}</span></div>
       ${g.examples.map((v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party || v.vtype)}</div>

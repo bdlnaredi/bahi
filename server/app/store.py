@@ -2,6 +2,7 @@
 import json
 import os
 import sqlite3
+import sys
 import threading
 import time
 from datetime import date, timedelta
@@ -55,6 +56,8 @@ CREATE INDEX IF NOT EXISTS ix_vg_v ON vgodown(voucher_id);
 CREATE INDEX IF NOT EXISTS ix_vg_i ON vgodown(item);
 CREATE TABLE IF NOT EXISTS stock_godown_open(company_id INT, item TEXT, godown TEXT, qty REAL);
 CREATE TABLE IF NOT EXISTS ledger_at(company_id INT, day TEXT, ledger TEXT, closing REAL, PRIMARY KEY(company_id, day, ledger));
+CREATE TABLE IF NOT EXISTS unsent(company_id INT, guid TEXT, alterid INT, date TEXT, seen REAL, times INT DEFAULT 1,
+  PRIMARY KEY(company_id, guid));
 CREATE TABLE IF NOT EXISTS heal(company_id INT, month TEXT, at REAL, diff REAL, PRIMARY KEY(company_id, month));
 CREATE TABLE IF NOT EXISTS stock_at(company_id INT, day TEXT, item TEXT, qty REAL, value REAL, PRIMARY KEY(company_id, day, item));
 CREATE TABLE IF NOT EXISTS bill(company_id INT, kind TEXT, party TEXT, ref TEXT, date TEXT, due TEXT, amount REAL);
@@ -289,6 +292,10 @@ def _month_range(m, d_from, d_to):
 TOL = 0.5          # rupees: rounding
 
 
+def month_list(a, b):
+    return _months_between(a, b)
+
+
 def _months_between(a, b):
     """YYYY-MM of every month from day a to day b."""
     out, y, m = [], int(a[:4]), int(a[5:7])
@@ -368,28 +375,73 @@ EXPECT = {}       # company -> (when, {YYYY-MM: vouchers Tally listed}) from the
 
 
 def check_complete(company, vouchers, months=None, d_from=None, d_to=None):
-    """Refuse a sync that would replace a month with fewer vouchers than Tally listed for it a moment ago
-    (a busy or misbehaving Tally can send part of a month). Nothing is changed when it fails."""
-    when, counts = EXPECT.get(company, (0, None))
+    """Months of this sync that must keep the copy already here, as "YYYY-MM: got of listed": a month is only
+    replaced when every voucher Tally listed for it a moment ago, and that Bahi already holds, came back (a busy
+    or misbehaving Tally can send part of a month). A voucher Tally lists but has never sent (deleted or damaged
+    in Tally) doesn't hold the month up: it is remembered and, once missing from two syncs, left out of later
+    comparisons and shown on the Sync check page."""
+    when, counts, listed = EXPECT.get(company, (0, None, None))
     if not counts or time.time() - when > 3 * 3600:
-        return
-    got = {}
-    for v in vouchers:
-        got[v["date"][:7]] = got.get(v["date"][:7], 0) + 1
+        return []
     check = months if months is not None else [m for m in counts if (not d_from or m >= d_from[:7]) and (not d_to or m <= d_to[:7])]
-    short = [f"{m}: {got.get(m, 0)} of {counts[m]}" for m in sorted(check) if got.get(m, 0) < counts.get(m, 0)]
-    if short:
-        raise ValueError("Tally sent fewer vouchers than it listed, so nothing was changed (" + "; ".join(short[:4])
-                         + "). The Tally PC tries again at the next sync.")
+    got, got_n = {}, {}
+    for v in vouchers:
+        m = v["date"][:7]
+        got_n[m] = got_n.get(m, 0) + 1
+        if v.get("guid"):
+            got.setdefault(m, set()).add(v["guid"])
+    short, unsent = [], []
+    with _lock, conn() as c:
+        r = c.execute("SELECT id FROM company WHERE name=?", (company,)).fetchone()
+        cid = r["id"] if r else None
+        for m in sorted(check):
+            want = listed.get(m, {})
+            if len(want) < counts.get(m, 0):           # vouchers without a GUID: only counts can be compared
+                if got_n.get(m, 0) < counts.get(m, 0):
+                    short.append(f"{m}: {got_n.get(m, 0)} of {counts[m]}")
+                continue
+            missing = set(want) - got.get(m, set())
+            if not missing:
+                continue
+            have = set()
+            if cid is not None:
+                ph = ",".join("?" for _ in missing)
+                have = {x[0] for x in c.execute(f"SELECT guid FROM voucher WHERE company_id=? AND guid IN ({ph})",
+                                                [cid] + sorted(missing))}
+            if have:
+                short.append(f"{m}: {got_n.get(m, 0)} of {counts[m]}")
+            else:
+                unsent += [(g, want[g][0], want[g][1]) for g in missing]
+        if short:
+            print(f"{company}: kept the copy already here for " + "; ".join(short[:6]), file=sys.stderr, flush=True)
+        if unsent and cid is not None:
+            # counted per sync: only a voucher missing from two syncs is treated as one Tally never sends
+            for g, a, d in unsent:
+                c.execute("INSERT OR IGNORE INTO unsent(company_id, guid, alterid, date, seen, times) VALUES(?,?,?,?,?,0)",
+                          (cid, g, a, d, time.time()))
+                c.execute("UPDATE unsent SET times=times+1, seen=?, alterid=?, date=? WHERE company_id=? AND guid=?",
+                          (time.time(), a, d, cid, g))
+            print(f"{company}: {len(unsent)} voucher(s) Tally lists but doesn't send:", ", ".join(f"{d} {g}" for g, a, d in unsent[:5]),
+                  file=sys.stderr, flush=True)
+    return short
 
 
 def plan(company, d_from, d_to, tally_list):
     """Compare Tally's list of (GUID, AlterID, date) with what is stored; return the months to resend."""
-    counts = {}
+    # vouchers Tally lists but has never sent (unchanged since) are left out of every comparison
+    with conn() as c:
+        r = c.execute("SELECT id FROM company WHERE name=?", (company,)).fetchone()
+        skip = {x["guid"]: x["alterid"] for x in c.execute("SELECT guid, alterid FROM unsent WHERE company_id=? AND times>=2",
+                                                             (r["id"],))} if r else {}
+    if skip:
+        tally_list = [(g, a, d) for g, a, d in tally_list if not (g in skip and skip[g] == a)]
+    counts, listed = {}, {}
     for g, a, d in tally_list:
         if d_from <= d <= d_to:
             counts[d[:7]] = counts.get(d[:7], 0) + 1
-    EXPECT[company] = (time.time(), counts)
+            if g:
+                listed.setdefault(d[:7], {})[g] = (a, d)
+    EXPECT[company] = (time.time(), counts, listed)
     with conn() as c:
         r = c.execute("SELECT id, from_date, to_date, keep_from FROM company WHERE name=? AND last_sync IS NOT NULL",
                       (company,)).fetchone()
@@ -521,6 +573,8 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                     c.execute(f"DELETE FROM {t} WHERE voucher_id IN ({old})", (cid, a, b))
                 c.execute("DELETE FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (cid, a, b))
         inserted = 0
+        # a voucher that arrives after all is no longer "listed but never sent"
+        c.executemany("DELETE FROM unsent WHERE company_id=? AND guid=?", [(cid, v["guid"]) for v in vouchers if v.get("guid")])
         for v in vouchers:
             if not any(a <= v["date"] <= b for a, b in ranges):
                 continue
@@ -1401,7 +1455,9 @@ def sync_check(cid):
             SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) cancelled
             FROM voucher WHERE company_id=? GROUP BY m ORDER BY m DESC""", (cid,))
     bal = sync_issues(cid)
-    return {"balances": bal, "unbalanced": len(rows), "groups": out, "types": counts, "months": months}
+    with conn() as c:
+        unsent = _rows(c, "SELECT date, guid FROM unsent WHERE company_id=? AND times>=2 ORDER BY date", (cid,))
+    return {"balances": bal, "unsent": unsent, "unbalanced": len(rows), "groups": out, "types": counts, "months": months}
 
 
 def agent_stats():

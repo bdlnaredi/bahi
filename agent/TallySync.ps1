@@ -4,7 +4,7 @@
 #         TallySync.ps1 -Force     always send everything
 #         TallySync.ps1 -Now       check Tally for changes right away (the Bahi Sync app's Sync now)
 param([switch]$Force, [switch]$Verbose, [switch]$Now)
-$AgentVersion = "3.9"
+$AgentVersion = "3.10"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -651,7 +651,7 @@ foreach ($co in $companies) {
             if ($full -or ((-not $sentByVch) -and ($months -contains $m.ToString("yyyy-MM")))) { $todo += $m }
             $m = $m.AddMonths(1)
         }
-        $method = $script:VchMethod; $sentTotal = 0; $expTotal = 0; $short = @(); $sentMonths = @()
+        $method = $script:VchMethod; $sentTotal = 0; $expTotal = 0; $short = @(); $sentMonths = @(); $note = @()
         foreach ($m in $todo) {
             $mEnd = $m.AddMonths(1).AddDays(-1)
             $a = if ($m -lt $FromDate) { $FromDate } else { $m }
@@ -672,7 +672,12 @@ foreach ($co in $companies) {
                 # The Day Book must not send other days (that is how a Day Book ignoring dates shows); the
                 # date-filtered collection may carry other bits, and the server keeps only this month's vouchers
                 $outOk = ($how -ne "daybook") -or ($c.Out -eq 0)
-                $good = $c.Ok -and $outOk -and ($c.In -eq 0 -or $c.Entries) -and ($want -lt 0 -or $c.In -ge $want)
+                # the date-filtered collection is sent even when it has fewer vouchers than Tally listed: the server
+                # compares voucher by voucher and keeps its copy of a month that would lose any it already has.
+                # A Day Book answer must be complete (a short one is how a Day Book ignoring dates shows).
+                $countOk = ($want -lt 0) -or ($c.In -ge $want) -or ($how -ne "daybook")
+                $good = $c.Ok -and $outOk -and ($c.In -eq 0 -or $c.Entries) -and $countOk
+                if ($good -and $want -ge 0 -and $c.In -lt $want) { $note += ("{0}: {1} of {2}" -f $key, $c.In, $want) }
                 if (-not $good) { $why = "{0}: got {1}, outside the month {2}, entries {3}" -f $how, $c.In, $c.Out, $(if ($c.Entries) { "yes" } else { "no" }) }
                 if ($c.Ok -and $c.Entries -and $c.In -gt $bestIn) { $best = $raw; $bestIn = $c.In }
                 if ($good) {
@@ -691,7 +696,8 @@ foreach ($co in $companies) {
         }
         if ($method -ne $script:VchMethod) { try { Set-Content $MethodFile $method } catch {} }
         $script:VchMethod = $method
-        if ($expected -and $todo.Count -and $short.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in the " + $todo.Count + " month(s) sent were received") }
+        if ($expected -and $todo.Count -and $short.Count -eq 0 -and $note.Count -eq 0) { Log ("Vouchers checked: all $expTotal vouchers in the " + $todo.Count + " month(s) sent were received") }
+        if ($note.Count -gt 0) { Log ("Tally sent fewer vouchers than it listed for " + ($note -join "; ") + " - the server keeps any it already has.") "Yellow" }
         if ($short.Count -gt 0) {
             Log ("Some months didn't come back complete from Tally and were not sent (the app keeps what it had): " + ($short -join "; ") + ". They are tried again at the next sync.") "Yellow"
             $exitCode = 1
@@ -737,6 +743,7 @@ foreach ($co in $companies) {
         elseif (-not $full) { $meta.months = @($sentMonths) }
         if ($short.Count -gt 0) { $meta.alt_vch = "" }      # not complete: the next run looks again
         $res = Server-Json "POST" "/agent/commit" $meta
+        if ($res.held) { Log ("The server kept its own copy of " + $res.held + " (vouchers it has were missing) - tried again at the next sync.") "Yellow" }
         $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
         Log ("Done: " + $res.ledgers + " ledgers, " + $res.stock + " stock items, " + $res.vouchers +
              " vouchers in $secs s") "Green"
