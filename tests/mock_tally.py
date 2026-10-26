@@ -540,7 +540,7 @@ class H(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA><COLLECTION>"
+            out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC><CMPINFO><COMPANY>0</COMPANY><GROUP>0</GROUP><LEDGER>0</LEDGER><VOUCHER>51</VOUCHER></CMPINFO></DESC><DATA><COLLECTION>"
             if ctype == "Voucher":
                 light = "AllLedgerEntries" not in req
                 picked = set() if os.environ.get("NO_GUID_FILTER") == "1" else set(re.findall(r'\$GUID = "([^"]+)"', req))

@@ -3,7 +3,7 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 param([switch]$Force, [switch]$Verbose)
-$AgentVersion = "3.6"
+$AgentVersion = "3.7"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -285,7 +285,7 @@ function Count-Vouchers-Text([byte[]]$raw, [datetime]$from, [datetime]$to) {
     $t = [System.Text.Encoding]::UTF8.GetString($raw)
     $r = [pscustomobject]@{ Ok = $true; In = 0; Out = 0; Entries = ($t -match 'LEDGERENTRIES\.LIST') }
     $f = $from.ToString("yyyy-MM-dd"); $e = $to.ToString("yyyy-MM-dd")
-    foreach ($m in [regex]::Matches($t, '<VOUCHER[ >][\s\S]*?<DATE[^>]*>([^<]+)</DATE>')) {
+    foreach ($m in [regex]::Matches($t, '<VOUCHER(?=[ >])(?![^<]*</VOUCHER>)[\s\S]*?<DATE[^>]*>([^<]+)</DATE>')) {
         $d = Iso-Date $m.Groups[1].Value
         if ($d -and $d -ge $f -and $d -le $e) { $r.In++ } else { $r.Out++ }
     }
@@ -307,9 +307,9 @@ function Check-Vouchers([byte[]]$raw, [datetime]$from, [datetime]$to) {
     $r = [pscustomobject]@{ Ok = $false; In = 0; Out = 0; Entries = $false }
     if (-not $x) { return (Count-Vouchers-Text $raw $from $to) }
     $f = $from.ToString("yyyy-MM-dd"); $t = $to.ToString("yyyy-MM-dd")
-    foreach ($v in $x.SelectNodes("//VOUCHER")) {
-        $dn = $v.SelectSingleNode("DATE")
-        $d = if ($dn) { Iso-Date $dn.InnerText } else { "" }
+    # only real vouchers: newer TallyPrime puts a <VOUCHER>count</VOUCHER> field in the company summary at the top
+    foreach ($v in $x.SelectNodes("//VOUCHER[DATE]")) {
+        $d = Iso-Date $v.SelectSingleNode("DATE").InnerText
         if ($d -and $d -ge $f -and $d -le $t) { $r.In++ } else { $r.Out++ }
     }
     $r.Entries = [bool]($x.SelectSingleNode("//ALLLEDGERENTRIES.LIST|//LEDGERENTRIES.LIST"))
@@ -524,7 +524,7 @@ foreach ($co in $companies) {
                     if ($d) { $k = $d.Substring(0, 7); $expected[$k] = 1 + [int]$expected[$k] }
                 }
             } else {
-                foreach ($mt in [regex]::Matches([System.Text.Encoding]::UTF8.GetString($light), '<VOUCHER[ >][\s\S]*?<DATE[^>]*>([^<]+)</DATE>')) {
+                foreach ($mt in [regex]::Matches([System.Text.Encoding]::UTF8.GetString($light), '<VOUCHER(?=[ >])(?![^<]*</VOUCHER>)[\s\S]*?<DATE[^>]*>([^<]+)</DATE>')) {
                     $d = Iso-Date $mt.Groups[1].Value
                     if ($d) { $k = $d.Substring(0, 7); $expected[$k] = 1 + [int]$expected[$k] }
                 }
