@@ -42,6 +42,30 @@ jobs:
           foreach ($f in "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1") { if (-not (Test-Path "t\$f")) { throw "$f was not put out" } }
           Stop-Process -Id $p.Id -Force
 
+      - name: Screenshots (settings on first start, then the main window)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("shots\$name.png"); $g.Dispose(); $bmp.Dispose()
+          }
+          New-Item -ItemType Directory shots, s1, s2 | Out-Null
+          Copy-Item BahiSync.exe s1\; Copy-Item BahiSync.exe s2\
+          $p = Start-Process -FilePath (Resolve-Path s1\BahiSync.exe) -PassThru; Start-Sleep -Seconds 6; Shot "1-first-start"; Stop-Process -Id $p.Id -Force
+          '{"ServerUrl":"https://books.example.com","SyncToken":"x","TallyUrl":"http://localhost:9000","FromDate":"2023-04-01"}' | Set-Content s2\TallySync.config.json
+          "2026-10-26 18:54:15  Syncing SHIV SHAKTI BHANDAR - changed months: 2026-10 ...`r`n2026-10-26 18:56:09  Done: 659 ledgers, 11 stock items, 38095 vouchers in 500 s" | Set-Content s2\TallySync.log
+          $p = Start-Process -FilePath (Resolve-Path s2\BahiSync.exe) -PassThru; Start-Sleep -Seconds 12; Shot "2-main"; Stop-Process -Id $p.Id -Force
+
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: screenshots
+          path: shots/
+
       - uses: actions/upload-artifact@v4
         with:
           name: BahiSync
