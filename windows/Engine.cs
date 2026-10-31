@@ -61,6 +61,59 @@ namespace BahiSync
             return Get(cfg, "ServerUrl", "") != "" && Get(cfg, "SyncToken", "") != "";
         }
 
+        // ------------------------------------------------------------ companies
+        /// <summary>Per-company settings: name to {Sync, From}.</summary>
+        public static Dictionary<string, Dictionary<string, object>> CompanySettings(Dictionary<string, object> cfg)
+        {
+            var o = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+            object v;
+            var all = cfg.TryGetValue("Companies", out v) ? v as Dictionary<string, object> : null;
+            if (all == null) return o;
+            foreach (var kv in all)
+            {
+                var c = kv.Value as Dictionary<string, object>;
+                if (c != null) o[kv.Key] = c;
+            }
+            return o;
+        }
+
+        /// <summary>Companies the sync has seen open in Tally (it keeps the list in TallySync.companies.json).</summary>
+        public static List<Dictionary<string, object>> SeenCompanies()
+        {
+            var o = new List<Dictionary<string, object>>();
+            try
+            {
+                string path = Path.Combine(Dir, "TallySync.companies.json");
+                if (!File.Exists(path)) return o;
+                object x = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path));
+                var one = x as Dictionary<string, object>;
+                if (one != null) { o.Add(one); return o; }
+                var many = x as object[];
+                if (many != null) foreach (var e in many) { var d = e as Dictionary<string, object>; if (d != null) o.Add(d); }
+            }
+            catch { }
+            return o;
+        }
+
+        /// <summary>The companies open in Tally right now (only reads; Tally is asked for a list of names).</summary>
+        public static List<string> OpenCompanies(string url)
+        {
+            string xml = "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>BSCompanies</ID></HEADER>" +
+                         "<BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES><TDL><TDLMESSAGE>" +
+                         "<COLLECTION NAME=\"BSCompanies\" ISMODIFY=\"No\"><TYPE>Company</TYPE><FETCH>Name</FETCH></COLLECTION>" +
+                         "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>";
+            var wc = new WebClient();
+            wc.Headers.Add("Content-Type", "text/xml;charset=utf-8");
+            string body = Encoding.UTF8.GetString(wc.UploadData(url, "POST", Encoding.UTF8.GetBytes(xml)));
+            var names = new List<string>();
+            foreach (Match m in Regex.Matches(body, "<COMPANY NAME=\"([^\"]*)\""))
+            {
+                string n = WebUtility.HtmlDecode(m.Groups[1].Value).Trim();
+                if (n != "" && !names.Contains(n)) names.Add(n);
+            }
+            return names;
+        }
+
         // ------------------------------------------------------------ the scripts inside this .exe
         static int[] Ver(string s)
         {
@@ -180,6 +233,60 @@ namespace BahiSync
                 if (on) k.SetValue("BahiSync", "\"" + Application_ExecutablePath() + "\" --tray");
                 else if (k.GetValue("BahiSync") != null) k.DeleteValue("BahiSync");
             }
+        }
+
+        /// <summary>First start of an installed copy: bring the settings and sync records over from the folder the
+        /// earlier copy ran in (BahiSync.exe on its own, or the batch-file setup). Returns that folder, or null.</summary>
+        public static string MigrateFromOld()
+        {
+            if (File.Exists(ConfigPath)) return null;
+            var dirs = new List<string>();
+            bool started = false;
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
+                {
+                    var v = k == null ? null : k.GetValue("BahiSync") as string;
+                    if (!string.IsNullOrEmpty(v))
+                    {
+                        var m = Regex.Match(v, "^\"([^\"]+)\"");
+                        dirs.Add(Path.GetDirectoryName(m.Success ? m.Groups[1].Value : v.Split(' ')[0]));
+                        started = true;
+                    }
+                }
+            }
+            catch { }
+            try
+            {
+                var p = new ProcessStartInfo("schtasks.exe", "/Query /TN \"Tally Mobile Sync\" /XML");
+                p.CreateNoWindow = true; p.UseShellExecute = false; p.RedirectStandardOutput = true; p.RedirectStandardError = true;
+                using (var pr = Process.Start(p))
+                {
+                    string xml = pr.StandardOutput.ReadToEnd(); pr.WaitForExit(10000);
+                    var m = Regex.Match(xml, "([A-Za-z]:\\\\[^\"<>]*?)\\\\run-hidden\\.vbs", RegexOptions.IgnoreCase);
+                    if (m.Success) dirs.Add(m.Groups[1].Value);
+                }
+            }
+            catch { }
+            foreach (var c in new[] { @"C:\Bahi", @"C:\TallySync", @"C:\Tally Mobile", @"C:\TallyMobile", @"C:\Tally Sync" }) dirs.Add(c);
+            foreach (var d in dirs)
+            {
+                try
+                {
+                    if (string.IsNullOrEmpty(d) || string.Equals(Path.GetFullPath(d).TrimEnd('\\'), Path.GetFullPath(Dir).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!File.Exists(Path.Combine(d, "TallySync.config.json"))) continue;
+                    foreach (var f in new[] { "TallySync.config.json", "TallySync.sent", "TallySync.method", "TallySync.noguid", "TallySync.deep",
+                                              "TallySync.companies.json", "TallySync.log" })
+                    {
+                        string from = Path.Combine(d, f), to = Path.Combine(Dir, f);
+                        if (File.Exists(from) && !File.Exists(to)) File.Copy(from, to);
+                    }
+                    if (started) SetStartWithWindows(true);       // start this copy with Windows instead of the old one
+                    return d;
+                }
+                catch { }
+            }
+            return null;
         }
 
         /// <summary>The scheduled task from the older batch-file setup would sync alongside this app: remove it.</summary>

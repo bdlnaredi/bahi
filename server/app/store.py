@@ -502,6 +502,28 @@ def plan(company, d_from, d_to, tally_list):
             "changed": changed if by_voucher else [], "deleted": deleted if by_voucher else []}
 
 
+def merge_einv(company, einv):
+    """e-invoice / e-way bill details of vouchers already stored (an e-way bill made after the invoice was
+    synced, or a month kept as it was). Only adds to the voucher's printing details; nothing else changes."""
+    if not einv:
+        return 0
+    n = 0
+    with _lock, conn() as c:
+        r = c.execute("SELECT id FROM company WHERE name=?", (company,)).fetchone()
+        if not r:
+            return 0
+        for g, f_ in einv.items():
+            row = c.execute("SELECT id, extra FROM voucher WHERE company_id=? AND guid=?", (r["id"], g)).fetchone()
+            if not row:
+                continue
+            x = json.loads(row["extra"] or "{}")
+            new = {**x, **f_}
+            if new != x:
+                c.execute("UPDATE voucher SET extra=? WHERE id=?", (json.dumps(new), row["id"]))
+                n += 1
+    return n
+
+
 def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, stock, vouchers,
            bills_rec=None, bills_pay=None, info=None, ledger_x=None, stock_x=None, months=None, guids=None, stock_at=None,
            stock_godown=None, ledger_at=None):

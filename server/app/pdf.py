@@ -93,6 +93,13 @@ def fit(s, size, maxw, bold=False):
     return s + "..."
 
 
+def whole(s, size, maxw, bold=False, floor=4.5):
+    """The font size at which s fits maxw whole - for numbers that must never be cut short."""
+    s = str(s or "")
+    w = width(s, size, bold)
+    return size if w <= maxw or not w else max(floor, size * maxw / w)
+
+
 def wrap(s, size, maxw, bold=False):
     out = []
     for para in str(s or "").replace("\r", "").split("\n"):
@@ -448,13 +455,19 @@ def invoice_pdf(d):
         y0 = top - r * row_h
         p.text(x0 + 3, y0 - 8, lab, 7)
         if i == 0 and X.get("ewb_no") and not X.get("ewb_cancelled"):        # Tally prints the e-Way Bill No. beside the invoice number
-            half_w = cw * 0.52
-            p.text(x0 + half_w, y0 - 8, "e-Way Bill No.", 7)
-            p.text(x0 + half_w, y0 - 18, fit(X["ewb_no"], 8, cw - half_w - 3, True), 8, "B")
+            # both numbers are printed in full: the invoice number takes the room it needs, and both get
+            # smaller only when together they don't fit the cell
+            ewb, avail = str(X["ewb_no"]), cw - 6 - 6
+            wi, we = width(val or "", 8, True), max(width(ewb, 8, True), width("e-Way Bill No.", 7) * 8 / 7)
+            sz = 8 if wi + we <= avail else max(4.5, 8 * avail / (wi + we))
+            xe = x0 + 3 + max(cw * 0.52 - 3, width(val or "", sz, True) + 6)
+            xe = min(xe, x0 + cw - 3 - we * sz / 8)
+            p.text(xe, y0 - 8, "e-Way Bill No.", max(6, min(7, sz * 7 / 8)))
+            p.text(xe, y0 - 18, ewb, sz, "B")
             if val:
-                p.text(x0 + 3, y0 - 18, fit(val, 8, half_w - 6, True), 8, "B")
+                p.text(x0 + 3, y0 - 18, val, sz, "B")
         elif val:
-            p.text(x0 + 3, y0 - 18, fit(val, 8, cw - 6, True), 8, "B")
+            p.text(x0 + 3, y0 - 18, val if i == 0 else fit(val, 8, cw - 6, True), whole(val, 8, cw - 6, True) if i == 0 else 8, "B")
         p.line(mid, y0 - row_h, R, y0 - row_h)
     for r in range(6):
         p.line(mid + cw, top - r * row_h, mid + cw, top - (r + 1) * row_h)
@@ -726,7 +739,7 @@ def _eway_page(p, d, X, pname, pgst, pstate, ship_addr):
             continue
         p.text(L, y, lab, 8.5)
         p.text(L + 44, y, ":", 8.5)
-        p.text(L + 52, y, fit(val, 8.5, R - L - 52, True), 8.5, "B")
+        p.text(L + 52, y, val, whole(val, 8.5, R - L - 52, True), "B")
         y -= 13
     y -= 8
 
@@ -993,7 +1006,7 @@ def ledger_pdf(d):
             p.text(cx["part"], y, toby, 8.5)
         p.text(cx["part"] + 16, y, fit(part, 9, cx["type"] - cx["part"] - 22, True), 9, "B")
         p.text(cx["type"], y, fit(vtype, 8.5, cx["no"] - cx["type"] - 4), 8.5)
-        p.text(cx["no"], y, fit(vno, 8.5, cx["dr"] - cx["no"] - 60), 8.5)
+        p.text(cx["no"], y, vno, whole(vno, 8.5, cx["dr"] - cx["no"] - 60), "R")
         if amt > 0:
             p.text(cx["dr"], y, inr(amt), 8.5, "B" if bold else "R", "right")
             dr_tot += amt
@@ -1066,7 +1079,7 @@ def ledger_pdf(d):
                 p.text(R, y - 4, "Continued...", 7.5, "I", "right")
                 p.new_page()
                 y = ihead(PDF.H - 50)
-            p.text(L, y, fit(b["ref"], 8, 115), 8)
+            p.text(L, y, b["ref"], whole(b["ref"], 8, 115), "R")
             p.text(L + 120, y, tdate(b["date"]) if b.get("date") else "", 8)
             p.text(L + 190, y, tdate(b["due"]) if b.get("due") else "", 8)
             p.text(L + 300, y, str(b["interest_days"]), 8, "R", "right")

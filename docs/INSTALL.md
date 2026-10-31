@@ -102,13 +102,17 @@ To update: **Compose Pull**, then **Compose Up**.
 
 ### Bahi Sync app (recommended)
 
-1. On the Tally PC, download **[BahiSync.exe](https://github.com/bdlnaredi/bahi/releases/download/windows/BahiSync.exe)** and put it in a folder of its own, for example `C:\Bahi` (if you already use the batch-file setup, put it in that same folder: it picks up your settings).
-2. Double-click it. Windows may show *Windows protected your PC*: click **More info → Run anyway** (the app isn't signed with a paid certificate).
-3. The first time, it asks for the **Bahi server address** and the **sync token** (`SYNC_TOKEN` from Unraid). Tally's address and the sync start date can stay as they are. Click **Test connection**, then **Save**.
+1. On the Tally PC, download **[BahiSync-Setup.exe](https://github.com/bdlnaredi/bahi/releases/download/windows/BahiSync-Setup.exe)** and run it. Windows may show *Windows protected your PC*: click **More info → Run anyway** (the app isn't signed with a paid certificate), then **Yes** to let it install.
+2. It installs into `C:\Program Files\Bahi Sync` with everything it needs, adds **Bahi Sync** to the Start menu (and the desktop if you tick it) and an uninstaller (Windows Settings → Apps). If you used `BahiSync.exe` or the batch files before, close nothing: the installer stops the old copy, and the installed one brings your settings and sync records over from that folder, starts with Windows in its place, and says so in its log. The old folder can then be deleted.
+3. The first time (on a new PC), it asks for the **Bahi server address** and the **sync token** (`SYNC_TOKEN` from Unraid). Tally's address and the sync start date can stay as they are. Click **Test connection**, then **Save**.
 
-Bahi Sync then sits in the system tray (bottom-right of the taskbar), starts with Windows, and checks Tally every 2 minutes. Its window shows whether Tally and the server can be reached, the last sync and the log, with **Sync now**, **Pause**, **Settings** and **Tools** (Diagnose, Save a voucher or stock figures for a problem report, a full resend, open the log or folder). Closing the window keeps it syncing; to stop, right-click the tray icon → **Exit**.
+Bahi Sync then sits in the system tray (bottom-right of the taskbar), starts with Windows, and checks Tally every 2 minutes. Its window shows whether Tally and the server can be reached, the last sync and the log, with **Sync now**, **Pause**, **Settings**, **Companies** and **Tools** (Diagnose, Save a voucher or stock figures for a problem report, a full resend, open the log or folder). Closing the window keeps it syncing; to stop, right-click the tray icon → **Exit**.
 
-It replaces the batch files and the Windows scheduled task (it removes the old task itself). The sync files inside it keep updating themselves from your server, and the app offers its own new versions in the window.
+It replaces the batch files and the Windows scheduled task (it removes the old task itself). The sync files keep updating themselves from your server, and the app offers its own new versions in the window. Prefer not to install? [BahiSync.exe](https://github.com/bdlnaredi/bahi/releases/download/windows/BahiSync.exe) is the same app on its own: put it in a folder such as `C:\Bahi` and run it from there.
+
+#### More than one company
+
+Every company open in TallyPrime is synced, and each one is its own company in the Bahi app: tap the company name at the top of the app to switch. **Companies** in Bahi Sync lists the companies it has seen in Tally: untick one to leave it out, or give one its own start date (an older year's company from 2023, say). Tally only lets Bahi read companies that are open in it, so open all of them together (**Alt+F3 → Select Company**, pick each one) or let TallyPrime open them when it starts (**F1 → Settings → Startup**). A company that isn't open keeps what it last synced and catches up when it is opened again.
 
 ### Or: the batch-file setup
 

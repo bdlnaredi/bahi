@@ -1,0 +1,27 @@
+Bahi Sync
+=========
+
+Bahi Sync copies your TallyPrime books to your Bahi server, so you can see them in the Bahi app on your
+phone or computer. It only reads from Tally; the only thing it ever puts into Tally is a new entry you made
+in the Bahi app (receipts, payments, orders, sales, purchases). It never changes or deletes anything in Tally.
+
+Getting started
+  1. Open Bahi Sync (Start menu, Bahi Sync).
+  2. Settings: enter your Bahi server address and the sync token, then Test connection and Save.
+  3. Keep TallyPrime open with your companies loaded. Bahi Sync checks Tally every 2 minutes.
+
+More than one company
+  Click Companies. Tick every company you want in the Bahi app and, if you like, a start date for each.
+  Tally only lets Bahi read the companies that are open in it, so open all of them together
+  (Alt+F3, Select Company) or have TallyPrime open them when it starts (F1, Settings, Startup).
+  In the app, tap the company name at the top to switch between companies.
+
+Files in this folder
+  BahiSync.exe               the app
+  TallySync.ps1 and others   the sync itself (kept up to date from your Bahi server)
+  TallySync.config.json      your settings
+  TallySync.sent             entries already put into Tally (stops one going in twice) - keep it
+  TallySync.log              what happened at each sync
+
+Removing it
+  Windows Settings, Apps, Bahi Sync, Uninstall. Your data on the Bahi server is not touched.

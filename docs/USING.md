@@ -357,7 +357,9 @@ On an item's page, set **Alert me on Telegram when stock falls below …**. Afte
 
 ## e-Invoice and e-Way Bill on invoices
 
-When an invoice in Tally has an e-invoice (IRN) or an e-way bill, the invoice PDF prints them like Tally does: the **e-Invoice** block with IRN, Ack No., Ack Date and the signed **QR code** at the top, the **e-Way Bill No.** beside the invoice number, and the **e-Way Bill** as page 2 (number, dates, validity, distance, vehicle, addresses and goods). The voucher screen in the app lists the same details.
+When an invoice in Tally has an e-invoice (IRN) or an e-way bill, the invoice PDF prints them like Tally does: the **e-Invoice** block with IRN, Ack No., Ack Date and the signed **QR code** at the top, the **e-Way Bill No.** beside the invoice number, and the **e-Way Bill** as page 2 (number, dates, validity, distance, vehicle, addresses and goods). The voucher screen in the app lists the same details. The invoice number always prints in full (it gets a little smaller when it is long, never cut short).
+
+An e-way bill or e-invoice made in Tally after the invoice was already synced comes across at the next sync (the Tally PC reads the last 15 days' e-way bill and e-invoice details at every sync). For an older one, use **Tools → Send everything again** in Bahi Sync.
 
 ## Hindi in PDFs
 

@@ -4,7 +4,7 @@
 #         TallySync.ps1 -Force     always send everything
 #         TallySync.ps1 -Now       check Tally for changes right away (the Bahi Sync app's Sync now)
 param([switch]$Force, [switch]$Verbose, [switch]$Now)
-$AgentVersion = "3.10"
+$AgentVersion = "3.11"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -400,6 +400,31 @@ catch { Log ("Tally is not reachable on $Tally - is TallyPrime open? (" + $_.Exc
 
 if ($companies.Count -eq 0) { Log "Tally is open but no company is loaded." "Yellow"; End-Run 3 }
 
+# Which companies to sync, and from when (the Bahi Sync app's Companies list). A company not in the list is
+# synced from the general start date, as before. Every company seen open in Tally is remembered for that list.
+$CoCfg = @{}; $GlobalFrom = $FromDate
+try { if ($Cfg.Companies) { foreach ($p in $Cfg.Companies.PSObject.Properties) { $CoCfg[$p.Name] = $p.Value } } } catch {}
+function Company-Wanted($co) { $c = $CoCfg[$co.Name]; return -not ($c -and $c.PSObject.Properties["Sync"] -and $c.Sync -eq $false) }
+function Company-From($co) {
+    $c = $CoCfg[$co.Name]
+    if ($c -and $c.PSObject.Properties["From"] -and $c.From) { try { return [datetime]::ParseExact([string]$c.From, "yyyy-MM-dd", $null) } catch {} }
+    return $GlobalFrom
+}
+$SeenPath = Join-Path $Here "TallySync.companies.json"
+try {
+    $seen = @{}
+    if (Test-Path $SeenPath) { foreach ($e in @((Get-Content $SeenPath -Raw | ConvertFrom-Json))) { if ($e.Name) { $seen[$e.Name] = $e } } }
+    $stamp = (Get-Date).ToString("yyyy-MM-dd HH:mm")
+    foreach ($co in $companies) {
+        $seen[$co.Name] = [pscustomobject]@{ Name = $co.Name; BooksFrom = $(if ($co.BooksFrom) { $co.BooksFrom.ToString("yyyy-MM-dd") } else { "" }); LastOpen = $stamp }
+    }
+    ConvertTo-Json @($seen.Values | Sort-Object Name) | Set-Content $SeenPath -Encoding UTF8
+} catch {}
+$off = @($companies | Where-Object { -not (Company-Wanted $_) })
+$companies = @($companies | Where-Object { Company-Wanted $_ })
+if ($off.Count -and ($Force -or $Verbose -or $Now)) { Log ("Not syncing (switched off in Bahi Sync, Companies): " + (($off | ForEach-Object { $_.Name }) -join ", ")) }
+if ($companies.Count -eq 0) { Log "None of the companies open in Tally is set to sync (Bahi Sync, Companies)." "Yellow"; End-Run 0 }
+
 function Send-Heartbeat {
     try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }); agent = $AgentVersion }) } catch {}
 }
@@ -489,6 +514,7 @@ foreach ($co in $companies) {
         }
         $madeEntries = Push-Entries $co
         # "Delete older vouchers" in the app sets keep_from: don't send anything before it
+        $BaseFrom = Company-From $co
         $FromDate = $BaseFrom
         if ($state.keep_from -and $state.keep_from -gt $BaseFrom.ToString("yyyy-MM-dd")) {
             $FromDate = [datetime]::ParseExact($state.keep_from, "yyyy-MM-dd", $null)
@@ -703,6 +729,11 @@ foreach ($co in $companies) {
             $exitCode = 1
             if ($full) { continue }       # a full sync replaces everything, so it must not go ahead with a gap
         }
+
+        # e-way bills and e-invoices made after an invoice was synced don't always move Tally's change counter,
+        # so the last 15 days' details are read every time (only those fields; the server adds them to its copy)
+        $eFrom = $today.Date.AddDays(-15); if ($eFrom -lt $FromDate) { $eFrom = $FromDate }
+        if ($eFrom -le $ToDate) { Send-Einv $run $co.Name $eFrom $ToDate $null }
 
         # 5. Stock as Tally has it at each month-end, so opening stock for any month or year is Tally's own figure.
         #    All months on a full sync; otherwise only from the month of the earliest change.

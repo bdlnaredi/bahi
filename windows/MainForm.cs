@@ -23,7 +23,7 @@ namespace BahiSync
         readonly List<string> lines = new List<string>();
 
         readonly Label title = new Label(), tallyLbl = new Label(), serverLbl = new Label(), lastLbl = new Label(), stateLbl = new Label();
-        readonly Button syncBtn = new Button(), pauseBtn = new Button(), setBtn = new Button(), toolsBtn = new Button();
+        readonly Button syncBtn = new Button(), pauseBtn = new Button(), setBtn = new Button(), coBtn = new Button(), toolsBtn = new Button();
         readonly TextBox log = new TextBox();
         readonly LinkLabel update = new LinkLabel();
         readonly Label foot = new Label();
@@ -33,6 +33,7 @@ namespace BahiSync
         readonly System.Windows.Forms.Timer every2min = new System.Windows.Forms.Timer(), everySec = new System.Windows.Forms.Timer(),
             every30s = new System.Windows.Forms.Timer();
         string newVersionUrl;
+        public bool CompaniesAtStart;
 
         public MainForm(bool tray)
         {
@@ -64,14 +65,15 @@ namespace BahiSync
             foreach (var l in new[] { tallyLbl, serverLbl, lastLbl, stateLbl }) { l.AutoSize = true; l.Margin = new Padding(0, 2, 0, 0); top.Controls.Add(l); }
 
             var buttons = new FlowLayoutPanel(); buttons.AutoSize = true; buttons.Margin = new Padding(0, 10, 0, 0);
-            syncBtn.Text = "Sync now"; pauseBtn.Text = "Pause"; setBtn.Text = "Settings"; toolsBtn.Text = "Tools ▾";
-            foreach (var b in new[] { syncBtn, pauseBtn, setBtn, toolsBtn }) { b.AutoSize = true; b.Padding = new Padding(8, 2, 8, 2); buttons.Controls.Add(b); }
+            syncBtn.Text = "Sync now"; pauseBtn.Text = "Pause"; setBtn.Text = "Settings"; coBtn.Text = "Companies"; toolsBtn.Text = "Tools ▾";
+            foreach (var b in new[] { syncBtn, pauseBtn, setBtn, coBtn, toolsBtn }) { b.AutoSize = true; b.Padding = new Padding(8, 2, 8, 2); buttons.Controls.Add(b); }
             top.Controls.Add(buttons);
             Controls.Add(top);
 
             syncBtn.Click += delegate { RunSync("-Now", true); };
             pauseBtn.Click += delegate { TogglePause(); };
             setBtn.Click += delegate { OpenSettings(); };
+            coBtn.Click += delegate { OpenCompanies(); };
             toolsBtn.Click += delegate { tools.Show(toolsBtn, new Point(0, toolsBtn.Height)); };
 
             tools.Items.Add("Diagnose (count vouchers per month in Tally)", null, delegate { Engine.StartTool("Diagnose.ps1"); });
@@ -121,8 +123,12 @@ namespace BahiSync
             string ver = "?";
             try { ver = Engine.ExtractScripts(); } catch (Exception x) { AddLine("Couldn't put the sync files in place: " + x.Message); }
             foot.Text = "App " + BuildInfo.Version + "   Sync files " + ver + "   Folder " + Engine.Dir;
+            string moved = null;
+            try { moved = Engine.MigrateFromOld(); } catch { }
             cfg = Engine.LoadConfig();
             LoadLogTail();
+            if (moved != null)
+                AddLine("(Bahi Sync) Settings and sync records brought over from " + moved + ". This copy does the syncing now; the old folder can be deleted.");
             if (!Engine.Configured(cfg))
             {
                 if (startHidden) ShowMain();
@@ -134,6 +140,7 @@ namespace BahiSync
             CheckConnections();
             ThreadPool.QueueUserWorkItem(delegate { CheckForUpdate(); });
             if (Engine.Configured(cfg)) RunSync("", false);
+            if (CompaniesAtStart && Engine.Configured(cfg)) BeginInvoke((MethodInvoker)OpenCompanies);
         }
 
         // ------------------------------------------------------------ syncing
@@ -184,6 +191,25 @@ namespace BahiSync
                 ShowState();
                 return ok;
             }
+        }
+
+        void OpenCompanies()
+        {
+            if (cfg == null || !Engine.Configured(cfg)) { OpenSettings(); return; }
+            using (var f = new CompaniesForm(cfg))
+            {
+                bool ok = f.ShowDialog(Visible ? this : null) == DialogResult.OK;
+                cfg = Engine.LoadConfig();
+                if (ok) { AddLine("(Bahi Sync) Company list saved. " + CompanyLine()); RunSync("-Now", false); }
+                ShowState();
+            }
+        }
+
+        string CompanyLine()
+        {
+            var off = new List<string>();
+            foreach (var kv in Engine.CompanySettings(cfg)) if (Engine.Get(kv.Value, "Sync", "True") == "False") off.Add(kv.Key);
+            return off.Count == 0 ? "Every company open in Tally is synced." : "Not synced: " + string.Join(", ", off.ToArray()) + ".";
         }
 
         // ------------------------------------------------------------ what the window shows

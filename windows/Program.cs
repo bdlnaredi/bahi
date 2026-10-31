@@ -30,7 +30,9 @@ namespace BahiSync
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 bool tray = Array.IndexOf(args, "--tray") >= 0;
-                Application.Run(new MainForm(tray));
+                var main = new MainForm(tray);
+                main.CompaniesAtStart = Array.IndexOf(args, "--companies") >= 0;
+                Application.Run(main);
             }
         }
     }

@@ -41,7 +41,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.6.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -490,6 +490,11 @@ class Handler(BaseHTTPRequestHandler):
                             months,
                             [str(g) for g in meta["guids"]] if isinstance(meta.get("guids"), list) else None,
                             parts["stock_at"], parts["stock_godown"], parts["ledger_at"])
+        if parts["einv"]:            # also reaches vouchers not in this batch (e-way bill made after the invoice)
+            try:
+                store.merge_einv(meta["company"], parts["einv"])
+            except Exception as e:      # printing details only; the sync itself is already stored
+                print("e-invoice details not stored:", e, file=sys.stderr)
         if held:
             res["held"] = "; ".join(held)
         return res

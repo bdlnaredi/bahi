@@ -3,7 +3,7 @@ name: Windows app
 on:
   push:
     branches: [main]
-    paths: ["windows/**", "agent/**", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "agent/**", "docs/BahiSync.txt", ".github/workflows/windows.yml"]
   workflow_dispatch:
 
 permissions:
@@ -57,8 +57,56 @@ jobs:
           Copy-Item BahiSync.exe s1\; Copy-Item BahiSync.exe s2\
           $p = Start-Process -FilePath (Resolve-Path s1\BahiSync.exe) -PassThru; Start-Sleep -Seconds 6; Shot "1-first-start"; Stop-Process -Id $p.Id -Force
           '{"ServerUrl":"https://books.example.com","SyncToken":"x","TallyUrl":"http://localhost:9000","FromDate":"2023-04-01"}' | Set-Content s2\TallySync.config.json
-          "2026-10-26 18:54:15  Syncing SHIV SHAKTI BHANDAR - changed months: 2026-10 ...`r`n2026-10-26 18:56:09  Done: 659 ledgers, 11 stock items, 38095 vouchers in 500 s" | Set-Content s2\TallySync.log
+          "2026-10-26 18:54:15  Syncing Demo Traders - changed months: 2026-10 ...`r`n2026-10-26 18:56:09  Done: 312 ledgers, 40 stock items, 9120 vouchers in 61 s" | Set-Content s2\TallySync.log
           $p = Start-Process -FilePath (Resolve-Path s2\BahiSync.exe) -PassThru; Start-Sleep -Seconds 12; Shot "2-main"; Stop-Process -Id $p.Id -Force
+
+      - name: Build the installer (BahiSync-Setup.exe)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command iscc.exe -ErrorAction Stop).Source }
+          $env:BAHI_VERSION = "1.${{ github.run_number }}"
+          & $iscc /Q windows\BahiSync.iss
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+          Get-Item out\BahiSync-Setup.exe | Format-List Name, Length
+
+      - name: Installer test (Program Files, settings brought over from the old folder, uninstall)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory C:\Bahi -Force | Out-Null
+          '{"ServerUrl":"https://books.example.com","SyncToken":"x","TallyUrl":"http://localhost:9000","FromDate":"2023-04-01","Companies":{"Demo Traders":{"Sync":true},"Demo Traders (2023-24)":{"Sync":false,"From":"2023-04-01"}}}' | Set-Content C:\Bahi\TallySync.config.json
+          "test-uid" | Set-Content C:\Bahi\TallySync.sent
+          '[{"Name":"Demo Traders","BooksFrom":"2023-04-01","LastOpen":"2026-10-30 18:00"},{"Name":"Demo Traders (2023-24)","BooksFrom":"2023-04-01","LastOpen":"2026-09-01 10:00"},{"Name":"Sample Shop","BooksFrom":"2025-04-01","LastOpen":"2026-10-30 18:00"}]' | Set-Content C:\Bahi\TallySync.companies.json
+          Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run BahiSync '"C:\Bahi\BahiSync.exe" --tray'
+          $p = Start-Process out\BahiSync-Setup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=setup.log" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 40; throw "setup failed ($($p.ExitCode))" }
+          $app = "$env:ProgramFiles\Bahi Sync"
+          Start-Sleep -Seconds 12
+          Get-ChildItem $app | Format-Table Name, Length
+          foreach ($f in "BahiSync.exe", "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1", "Read me.txt", "TallySync.config.json", "TallySync.sent", "TallySync.companies.json") {
+            if (-not (Test-Path "$app\$f")) { throw "$f is missing in $app" }
+          }
+          $run = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run).BahiSync
+          "Start with Windows: $run"
+          if ($run -notlike "*Bahi Sync\BahiSync.exe*") { throw "start with Windows still points at $run" }
+          if (-not (Get-Process BahiSync -ErrorAction SilentlyContinue)) { throw "Bahi Sync didn't start after installing" }
+          (Get-Acl $app).Access | Where-Object { "$($_.IdentityReference)" -like "*Users" } | Format-Table IdentityReference, FileSystemRights, IsInherited
+          # the companies window, for the screenshots
+          Get-Process BahiSync | Stop-Process -Force; Start-Sleep -Seconds 2
+          $p = Start-Process -FilePath "$app\BahiSync.exe" -ArgumentList "--companies" -PassThru; Start-Sleep -Seconds 12
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory shots -Force | Out-Null
+          $bmp.Save("shots\3-companies.png"); $g.Dispose(); $bmp.Dispose()
+          Stop-Process -Id $p.Id -Force
+          $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -PassThru -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path "$app\BahiSync.exe") { throw "uninstall left BahiSync.exe behind" }
+          if ((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run).BahiSync) { throw "uninstall left the start-with-Windows entry" }
+          "uninstalled; left in the folder (settings and records): " + ((Get-ChildItem $app -ErrorAction SilentlyContinue | ForEach-Object Name) -join ", ")
 
       - name: Keep the screenshots on a draft release (not shown publicly)
         continue-on-error: true
@@ -73,15 +121,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: BahiSync
-          path: BahiSync.exe
+          path: |
+            BahiSync.exe
+            out/BahiSync-Setup.exe
 
       - name: Publish to the "windows" release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = "Bahi Sync for the Tally PC, version 1.${{ github.run_number }}. Download BahiSync.exe into the Bahi folder (for example C:\Bahi) and run it.`n`nversionCode: ${{ github.run_number }}"
+          $notes = "Bahi Sync for the Tally PC, version 1.${{ github.run_number }}.`n`nBahiSync-Setup.exe installs it in Program Files with everything it needs (Start menu shortcut, uninstaller) and brings your settings over from an earlier copy. BahiSync.exe is the same app without installing, for running from any folder.`n`nversionCode: ${{ github.run_number }}"
           gh release view windows *> $null
           if ($LASTEXITCODE -eq 0) { gh release edit windows --title "Windows app 1.${{ github.run_number }}" --notes $notes }
           else { gh release create windows --title "Windows app 1.${{ github.run_number }}" --notes $notes --latest=false }
-          gh release upload windows BahiSync.exe --clobber
+          gh release upload windows BahiSync.exe out\BahiSync-Setup.exe --clobber

@@ -484,7 +484,7 @@ class H(BaseHTTPRequestHandler):
         co = g("SVCURRENTCOMPANY").replace("&amp;", "&")
         if "<TALLYREQUEST>Import Data</TALLYREQUEST>" in req:
             out = import_voucher(req)
-        elif co and co != COMPANY:
+        elif co and co != COMPANY and co != os.environ.get("SECOND_CO"):
             out = "<ENVELOPE><LINEERROR>Could not find Company</LINEERROR></ENVELOPE>"
         elif typ == "Data" and rid in ("Bills Receivable", "Bills Payable"):
             want = {n for n, _, _ in DEBTORS} if rid == "Bills Receivable" else {n for n, _ in CREDITORS}
@@ -577,6 +577,9 @@ class H(BaseHTTPRequestHandler):
                         f'<STATENAME>Maharashtra</STATENAME><EMAIL>accounts@demotraders.in</EMAIL><INCOMETAXNUMBER>AABCD1234E</INCOMETAXNUMBER>'
                         f'<GSTREGISTRATIONNUMBER>27AABCD1234E1Z9</GSTREGISTRATIONNUMBER>'
                         f'<ALTVCHID TYPE="Number"> {431 if os.environ.get("STUCK_ALTVCH") == "1" else max(v["alterid"] for v in VOUCHERS) + EDITS[0]}</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID><BOOKSFROM TYPE="Date">20240401</BOOKSFROM></COMPANY>')
+                if os.environ.get("SECOND_CO"):     # a second company open in Tally (same books, for testing)
+                    out += (f'<COMPANY NAME="{escape(os.environ["SECOND_CO"])}"><NAME>{escape(os.environ["SECOND_CO"])}</NAME>'
+                            f'<ALTVCHID TYPE="Number"> 431</ALTVCHID><ALTMSTID TYPE="Number"> 87</ALTMSTID><BOOKSFROM TYPE="Date">20250401</BOOKSFROM></COMPANY>')
             elif ctype == "Group":
                 for n, p in GROUPS:
                     par = escape(p) if p else "&#4; Primary"
