@@ -103,8 +103,8 @@ jobs:
           if ($run -notlike "*Bahi Sync\BahiSync.exe*") { $fail += "run key" }
           Note ("running: " + ((Get-Process BahiSync -ErrorAction SilentlyContinue | ForEach-Object Path) -join ", "))
           if (-not (Get-Process BahiSync -ErrorAction SilentlyContinue)) { $fail += "not started" }
-          if (Test-Path "$app\TallySync.log") { Get-Content "$app\TallySync.log" -Tail 5 | ForEach-Object { Note "log: $_" } }
-          (Get-Acl $app -ErrorAction SilentlyContinue).Access | ForEach-Object { Note "acl: $($_.IdentityReference) $($_.FileSystemRights)" }
+          if (Test-Path "$app\TallySync.log") { Note ("log: " + ((Get-Content "$app\TallySync.log" -Tail 4) -join " | ")) }
+          if (-not ((Get-Acl $app).Access | Where-Object { "$($_.IdentityReference)" -like "*\Users" -and "$($_.FileSystemRights)" -like "*Modify*" })) { $fail += "users can't write to the folder" }
           # the companies window, for the screenshots
           Get-Process BahiSync -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
           if (Test-Path "$app\BahiSync.exe") {

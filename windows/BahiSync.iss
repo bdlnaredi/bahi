@@ -54,15 +54,13 @@ Name: "{group}\Bahi Sync folder"; Filename: "{app}"
 Name: "{group}\Uninstall Bahi Sync"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Bahi Sync"; Filename: "{app}\BahiSync.exe"; Tasks: desktopicon
 
-[Registry]
-; "Start with Windows" is set by the app itself; removed again on uninstall
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "BahiSync"; Flags: uninsdeletevalue
-
 [Run]
 Filename: "{app}\BahiSync.exe"; Description: "Start Bahi Sync now"; Flags: nowait postinstall
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM BahiSync.exe"; Flags: runhidden; RunOnceId: "StopBahiSync"
+; "Start with Windows" is set by the app itself (for the user who runs it); taken off again here
+Filename: "{sys}\reg.exe"; Parameters: "delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v BahiSync /f"; Flags: runhidden runasoriginaluser; RunOnceId: "NoAutostart"
 
 [Code]
 // A running Bahi Sync (this one, or a copy started from another folder) is closed first, so its files can
