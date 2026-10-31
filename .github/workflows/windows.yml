@@ -98,7 +98,12 @@ jobs:
           foreach ($f in "BahiSync.exe", "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1", "Read me.txt", "TallySync.config.json", "TallySync.sent", "TallySync.companies.json") {
             if (-not (Test-Path "$app\$f")) { $fail += "$f missing" }
           }
-          $run = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -ErrorAction SilentlyContinue).BahiSync
+          # the first start of a new .exe can be slow (virus scan): give it up to a minute to take over
+          for ($i = 0; $i -lt 30; $i++) {
+            $run = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -ErrorAction SilentlyContinue).BahiSync
+            if ($run -like "*Bahi Sync\BahiSync.exe*") { break }
+            Start-Sleep -Seconds 2
+          }
           Note "start with Windows: $run"
           if ($run -notlike "*Bahi Sync\BahiSync.exe*") { $fail += "run key" }
           Note ("running: " + ((Get-Process BahiSync -ErrorAction SilentlyContinue | ForEach-Object Path) -join ", "))
