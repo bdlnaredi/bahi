@@ -74,6 +74,9 @@ jobs:
       - name: Installer test (Program Files, settings brought over from the old folder, uninstall)
         shell: pwsh
         run: |
+          Write-Host "::warning::installer test begins"
+          $ErrorActionPreference = "Continue"
+          trap { Write-Host ("::warning::error: " + $_.Exception.Message + " at line " + $_.InvocationInfo.ScriptLineNumber); continue }
           New-Item -ItemType Directory shots -Force | Out-Null
           $out = "shots\installer-test.txt"; $fail = @()
           function Note($t) { Add-Content $out $t; Write-Host ("::warning::" + ($t -replace "`r|`n", " ")) }
