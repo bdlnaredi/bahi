@@ -447,6 +447,13 @@ def plan(company, d_from, d_to, tally_list):
                       (company,)).fetchone()
         if not r or r["from_date"] != max(d_from, r["keep_from"] or "") or r["to_date"] != d_to:
             return {"full": True, "months": []}
+        # 3.6.1: stock lines Tally sends twice (ALLINVENTORYENTRIES and INVENTORYENTRIES) were both kept;
+        # every company's vouchers are read again once so the stored copies are right
+        key = f"items_once:{r['id']}"
+        if not c.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
+            c.execute("INSERT OR REPLACE INTO meta VALUES(?, '1')", (key,))
+            c.commit()
+            return {"full": True, "months": []}
         stored = {g: (a, d) for g, a, d in c.execute(
             "SELECT guid, alterid, date FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?", (r["id"], d_from, d_to))}
     if not stored:
@@ -532,6 +539,8 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
     with _lock, conn() as c:
         cid = company_id(c, company)
         kf = keep_from(c, cid)
+        if months is None and guids is None:          # a full sync: nothing stored before it needs reading again
+            c.execute("INSERT OR REPLACE INTO meta VALUES(?, '1')", (f"items_once:{cid}",))
         if kf and d_from < kf:
             d_from = kf
             vouchers = [v for v in vouchers if v["date"] >= kf]

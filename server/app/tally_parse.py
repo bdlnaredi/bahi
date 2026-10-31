@@ -322,7 +322,9 @@ def parse_vouchers(root):
             continue
         all_le = v.findall("ALLLEDGERENTRIES.LIST")
         le = v.findall("LEDGERENTRIES.LIST")
-        inv_lists = v.findall("ALLINVENTORYENTRIES.LIST") + v.findall("INVENTORYENTRIES.LIST")
+        # Tally can send the same stock lines twice, as ALLINVENTORYENTRIES and INVENTORYENTRIES (the voucher
+        # collection does): use one of them, never both
+        inv_lists = v.findall("ALLINVENTORYENTRIES.LIST") or v.findall("INVENTORYENTRIES.LIST")
         alloc = []
         for ie in inv_lists:
             alloc += ie.findall("ACCOUNTINGALLOCATIONS.LIST")
@@ -344,19 +346,24 @@ def parse_vouchers(root):
             r = _inv_row(ie)
             if r:
                 items.append(r)
-        for e in all_le + le:
-            for ia in e.findall("INVENTORYALLOCATIONS.LIST"):
+        # stock inside ledger lines (accounting-mode invoices), only when the voucher has no stock lines of its
+        # own, and again from one of the two lists: Tally repeats the same stock under several names
+        if not items:
+            in_all = [ia for e in all_le for ia in e.findall("INVENTORYALLOCATIONS.LIST")]
+            for ia in in_all or [ia for e in le for ia in e.findall("INVENTORYALLOCATIONS.LIST")]:
                 r = _inv_row(ia)
                 if r:
                     items.append(r)
-        for ie in v.findall("INVENTORYENTRIESIN.LIST"):
-            r = _inv_row(ie, True)
-            if r:
-                items.append(r)
-        for ie in v.findall("INVENTORYENTRIESOUT.LIST"):
-            r = _inv_row(ie, False)
-            if r:
-                items.append(r)
+        # stock journals and manufacturing: items consumed and produced
+        if not items:
+            for ie in v.findall("INVENTORYENTRIESIN.LIST"):
+                r = _inv_row(ie, True)
+                if r:
+                    items.append(r)
+            for ie in v.findall("INVENTORYENTRIESOUT.LIST"):
+                r = _inv_row(ie, False)
+                if r:
+                    items.append(r)
 
         bills = []
         for e in all_le + le:
