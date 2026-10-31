@@ -76,12 +76,13 @@ jobs:
         run: |
           New-Item -ItemType Directory shots -Force | Out-Null
           $out = "shots\installer-test.txt"; $fail = @()
-          function Note($t) { Add-Content $out $t; Write-Host $t }
+          function Note($t) { Add-Content $out $t; Write-Host ("::warning::" + ($t -replace "`r|`n", " ")) }
           New-Item -ItemType Directory C:\Bahi -Force | Out-Null
           '{"ServerUrl":"https://books.example.com","SyncToken":"x","TallyUrl":"http://localhost:9000","FromDate":"2023-04-01","Companies":{"Demo Traders":{"Sync":true},"Demo Traders (2023-24)":{"Sync":false,"From":"2023-04-01"}}}' | Set-Content C:\Bahi\TallySync.config.json
           "test-uid" | Set-Content C:\Bahi\TallySync.sent
           '[{"Name":"Demo Traders","BooksFrom":"2023-04-01","LastOpen":"2026-10-30 18:00"},{"Name":"Demo Traders (2023-24)","BooksFrom":"2023-04-01","LastOpen":"2026-09-01 10:00"},{"Name":"Sample Shop","BooksFrom":"2025-04-01","LastOpen":"2026-10-30 18:00"}]' | Set-Content C:\Bahi\TallySync.companies.json
           Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run BahiSync '"C:\Bahi\BahiSync.exe" --tray'
+          Note "test started"
           $p = Start-Process out\BahiSync-Setup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=setup.log" -PassThru -Wait
           Note "setup exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { $fail += "setup"; Get-Content setup.log -Tail 40 | ForEach-Object { Note $_ } }
@@ -128,7 +129,7 @@ jobs:
         run: |
           gh release view ci-screenshots *> $null
           if ($LASTEXITCODE -ne 0) { gh release create ci-screenshots --draft --title "CI screenshots" --notes "Screenshots from the Windows build, for checking the layout." }
-          gh release upload ci-screenshots (Get-ChildItem shots\*.png, shots\*.txt).FullName --clobber
+          foreach ($f in Get-ChildItem shots) { gh release upload ci-screenshots $f.FullName --clobber; if ($LASTEXITCODE) { Write-Host "::warning::upload of $($f.Name) failed" } }
 
       - uses: actions/upload-artifact@v4
         with:
