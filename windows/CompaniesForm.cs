@@ -87,6 +87,13 @@ namespace BahiSync
             AskTally();
         }
 
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            // an unticked date picker shows today once its window is made: show the general start date instead
+            foreach (var r in rows.Values) if (!r.From.Checked) { r.From.Value = general; r.From.Checked = false; }
+        }
+
         Row Add(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;
