@@ -281,7 +281,15 @@ namespace BahiSync
                         string from = Path.Combine(d, f), to = Path.Combine(Dir, f);
                         if (File.Exists(from) && !File.Exists(to)) File.Copy(from, to);
                     }
-                    if (started) SetStartWithWindows(true);       // start this copy with Windows instead of the old one
+                    string note = "";
+                    try { if (started) SetStartWithWindows(true); }      // start this copy with Windows instead of the old one
+                    catch (Exception e) { note = " (couldn't set it to start with Windows: " + e.Message + ")"; }
+                    try
+                    {
+                        File.AppendAllText(LogPath, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  Bahi Sync: settings brought over from " + d +
+                            (started ? ", starts with Windows from here" : "") + note + "\r\n", new UTF8Encoding(false));
+                    }
+                    catch { }
                     return d;
                 }
                 catch { }
