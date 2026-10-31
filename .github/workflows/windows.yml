@@ -72,6 +72,7 @@ jobs:
           Get-Item out\BahiSync-Setup.exe | Format-List Name, Length
 
       - name: Installer test (Program Files, settings brought over from the old folder, uninstall)
+        timeout-minutes: 10
         shell: pwsh
         run: |
           Write-Host "::warning::installer test begins"
@@ -86,7 +87,9 @@ jobs:
           '[{"Name":"Demo Traders","BooksFrom":"2023-04-01","LastOpen":"2026-10-30 18:00"},{"Name":"Demo Traders (2023-24)","BooksFrom":"2023-04-01","LastOpen":"2026-09-01 10:00"},{"Name":"Sample Shop","BooksFrom":"2025-04-01","LastOpen":"2026-10-30 18:00"}]' | Set-Content C:\Bahi\TallySync.companies.json
           Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run BahiSync '"C:\Bahi\BahiSync.exe" --tray'
           Note "test started"
-          $p = Start-Process out\BahiSync-Setup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=setup.log" -PassThru -Wait
+          # -Wait would also wait for Bahi Sync, which setup starts at the end and which keeps running
+          $p = Start-Process out\BahiSync-Setup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=setup.log" -PassThru
+          if (-not $p.WaitForExit(300000)) { $fail += "setup did not finish" }
           Note "setup exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) { $fail += "setup"; Get-Content setup.log -Tail 40 | ForEach-Object { Note $_ } }
           $app = "$env:ProgramFiles\Bahi Sync"
@@ -114,7 +117,7 @@ jobs:
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           }
           if (Test-Path "$app\unins000.exe") {
-            $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -PassThru -Wait
+            $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -PassThru; [void]$u.WaitForExit(120000)
             Start-Sleep -Seconds 5
             if (Test-Path "$app\BahiSync.exe") { $fail += "uninstall left BahiSync.exe" }
             if ((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -ErrorAction SilentlyContinue).BahiSync) { $fail += "uninstall left run key" }
