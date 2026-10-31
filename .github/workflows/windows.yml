@@ -74,41 +74,53 @@ jobs:
       - name: Installer test (Program Files, settings brought over from the old folder, uninstall)
         shell: pwsh
         run: |
+          New-Item -ItemType Directory shots -Force | Out-Null
+          $out = "shots\installer-test.txt"; $fail = @()
+          function Note($t) { Add-Content $out $t; Write-Host $t }
           New-Item -ItemType Directory C:\Bahi -Force | Out-Null
           '{"ServerUrl":"https://books.example.com","SyncToken":"x","TallyUrl":"http://localhost:9000","FromDate":"2023-04-01","Companies":{"Demo Traders":{"Sync":true},"Demo Traders (2023-24)":{"Sync":false,"From":"2023-04-01"}}}' | Set-Content C:\Bahi\TallySync.config.json
           "test-uid" | Set-Content C:\Bahi\TallySync.sent
           '[{"Name":"Demo Traders","BooksFrom":"2023-04-01","LastOpen":"2026-10-30 18:00"},{"Name":"Demo Traders (2023-24)","BooksFrom":"2023-04-01","LastOpen":"2026-09-01 10:00"},{"Name":"Sample Shop","BooksFrom":"2025-04-01","LastOpen":"2026-10-30 18:00"}]' | Set-Content C:\Bahi\TallySync.companies.json
           Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run BahiSync '"C:\Bahi\BahiSync.exe" --tray'
           $p = Start-Process out\BahiSync-Setup.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=setup.log" -PassThru -Wait
-          if ($p.ExitCode -ne 0) { Get-Content setup.log -Tail 40; throw "setup failed ($($p.ExitCode))" }
+          Note "setup exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { $fail += "setup"; Get-Content setup.log -Tail 40 | ForEach-Object { Note $_ } }
           $app = "$env:ProgramFiles\Bahi Sync"
-          Start-Sleep -Seconds 12
-          Get-ChildItem $app | Format-Table Name, Length
+          Start-Sleep -Seconds 15
+          Note ("files: " + ((Get-ChildItem $app -ErrorAction SilentlyContinue | ForEach-Object Name) -join ", "))
           foreach ($f in "BahiSync.exe", "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1", "Read me.txt", "TallySync.config.json", "TallySync.sent", "TallySync.companies.json") {
-            if (-not (Test-Path "$app\$f")) { throw "$f is missing in $app" }
+            if (-not (Test-Path "$app\$f")) { $fail += "$f missing" }
           }
-          $run = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run).BahiSync
-          "Start with Windows: $run"
-          if ($run -notlike "*Bahi Sync\BahiSync.exe*") { throw "start with Windows still points at $run" }
-          if (-not (Get-Process BahiSync -ErrorAction SilentlyContinue)) { throw "Bahi Sync didn't start after installing" }
-          (Get-Acl $app).Access | Where-Object { "$($_.IdentityReference)" -like "*Users" } | Format-Table IdentityReference, FileSystemRights, IsInherited
+          $run = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -ErrorAction SilentlyContinue).BahiSync
+          Note "start with Windows: $run"
+          if ($run -notlike "*Bahi Sync\BahiSync.exe*") { $fail += "run key" }
+          Note ("running: " + ((Get-Process BahiSync -ErrorAction SilentlyContinue | ForEach-Object Path) -join ", "))
+          if (-not (Get-Process BahiSync -ErrorAction SilentlyContinue)) { $fail += "not started" }
+          if (Test-Path "$app\TallySync.log") { Get-Content "$app\TallySync.log" -Tail 5 | ForEach-Object { Note "log: $_" } }
+          (Get-Acl $app -ErrorAction SilentlyContinue).Access | ForEach-Object { Note "acl: $($_.IdentityReference) $($_.FileSystemRights)" }
           # the companies window, for the screenshots
-          Get-Process BahiSync | Stop-Process -Force; Start-Sleep -Seconds 2
-          $p = Start-Process -FilePath "$app\BahiSync.exe" -ArgumentList "--companies" -PassThru; Start-Sleep -Seconds 12
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
-          $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          New-Item -ItemType Directory shots -Force | Out-Null
-          $bmp.Save("shots\3-companies.png"); $g.Dispose(); $bmp.Dispose()
-          Stop-Process -Id $p.Id -Force
-          $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -PassThru -Wait
-          Start-Sleep -Seconds 3
-          if (Test-Path "$app\BahiSync.exe") { throw "uninstall left BahiSync.exe behind" }
-          if ((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run).BahiSync) { throw "uninstall left the start-with-Windows entry" }
-          "uninstalled; left in the folder (settings and records): " + ((Get-ChildItem $app -ErrorAction SilentlyContinue | ForEach-Object Name) -join ", ")
+          Get-Process BahiSync -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2
+          if (Test-Path "$app\BahiSync.exe") {
+            $p = Start-Process -FilePath "$app\BahiSync.exe" -ArgumentList "--companies" -PassThru; Start-Sleep -Seconds 12
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("shots\3-companies.png"); $g.Dispose(); $bmp.Dispose()
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+          if (Test-Path "$app\unins000.exe") {
+            $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -PassThru -Wait
+            Start-Sleep -Seconds 5
+            if (Test-Path "$app\BahiSync.exe") { $fail += "uninstall left BahiSync.exe" }
+            if ((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -ErrorAction SilentlyContinue).BahiSync) { $fail += "uninstall left run key" }
+            Note ("after uninstall: " + ((Get-ChildItem $app -ErrorAction SilentlyContinue | ForEach-Object Name) -join ", "))
+          } else { $fail += "no uninstaller" }
+          Note ("FAILED: " + ($fail -join "; "))
+          if ($fail.Count) { exit 1 }
 
       - name: Keep the screenshots on a draft release (not shown publicly)
+        if: always()
         continue-on-error: true
         shell: pwsh
         env:
@@ -116,7 +128,7 @@ jobs:
         run: |
           gh release view ci-screenshots *> $null
           if ($LASTEXITCODE -ne 0) { gh release create ci-screenshots --draft --title "CI screenshots" --notes "Screenshots from the Windows build, for checking the layout." }
-          gh release upload ci-screenshots (Get-ChildItem shots\*.png).FullName --clobber
+          gh release upload ci-screenshots (Get-ChildItem shots\*.png, shots\*.txt).FullName --clobber
 
       - uses: actions/upload-artifact@v4
         with:
