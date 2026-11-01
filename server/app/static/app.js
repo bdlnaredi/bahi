@@ -166,8 +166,8 @@ async function downloadOffline(onProgress = () => {}) {
 function androidSection() {
   if (!window.BahiAndroid) return "";
   return `<section class="page"><div class="block-title">Android app <span>version ${h(BahiAndroid.version())}</span></div>
-    <div class="info"><div>Server: ${h(BahiAndroid.server())}</div></div>
-    <div class="actions"><button class="btn" onclick="BahiAndroid.changeServer()">Change server address</button><button class="btn" onclick="BahiAndroid.checkUpdate()">Check for app update</button></div></section>`;
+    <div class="info"><div>Server: ${h(BahiAndroid.server())}</div><div>Update app checks for a newer version and installs it here, keeping your login and saved data. The app also checks by itself twice a day.</div></div>
+    <div class="actions"><button class="btn" onclick="BahiAndroid.changeServer()">Change server address</button><button class="btn primary" onclick="BahiAndroid.checkUpdate()">Update app</button></div></section>`;
 }
 function offlineSection() {
   const el = $("#offsec");

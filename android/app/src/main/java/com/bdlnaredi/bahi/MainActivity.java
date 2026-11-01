@@ -11,9 +11,11 @@ import android.graphics.Typeface;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -414,37 +416,124 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void checkUpdate() {
-            prefs.edit().putLong("update_checked", 0).apply();
-            ui.post(() -> MainActivity.this.checkForUpdate());
+            ui.post(() -> MainActivity.this.checkForUpdate(true));
         }
     }
 
     // ------------------------------------------------------------------ new app versions
-    private void checkForUpdate() {
+    /** Looks for a newer app on GitHub (at most every 12 hours, or now when asked) and offers to update. */
+    private void checkForUpdate() { checkForUpdate(false); }
+
+    private void checkForUpdate(boolean asked) {
         long last = prefs.getLong("update_checked", 0);
-        if (System.currentTimeMillis() - last < 12 * 3600 * 1000L || !online()) return;
+        if (!asked && System.currentTimeMillis() - last < 12 * 3600 * 1000L) return;
+        if (!online()) { if (asked) toast("No internet connection."); return; }
         prefs.edit().putLong("update_checked", System.currentTimeMillis()).apply();
+        if (asked) toast("Checking for a new version ...");
         new Thread(() -> {
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL(RELEASE_API).openConnection();
                 c.setRequestProperty("Accept", "application/vnd.github+json");
                 c.setConnectTimeout(10000);
                 c.setReadTimeout(10000);
-                if (c.getResponseCode() != 200) return;
+                if (c.getResponseCode() != 200) throw new Exception("GitHub said " + c.getResponseCode());
                 String body = new String(readAll(c.getInputStream(), 200000), "UTF-8");
                 Matcher m = Pattern.compile("versionCode:\\s*(\\d+)").matcher(body);
-                if (m.find() && Integer.parseInt(m.group(1)) > BuildConfig.VERSION_CODE) {
+                int latest = m.find() ? Integer.parseInt(m.group(1)) : 0;
+                if (latest > BuildConfig.VERSION_CODE) {
                     ui.post(() -> new AlertDialog.Builder(this)
                             .setTitle("New version of the Bahi app")
-                            .setMessage("A newer version of this app is ready. Download it and tap it to install; your login and saved data stay.")
-                            .setPositiveButton("Download", (d, w) -> route(Uri.parse(APK_URL)))
+                            .setMessage("Version 1." + latest + " is ready (you have " + BuildConfig.VERSION_NAME + "). Update now? Your login and saved data stay.")
+                            .setPositiveButton("Update now", (d, w) -> downloadUpdate())
                             .setNegativeButton("Later", null)
                             .show());
+                } else if (asked) {
+                    ui.post(() -> toast("You have the latest version (" + BuildConfig.VERSION_NAME + ")."));
                 }
-            } catch (Exception ignored) {
-                // no update check this time
+            } catch (Exception e) {
+                if (asked) ui.post(() -> toast("Couldn't check for updates: " + e.getMessage()));
             }
         }).start();
+    }
+
+    /** Downloads the new app with a progress bar, then hands it to Android's installer. */
+    private void downloadUpdate() {
+        final ProgressBar pb = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        pb.setMax(100);
+        int pad = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 20, getResources().getDisplayMetrics());
+        pb.setPadding(pad, pad, pad, pad);
+        final AlertDialog dlg = new AlertDialog.Builder(this).setTitle("Downloading the update").setView(pb).setCancelable(false).show();
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(APK_URL).openConnection();
+                c.setInstanceFollowRedirects(true);
+                c.setConnectTimeout(20000);
+                c.setReadTimeout(60000);
+                if (c.getResponseCode() != 200) throw new Exception("GitHub said " + c.getResponseCode());
+                long total = c.getContentLengthLong();
+                File dir = new File(getCacheDir(), "updates");
+                dir.mkdirs();
+                File apk = new File(dir, "Bahi-update.apk");
+                try (InputStream in = c.getInputStream(); OutputStream os = new FileOutputStream(apk)) {
+                    byte[] buf = new byte[32768];
+                    long got = 0;
+                    int n, shown = -1;
+                    while ((n = in.read(buf)) > 0) {
+                        os.write(buf, 0, n);
+                        got += n;
+                        int pct = total > 0 ? (int) (got * 100 / total) : -1;
+                        if (pct != shown) { shown = pct; final int p = pct; ui.post(() -> { if (p >= 0) pb.setProgress(p); else pb.setIndeterminate(true); }); }
+                    }
+                }
+                c.disconnect();
+                if (apk.length() < 100000) throw new Exception("the download was incomplete");
+                ui.post(() -> { dlg.dismiss(); pendingApk = apk; installUpdate(); });
+            } catch (Exception e) {
+                ui.post(() -> { dlg.dismiss(); toast("Couldn't download the update: " + e.getMessage()); });
+            }
+        }).start();
+    }
+
+    private File pendingApk;
+    private boolean askedInstallPermission;
+
+    private void installUpdate() {
+        if (pendingApk == null || !pendingApk.exists()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            if (askedInstallPermission) { toast("Allow \"Install unknown apps\" for Bahi to update it."); askedInstallPermission = false; return; }
+            askedInstallPermission = true;
+            new AlertDialog.Builder(this)
+                    .setTitle("Allow Bahi to update itself")
+                    .setMessage("Android needs your permission once: on the next screen turn on \"Allow from this source\", then come back.")
+                    .setPositiveButton("Open settings", (d, w) -> {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + getPackageName())));
+                        } catch (ActivityNotFoundException e) {
+                            toast("Open Settings, Apps, Bahi, Install unknown apps, and allow it.");
+                        }
+                    })
+                    .setNegativeButton("Cancel", (d, w) -> { askedInstallPermission = false; pendingApk = null; })
+                    .show();
+            return;
+        }
+        askedInstallPermission = false;
+        Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", pendingApk);
+        Intent i = new Intent(Intent.ACTION_VIEW);
+        i.setDataAndType(uri, "application/vnd.android.package-archive");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        pendingApk = null;
+        try {
+            startActivity(i);
+        } catch (ActivityNotFoundException e) {
+            toast("This phone couldn't open the installer.");
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // back from the "Install unknown apps" screen: carry on with the update
+        if (pendingApk != null && askedInstallPermission) installUpdate();
     }
 
     // ------------------------------------------------------------------ plumbing
