@@ -306,12 +306,14 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ files: PDFs, Excel, backups
     private void fetchFile(final String url, final String name, final boolean share) {
         toast(share ? "Preparing to share" : "Opening");
+        // WebView may only be touched on this (the main) thread: read what the download needs first
+        final String agent = web != null ? web.getSettings().getUserAgentString() : "BahiAndroid";
         new Thread(() -> {
             try {
                 HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                 String cookie = CookieManager.getInstance().getCookie(url);
                 if (cookie != null) c.setRequestProperty("Cookie", cookie);
-                c.setRequestProperty("User-Agent", web != null ? web.getSettings().getUserAgentString() : "BahiAndroid");
+                c.setRequestProperty("User-Agent", agent);
                 c.setConnectTimeout(20000);
                 c.setReadTimeout(60000);
                 int code = c.getResponseCode();
