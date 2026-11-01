@@ -412,3 +412,15 @@ a.bill:active { background: var(--rule); }
 
 .badge.negative, .badge.low { background: color-mix(in srgb, var(--cr) 14%, transparent); color: var(--cr); }
 .linkbtn { background: none; border: 0; padding: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+
+/* figures by month / week / day: a summary row that opens to its entries or days */
+.ruled .entry.grp { width: 100%; background: none; border: 0; border-top: 1px solid var(--rule); font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.ruled .entry.grp .p { font-weight: 600; }
+.ruled .entry.grp .gdc { text-align: right; display: flex; flex-direction: column; font-size: 14px; white-space: nowrap; }
+.ruled .entry.grp .gdc .crt { color: var(--cr); }
+.ruled .entry.grp[aria-expanded="true"] { background: var(--sheet); }
+.gitems .entry { padding-left: 58px; background: var(--paper); }
+button.row.grp { width: 100%; background: none; border: 0; border-top: 1px solid var(--rule); font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.row.grp:first-child { border-top: 0; }
+button.row.grp[aria-expanded="true"] { background: var(--sheet); }
+.gdays .row.day { padding-left: 28px; }

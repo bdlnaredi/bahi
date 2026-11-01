@@ -25,7 +25,7 @@ function entryBar() {
     ${ks.length ? `<div class="actions">${ks.map((k) => `<a class="btn" href="#/new/${k}">+ ${ENTRY[k][0]}</a>`).join("")}<a class="btn" href="#/entries">Entries</a></div>` : ""}</section>`;
 }
 try { S.cid = Number(localStorage.getItem("cid")) || null; } catch (e) {}
-try { S.lsort = localStorage.getItem("lsort") || "name"; S.esort = localStorage.getItem("esort") || "old"; } catch (e) { S.lsort = "name"; S.esort = "old"; }
+try { S.lsort = localStorage.getItem("lsort") || "name"; S.esort = localStorage.getItem("esort") || "old"; S.lview = localStorage.getItem("lview") || "grouped"; } catch (e) { S.lsort = "name"; S.esort = "old"; S.lview = "grouped"; }
 function savePref(k, v) { S[k] = v; try { localStorage.setItem(k, v); } catch (e) {} }
 function sortChips(id, opts, cur) {
   return `<div class="toolbar sortbar" id="${id}" role="group" aria-label="Sort"><span class="sortlabel">Sort</span>${opts.map(([k, l]) =>
@@ -489,6 +489,37 @@ function sortEntries(list) {
   return e;
 }
 
+// ---- figures by month (a year), by week (a quarter) or by day (a month): picked from the period's length
+function grainOf(from, to) {
+  const days = Math.round((new Date(to + "T00:00:00") - new Date(from + "T00:00:00")) / 864e5) + 1;
+  return days > 120 ? "month" : days > 45 ? "week" : "day";
+}
+const GRAIN_WORD = { month: "Monthly", week: "Weekly", day: "Daily" };
+function iso(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function bucketOf(date, grain) {
+  if (grain === "month") return date.slice(0, 7);
+  if (grain === "day") return date;
+  const d = new Date(date + "T00:00:00");
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));          // weeks run Monday to Sunday
+  return iso(d);
+}
+function bucketLabel(key, grain, from, to) {
+  if (grain === "month") { const [y, m] = key.split("-"); return `${MON[+m - 1]} ${y}`; }
+  if (grain === "day") return `${new Date(key + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short" })}, ${fdate(key)}`;
+  const end = new Date(key + "T00:00:00"); end.setDate(end.getDate() + 6);
+  const a = key < from ? from : key, b = iso(end) > to ? to : iso(end);
+  return a === b ? fdate(a) : `${fdate(a)} to ${fdate(b)}`;
+}
+function groupBy(list, grain, dateOf) {
+  const out = [], at = {};
+  for (const x of list) {
+    const k = bucketOf(dateOf(x), grain);
+    if (!(k in at)) { at[k] = out.length; out.push({ key: k, items: [] }); }
+    out[at[k]].items.push(x);
+  }
+  return out;
+}
+
 async function vLedger(name) {
   setTitle(true);
   const d = await api(cpath("ledger", { name, ...ledgerParams() }));
@@ -499,6 +530,13 @@ async function vLedger(name) {
   const waText = isDebtor ? reminderText(L.name, co, d.closing, overdue, d.interest, d.interest_rate) : `Dear ${L.name}, greetings from ${co}.`;
   const pdfUrl = cpath("ledger_pdf", { name, ...ledgerParams() });
   const pending = (d.bills || []).filter((b) => Math.abs(b.amount) > 0.5);
+  const grain = grainOf(d.from, d.to);
+  const groups = groupBy(d.entries, grain, (e) => e.date);
+  const entryRow = (e) => `<a class="entry" href="#/voucher/${e.id}">
+          <span class="d">${fdate(e.date)}</span>
+          <span class="p">${h(e.against || e.vtype)}</span>${drcr(e.amount)}
+          <span class="v">${h(e.vtype)} ${h(e.number)}</span><span class="bal">Bal ${drcr(e.balance)}</span>
+        </a>`;
   view.innerHTML = `
     <div class="crumbs"><a href="#/group/${enc(L.parent)}">${h(L.parent)}</a></div>
     <h1 class="title">${h(L.name)}</h1>
@@ -520,14 +558,20 @@ async function vLedger(name) {
         <div><div class="label">Credits</div>${money(d.credit, "cr")}</div>
       </div>
     </section>
-    ${d.entries.length > 1 ? sortChips("esorts", [["old", "Oldest first"], ["new", "Newest first"], ["amount", "Largest amount"]], S.esort) : ""}
+    ${d.entries.length > 1 ? `<div class="toolbar" role="group" aria-label="Show">
+        <button class="chip ${S.lview !== "all" ? "on" : ""}" data-lview="grouped">${GRAIN_WORD[grain]} figures</button>
+        <button class="chip ${S.lview === "all" ? "on" : ""}" data-lview="all">All entries</button></div>` : ""}
+    ${d.entries.length > 1 && S.lview === "all" ? sortChips("esorts", [["old", "Oldest first"], ["new", "Newest first"], ["amount", "Largest amount"]], S.esort) : ""}
     <section class="page ruled stmt">
       <div class="carry"><span>Opening balance</span>${drcr(d.opening)}</div>
-      ${sortEntries(d.entries).map((e) => `<a class="entry" href="#/voucher/${e.id}">
-          <span class="d">${fdate(e.date)}</span>
-          <span class="p">${h(e.against || e.vtype)}</span>${drcr(e.amount)}
-          <span class="v">${h(e.vtype)} ${h(e.number)}</span><span class="bal">Bal ${drcr(e.balance)}</span>
-        </a>`).join("") || '<div class="empty">No entries in this period.</div>'}
+      ${!d.entries.length ? '<div class="empty">No entries in this period.</div>' : S.lview === "all" || d.entries.length < 2 ? sortEntries(d.entries).map(entryRow).join("") :
+        groups.map((g, i) => {
+          const dr = g.items.reduce((t, e) => t + (e.amount > 0 ? e.amount : 0), 0), cr = g.items.reduce((t, e) => t + (e.amount < 0 ? -e.amount : 0), 0);
+          return `<button class="entry grp" data-g="${i}" aria-expanded="false">
+              <span class="d">${g.items.length} entr${g.items.length === 1 ? "y" : "ies"}</span>
+              <span class="p">${h(bucketLabel(g.key, grain, d.from, d.to))}</span><span class="gdc">${dr ? `<span>Dr ${nf2.format(dr)}</span>` : ""}${cr ? `<span class="crt">Cr ${nf2.format(cr)}</span>` : ""}</span>
+              <span class="v">tap to see the entries</span><span class="bal">Bal ${drcr(g.items[g.items.length - 1].balance)}</span></button>
+            <div class="gitems" id="g${i}" hidden>${g.items.map(entryRow).join("")}</div>`; }).join("")}
       <div class="closing"><span>Closing balance</span>${drcr(d.closing)}</div>
     </section>
     ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}${d.interest > 0.5 ? `, interest ${rupees(d.interest, false)}` : ""}</span></div>${billRows(pending.slice(0, 5))}
@@ -535,6 +579,13 @@ async function vLedger(name) {
   wirePeriod(d.from, d.to, "ledger");
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`, L.name);
   $("#plink").onclick = () => linkDialog(L.name).catch(fail);
+  view.querySelectorAll("[data-lview]").forEach((b) => b.onclick = () => {
+    const y = window.scrollY; savePref("lview", b.dataset.lview); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);
+  });
+  view.querySelectorAll("button.grp").forEach((b) => b.onclick = () => {
+    const box = $("#g" + b.dataset.g), open = box.hidden;
+    box.hidden = !open; b.setAttribute("aria-expanded", String(open));
+  });
   view.querySelectorAll("#esorts [data-sort]").forEach((b) => b.onclick = () => {
     const y = window.scrollY; savePref("esort", b.dataset.sort); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);
   });
@@ -993,22 +1044,34 @@ async function vSales(kind) {
   const sales = S.skind === "sales";
   const sp = { kind: S.skind, sub: S.ssub || "", ...periodParams() };
   const d = await api(cpath("daily", sp));
-  const max = Math.max(1, ...d.days.map((x) => x.total));
-  let month = "", body = "";
-  const mtot = {};
-  d.days.forEach((x) => { const m = x.date.slice(0, 7); mtot[m] = mtot[m] || { t: 0, n: 0 }; mtot[m].t += x.total; mtot[m].n += x.bills; });
-  for (const x of d.days) {
-    const m = x.date.slice(0, 7);
-    if (m !== month) {
-      month = m; const [yy, mm] = m.split("-");
-      body += `<div class="block-title month-head"><span>${MON[+mm - 1]} ${yy}</span><span>${short(mtot[m].t)}, ${mtot[m].n} bills</span></div>`;
-    }
+  // a year by month, a quarter by week, a month by day; tap a month or week to see its days
+  const grain = grainOf(d.from, d.to);
+  const dayRow = (x, max) => {
     const dt = new Date(x.date + "T00:00:00");
-    body += `<a class="row day" href="#/day/${S.skind}/${x.date}"><div class="main">
+    return `<a class="row day" href="#/day/${S.skind}/${x.date}"><div class="main">
         <div class="name">${dt.toLocaleDateString("en-IN", { weekday: "short" })}, ${fdate(x.date)}</div>
         <div class="meta">${x.bills} bill${x.bills === 1 ? "" : "s"}${x.returns ? `, returns ${rupees(x.returns, false)}` : ""}</div>
         <div class="daybar"><span style="width:${Math.max(1, (x.total / max) * 100).toFixed(1)}%"></span></div></div>
       <div class="end">${money(x.total)}<div class="meta">${rupees(x.net, false)} before tax</div></div><span class="chev"></span></a>`;
+  };
+  let body = "";
+  if (grain === "day") {
+    const max = Math.max(1, ...d.days.map((x) => x.total));
+    body = d.days.map((x) => dayRow(x, max)).join("");
+  } else {
+    const gs = groupBy(d.days, grain, (x) => x.date).map((g) => ({ ...g,
+      total: g.items.reduce((t, x) => t + x.total, 0), net: g.items.reduce((t, x) => t + x.net, 0),
+      bills: g.items.reduce((t, x) => t + x.bills, 0), returns: g.items.reduce((t, x) => t + (x.returns || 0), 0) }));
+    const gmax = Math.max(1, ...gs.map((g) => g.total));
+    body = gs.map((g, i) => {
+      const dmax = Math.max(1, ...g.items.map((x) => x.total));
+      return `<button class="row day grp" data-sg="${i}" aria-expanded="false"><div class="main">
+          <div class="name">${h(bucketLabel(g.key, grain, d.from, d.to))}</div>
+          <div class="meta">${g.bills} bill${g.bills === 1 ? "" : "s"} on ${g.items.length} day${g.items.length === 1 ? "" : "s"}${g.returns ? `, returns ${rupees(g.returns, false)}` : ""}</div>
+          <div class="daybar"><span style="width:${Math.max(1, (g.total / gmax) * 100).toFixed(1)}%"></span></div></div>
+        <div class="end">${money(g.total)}<div class="meta">${rupees(g.net, false)} before tax</div></div><span class="chev down"></span></button>
+        <div class="gdays" id="sg${i}" hidden>${g.items.map((x) => dayRow(x, dmax)).join("")}</div>`;
+    }).join("");
   }
   view.innerHTML = `
     <div class="toolbar" role="group" aria-label="Sales or purchases">
@@ -1027,11 +1090,17 @@ async function vSales(kind) {
       </div>
       ${d.best && d.best.total ? `<div class="note">Best day: <a href="#/day/${S.skind}/${d.best.date}">${fdate(d.best.date)}</a>, ${rupees(d.best.total, false)}</div>` : ""}
     </section>
+    ${body ? `<div class="block-title" style="padding:4px 4px 6px">${GRAIN_WORD[grain]} figures${grain !== "day" ? " <span>tap one to see its days</span>" : ""}</div>` : ""}
     <section class="page">${body || `<div class="empty">No ${sales ? "sales" : "purchases"} in this period.</div>`}</section>
     ${S.ssub ? `<p class="note" style="border:0">Showing only ${h(S.ssub)}. Returns are counted under All combined.</p>` : ""}
     <div class="actions" style="padding:0 0 12px">${excelBtn("daily", sp)}<a class="btn" href="#/analysis">Sales analysis</a></div>`;
   wirePeriod(d.from, d.to);
   view.querySelectorAll("[data-ss]").forEach((b) => b.onclick = () => { S.ssub = b.dataset.ss; vSales().catch(fail); });
+  view.querySelectorAll("button.grp[data-sg]").forEach((b) => b.onclick = () => {
+    const box = $("#sg" + b.dataset.sg), open = box.hidden;
+    box.hidden = !open; b.setAttribute("aria-expanded", String(open));
+    b.querySelector(".chev").classList.toggle("up", open);
+  });
 }
 
 async function vDay(kind, day) {
