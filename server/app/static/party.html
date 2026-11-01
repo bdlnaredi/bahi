@@ -113,6 +113,7 @@ footer { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 1
           <div><div class="label">Closing, ${fdate(asOf)}</div>${drcr(d.closing)}</div>
         </div>
       </section>
+      ${d.upi && cl > 0.5 ? `<a class="btn primary" style="display:flex;justify-content:center;font-size:17px;padding:13px;margin-bottom:14px" href="${base}/pay">Pay ${rs(cl)} with UPI</a>` : ""}
       <div class="controls">
         <select id="fy" aria-label="Financial year">${fys.map((y) => `<option value="${y}" ${y === curFy ? "selected" : ""}>April ${y} to March ${y + 1}</option>`).join("")}</select>
         <a class="btn primary" href="${base}/ledger.pdf${pdfQs}" target="_blank" rel="noopener">Download statement (PDF)</a>

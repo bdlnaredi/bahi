@@ -399,7 +399,7 @@ async function vParties(q) {
 }
 
 // ---- customer links: a private page where a party sees their own ledger, bills and vouchers
-const LINKS = {};
+const LINKS = {}, LINKS_UPI = {};
 async function partyLink(party) {
   if (!party) return "";
   const key = S.cid + "|" + party;
@@ -407,12 +407,16 @@ async function partyLink(party) {
   try {
     const d = await api(cpath("party_link", { party }));
     LINKS[key] = d.base ? d.url : location.origin + d.path;
+    if (d.upi) LINKS_UPI[LINKS[key]] = true;
   } catch (e) { return ""; }
   return LINKS[key];
 }
-function linkLine(link) {
+// pay: add the UPI payment page (when the company has a UPI ID) for a request or reminder
+function linkLine(link, pay = false) {
   const co = S.companies.find((c) => c.id === S.cid)?.name || "";
-  return link ? `\n\nSee your account with ${co} any time (ledger, bills, invoices): ${link}` : "";
+  if (!link) return "";
+  return (pay && LINKS_UPI[link] ? `\n\nPay by UPI (GPay, PhonePe, Paytm, any bank app): ${link}/pay` : "") +
+    `\n\nSee your account with ${co} any time (ledger, bills, invoices): ${link}`;
 }
 // every WhatsApp message to a party carries their link
 document.addEventListener("click", async (ev) => {
@@ -421,7 +425,7 @@ document.addEventListener("click", async (ev) => {
   ev.preventDefault();
   const link = await partyLink(a.dataset.waParty);
   const u = new URL(a.href);
-  u.searchParams.set("text", (u.searchParams.get("text") || "") + linkLine(link));
+  u.searchParams.set("text", (u.searchParams.get("text") || "") + linkLine(link, !!a.dataset.waPay));
   if (window.BahiAndroid || !window.open(u.href, "_blank", "noopener")) location.href = u.href;
 });
 
@@ -448,8 +452,47 @@ async function linkDialog(party) {
   };
 }
 
-async function sharePdf(url, name, party) {
-  const text = party ? linkLine(await partyLink(party)).trim() : "";
+// ---- UPI payment request: the amount goes straight from the customer's UPI app to your UPI ID
+async function payDialog(party, amount, phone) {
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  const dlg = $("#sheet");
+  const draw = async (amt) => {
+    const r = await api(cpath("upi", { party, amount: amt > 0 ? amt.toFixed(2) : "" }));
+    if (!r.on) {
+      dlg.innerHTML = `<h3>Request payment</h3><div style="padding:0 14px 14px"><p class="hint" style="margin:0">Set your UPI ID first: ${S.me.owner ? "Settings, <b>UPI payments</b>" : "ask the owner to set it in Settings"}. Then you can send ${h(party)} a link that opens their UPI app with the amount filled in, or show a QR code to scan.</p>
+        <div class="actions" style="padding-top:12px">${S.me.owner ? '<a class="btn primary" href="#/settings" data-a="close">Open Settings</a>' : ""}<button class="btn" data-a="close">Close</button></div></div>`;
+      return null;
+    }
+    const pay = r.base ? r.pay_url : location.origin + r.pay_path;
+    const msg = `Dear ${party}, please pay ${amt > 0 ? rupees(amt) : "your dues"} to ${co}.\n\nPay by UPI (GPay, PhonePe, Paytm, any bank app): ${pay}`;
+    dlg.innerHTML = `<h3>Request payment</h3><div style="padding:0 14px 14px">
+      <form id="payf" class="form" style="padding:0"><label>Amount, ₹<input type="number" name="amt" min="1" step="0.01" inputmode="decimal" value="${amt > 0 ? amt.toFixed(2) : ""}" placeholder="Customer types it"></label></form>
+      <div style="text-align:center;margin:8px 0"><div style="display:inline-block;background:#fff;padding:6px;border-radius:8px;width:200px;height:200px" class="upiqr">${r.qr}</div>
+        <div class="hint">Customer at the counter? Let them scan this with any UPI app. Pays to ${h(r.vpa)}.</div>
+        ${amt > 100000 ? '<div class="hint od">UPI apps usually allow up to ₹1,00,000 in one payment; ask for it in parts above that.</div>' : ""}</div>
+      <div class="actions" style="padding-top:6px">
+        ${phone ? `<a class="btn wa primary" href="https://wa.me/${phone}?text=${enc(msg)}" target="_blank" rel="noopener">${ICON.wa}Send on WhatsApp</a>` : ""}
+        <button class="btn ${phone ? "" : "primary"}" data-a="share">${ICON.share}Share</button><button class="btn" data-a="copy">Copy link</button><button class="btn" data-a="close">Close</button></div>
+      <p class="hint" style="margin:8px 0 0">The money goes straight to your bank through UPI; Bahi doesn't handle it. Enter the receipt in Tally (or in Bahi) once it arrives.</p></div>`;
+    const sv = dlg.querySelector(".upiqr svg"); if (sv) { sv.setAttribute("width", "100%"); sv.setAttribute("height", "100%"); }
+    dlg.querySelector("[name=amt]").onchange = (e) => draw(parseFloat(e.target.value) || 0).catch(fail);
+    cur = { pay, msg };
+    return cur;
+  };
+  let cur = null;
+  await draw(Math.round(amount * 100) / 100);
+  if (!dlg.open) dlg.showModal();
+  dlg.onclick = async (ev) => {
+    const a = ev.target.closest("[data-a]")?.dataset.a || (ev.target === dlg ? "close" : "");
+    if (a === "close") { dlg.close(); dlg.onclick = null; return; }
+    if (!cur) return;
+    if (a === "share") { try { await navigator.share({ text: cur.msg }); } catch (e) { if (e.name !== "AbortError") { try { await navigator.clipboard.writeText(cur.msg); toast("Message copied"); } catch (x) {} } } }
+    if (a === "copy") { try { await navigator.clipboard.writeText(cur.pay); toast("Payment link copied"); } catch (e) { toast(cur.pay); } }
+  };
+}
+
+async function sharePdf(url, name, party, pay = false) {
+  const text = party ? linkLine(await partyLink(party), pay).trim() : "";
   if (window.BahiAndroid) {      // the Android app downloads it and opens the phone's share sheet (WhatsApp, email...)
     const file = name.replace(/[^\w .-]+/g, "").slice(0, 80) + ".pdf";
     if (text && BahiAndroid.shareWithText) BahiAndroid.shareWithText(new URL(url, location.origin).href, file, text);
@@ -549,7 +592,8 @@ async function vLedger(name) {
         <a class="btn" href="${pdfUrl}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
         ${excelBtn("ledger", { name, ...ledgerParams() })}
         <button class="btn" id="plink">${ICON.share}Customer link</button>
-        ${phone ? `<a class="btn wa" data-wa-party="${h(L.name)}" href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}">${ICON.call}Call</a>` : ""}
+        <button class="btn" id="preq">₹ Request payment</button>
+        ${phone ? `<a class="btn wa" data-wa-party="${h(L.name)}" ${isDebtor ? 'data-wa-pay="1"' : ""} href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}">${ICON.call}Call</a>` : ""}
       </div>
       <div class="totals">
         <div><div class="label">Opening</div>${drcr(d.opening)}</div>
@@ -577,8 +621,9 @@ async function vLedger(name) {
     ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}${d.interest > 0.5 ? `, interest ${rupees(d.interest, false)}` : ""}</span></div>${billRows(pending.slice(0, 5))}
       ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}`;
   wirePeriod(d.from, d.to, "ledger");
-  $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`, L.name);
+  $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`, L.name, d.closing > 0.5);
   $("#plink").onclick = () => linkDialog(L.name).catch(fail);
+  $("#preq").onclick = () => payDialog(L.name, d.closing > 0.5 ? d.closing : 0, phone).catch(fail);
   view.querySelectorAll("[data-lview]").forEach((b) => b.onclick = () => {
     const y = window.scrollY; savePref("lview", b.dataset.lview); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);
   });
@@ -655,7 +700,7 @@ async function vDues(kind) {
             <div class="end">${money(p.amount)}</div><span class="chev down"></span></button>
           <div class="bills" id="pb${i}" hidden>${billRows(p.bills)}
             <div class="actions" style="padding-top:10px"><a class="btn" href="#/ledger/${enc(p.name)}">Open ledger</a>
-            ${rec && ph ? `<a class="btn wa" data-wa-party="${h(p.name)}" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.amount, od, p.interest, d.interest_rate))}" target="_blank" rel="noopener">${ICON.wa}Remind</a>` : ""}</div></div>
+            ${rec && ph ? `<a class="btn wa" data-wa-party="${h(p.name)}" data-wa-pay="1" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.amount, od, p.interest, d.interest_rate))}" target="_blank" rel="noopener">${ICON.wa}Remind</a>` : ""}</div></div>
         </div>`;
       }).join("") || `<div class="empty">${rec ? "Nobody owes you money right now." : "You don't owe anyone right now."}</div>`}
     </section>
@@ -1034,7 +1079,7 @@ async function vVoucher(id) {
         <div style="color:var(--ink-3)">${E.ewb_no ? "The PDF has the e-Way Bill as page 2." : ""}${E.qr ? " The PDF prints the signed QR code." : ""}</div></div></section>` : ""; })()}
     ${V.narration ? `<section class="page"><div class="block-title">Narration</div><div class="info" style="white-space:pre-line">${h(V.narration)}</div></section>` : ""}
     ${!V.balanced ? '<p class="note warn">This voucher\'s debits and credits did not match when it was synced.</p>' : ""}`;
-  $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`, V.party);
+  $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`, V.party, V.base === "Sales");
 }
 
 async function vSales(kind) {
@@ -1236,6 +1281,29 @@ async function vCheck() {
     </section>`;
 }
 
+async function upiSection() {
+  const el = $("#upisec");
+  if (!el) return;
+  const d = await api("/api/upi");
+  el.innerHTML = `<div class="block-title">UPI payments</div>
+    <div class="info"><div>Your UPI ID lets you send customers a payment request: a link that opens their UPI app (GPay, PhonePe, Paytm, any bank app) with the amount filled in, or a QR code to scan. Sales invoice PDFs get a "scan to pay" code, and reminders carry the payment link. The money goes straight to your bank; there are no charges from Bahi.</div></div>
+    ${d.companies.map((c, i) => `<form class="form" data-upi="${i}">
+      ${d.companies.length > 1 ? `<div class="block-title" style="padding:0">${h(c.company)}</div>` : ""}
+      <label>UPI ID<input type="text" name="vpa" value="${h(c.vpa)}" placeholder="e.g. yourshop@okhdfcbank" autocomplete="off" autocapitalize="off"></label>
+      <label>Name shown to the payer<input type="text" name="name" value="${h(c.name || c.company)}" maxlength="60"></label>
+      <button class="btn primary" type="submit">Save</button><div class="msg" role="status"></div></form>`).join("")}
+    <p class="hint" style="padding:0 14px 14px">Use the UPI ID of the bank account the money should reach (your current account's UPI ID, or the one on your shop's QR stand). Leave it empty to turn this off.</p>`;
+  el.querySelectorAll("[data-upi]").forEach((f) => f.onsubmit = async (e) => {
+    e.preventDefault();
+    const c = d.companies[+f.dataset.upi], msg = f.querySelector(".msg");
+    const r = await fetch("/api/upi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ company: c.company, vpa: f.vpa.value.trim(), name: f.name.value.trim() }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { msg.textContent = j.error || "Couldn't save."; return; }
+    Object.keys(LINKS).forEach((k) => delete LINKS[k]);
+    msg.textContent = f.vpa.value.trim() ? "Saved." : "UPI payments are off.";
+  });
+}
+
 async function linksSection() {
   const el = $("#lnsec");
   if (!el) return;
@@ -1301,6 +1369,7 @@ async function vSettings() {
         <button class="btn primary" type="submit">Connect</button><div class="msg" id="tgmsg" role="status"></div></form>`}
     </section>
     <section class="page" id="intsec"></section>
+    <section class="page" id="upisec"></section>
     <section class="page" id="lnsec"></section>
     <section class="page" id="stsec"></section>
     <section class="page" id="bksec"></section>
@@ -1386,6 +1455,7 @@ async function vSettings() {
   offlineSection();
   showStaff().catch(() => {});
   linksSection().catch(() => {});
+  upiSection().catch(() => {});
   (async () => {
     const it = await api("/api/interest").catch(() => null);
     if (!it || !$("#intsec")) return;
@@ -1921,7 +1991,7 @@ async function vCollect() {
           <div class="end">${money(p.balance)}<div class="meta">balance</div></div><span class="chev down"></span></button>
         <div class="bills" id="cb${i}" hidden>
           <div class="actions" style="padding:12px 14px 4px">
-              ${ph ? `<a class="btn wa" data-wa-party="${h(p.name)}" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od, p.interest, S.irate || 0))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
+              ${ph ? `<a class="btn wa" data-wa-party="${h(p.name)}" data-wa-pay="1" href="https://wa.me/${ph}?text=${enc(reminderText(p.name, co, p.balance, od, p.interest, S.irate || 0))}" target="_blank" rel="noopener">${ICON.wa}Remind</a><a class="btn" href="tel:+${ph}">${ICON.call}Call</a>` : ""}
               <a class="btn" href="#/ledger/${enc(p.name)}">Ledger</a></div>
           <form class="form fu" data-party="${h(p.name)}" style="padding:8px 14px 14px">
             <div class="block-title" style="padding:0">Note and promised date</div>

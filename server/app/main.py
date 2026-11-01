@@ -33,6 +33,7 @@ import users  # noqa: E402
 import entries  # noqa: E402
 import bankrec  # noqa: E402
 import links  # noqa: E402
+import upi  # noqa: E402
 import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -140,6 +141,16 @@ def check_session(tok):
         return u if u and str(u["gen"]) == parts[1] else None
     except Exception:
         return None
+
+
+def _with_upi(d):
+    """A sales invoice gets a "scan to pay" UPI QR for its amount when the company has a UPI ID."""
+    if d and d["voucher"].get("base") == "Sales" and not d["voucher"].get("status"):
+        v = d["voucher"]
+        link = upi.uri(d["company"], abs(v.get("amount") or 0), f"Invoice {v['number']}")
+        if link:
+            d["upi"] = {"uri": link, "vpa": upi.get(d["company"])["vpa"]}
+    return d
 
 
 def _company_details(found, name, tax=None):
@@ -364,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
             ci = d.get("company_info") or {}
             co = next((c for c in store.companies() if c["id"] == cid), {})
             return self.send_json({
-                "company": company, "party": party,
+                "company": company, "party": party, "upi": bool(upi.get(company)),
                 "company_info": {k: ci.get(k) for k in ("address", "gstin", "state", "pincode", "email", "phone") if ci.get(k)},
                 "from": d["from"], "to": d["to"], "first": co.get("first_vch") or d["from"], "last": co.get("last_vch") or d["to"],
                 "synced": co.get("last_sync"),
@@ -373,6 +384,18 @@ class Handler(BaseHTTPRequestHandler):
                 "bills": [{k: b.get(k) for k in ("ref", "date", "due", "amount", "overdue", "interest")} for b in (d.get("bills") or [])
                           if abs(b.get("amount") or 0) > 0.5],
             })
+        if rest == "/pay":
+            if not upi.get(company):
+                return self.send_html("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+                                      "<body style='font-family:system-ui;padding:24px'><p>UPI payments aren't set up. Please ask for the bank details.</p>", 404)
+            try:
+                amount = round(float(q.get("am") or 0), 2)
+            except ValueError:
+                amount = 0
+            if amount <= 0:
+                d = store.ledger(cid, party)
+                amount = round(d["closing"], 2) if d and d["closing"] > 0 else 0
+            return self.send_html(self.pay_page(company, party, amount, m.group(1)))
         if rest == "/ledger.pdf":
             f, t = dates()
             d = store.ledger(cid, party, f, t)
@@ -381,13 +404,52 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_pdf(pdf.ledger_pdf(d), f"{party} statement")
         mv = re.match(r"^/v/(\d+)\.pdf$", rest)
         if mv:
-            d = store.voucher(cid, int(mv.group(1)))
+            d = _with_upi(store.voucher(cid, int(mv.group(1))))
             # only this party's own vouchers
             if not d or not (d["voucher"].get("party") == party or any(l["ledger"] == party for l in d["lines"])):
                 return self.send_json({"error": "not found"}, 404)
             v = d["voucher"]
             return self.send_pdf(pdf.voucher_pdf(d), f"{v['vtype']} {v['number']}")
         return self.send_json({"error": "not found"}, 404)
+
+    def pay_page(self, company, party, amount, token):
+        """The page a customer opens from a payment request: pay in their UPI app, or scan the QR from another phone."""
+        esc = lambda t: (str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;"))
+        link = upi.uri(company, amount, f"{party} to {company}")
+        u = upi.get(company)
+        amt = f"₹{pdf.inr(amount)}" if amount > 0 else ""
+        big = ("<div class=m style='color:#b42318;margin-top:8px'>UPI apps usually allow up to ₹1,00,000 in one payment. "
+               "For more, pay in parts (change the amount above) or by bank transfer.</div>") if amount > 100000 else ""
+        return f"""<!doctype html><html lang=en><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width, initial-scale=1"><meta name=robots content="noindex, nofollow"><meta name=referrer content=no-referrer>
+<title>Pay {esc(company)}</title><style>
+:root{{--bg:#f4f6f9;--paper:#fff;--ink:#111827;--ink3:#5b6474;--rule:#e2e7ef;--accent:#1d5fc4}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#10141b;--paper:#1a202b;--ink:#eef1f6;--ink3:#9ba5b8;--rule:#2c3546;--accent:#82aaff}}}}
+body{{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}}
+main{{max-width:440px;margin:0 auto;padding:20px 16px 40px;text-align:center}}
+.card{{background:var(--paper);border:1px solid var(--rule);border-radius:14px;padding:20px 16px;margin-top:14px}}
+h1{{font-size:19px;margin:0}} .m{{color:var(--ink3);font-size:14px}} .amt{{font-size:34px;font-weight:700;margin:6px 0}}
+a.pay{{display:block;background:var(--accent);color:#fff;text-decoration:none;font-weight:650;font-size:18px;padding:14px;border-radius:10px;margin:16px 0 6px}}
+.qr{{background:#fff;display:inline-block;padding:8px;border-radius:8px;margin-top:8px}} .qr svg{{width:220px;height:220px;display:block}}
+input{{font:inherit;font-size:20px;width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--rule);border-radius:8px;text-align:center;background:var(--paper);color:var(--ink)}}
+.back{{display:inline-block;margin-top:16px;color:var(--accent)}}
+</style></head><body><main>
+<h1>{esc(company)}</h1><div class=m>Payment from {esc(party)}</div>
+<div class=card>
+<div class=m>Amount</div>
+<form id=f onsubmit="return false"><input id=a type=number inputmode=decimal min=1 step=0.01 value="{amount:.2f}" aria-label="Amount"></form>
+<a class=pay id=pay href="{esc(link)}">Pay {esc(amt)} with UPI</a>{big}
+<div class=m>Opens GPay, PhonePe, Paytm, BHIM or your bank's app with everything filled in. UPI ID: {esc(u["vpa"])}</div>
+<div class=qr id=qr>{upi.qr_svg(link)}</div>
+<div class=m>Paying from another phone? Scan this code with any UPI app.</div>
+</div>
+<a class=back href="/p/{esc(token)}">See your account</a>
+</main><script>
+document.getElementById("a").addEventListener("change", function () {{
+  var v = parseFloat(this.value); if (!(v > 0)) return;
+  location.replace(location.pathname + "?am=" + v.toFixed(2));
+}});
+</script></body></html>"""
 
     def send_html(self, body, status=200):
         body = body.encode() if isinstance(body, str) else body
@@ -701,6 +763,17 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/telegram"):
             return self.telegram(method, path)
 
+        if path == "/api/upi":                  # Settings: each company's UPI ID for payment requests
+            if method == "POST":
+                data = json.loads(self.body(4096) or b"{}")
+                try:
+                    upi.set_(str(data.get("company", "")), str(data.get("vpa", "")), str(data.get("name", "")))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            have = upi.all_()
+            return self.send_json({"companies": [{"company": c["name"], **(have.get(c["name"]) or {"vpa": "", "name": ""})}
+                                                 for c in store.companies()]})
+
         if path == "/api/links":                # Settings: the address customers use, and every link given out
             if method == "POST":
                 data = json.loads(self.body(4096) or b"{}")
@@ -805,6 +878,29 @@ class Handler(BaseHTTPRequestHandler):
                     out.update(bankrec.check(cid, ledger, saved, f, t))
             return self.send_json(out)
 
+        mp = re.match(r"^/api/c/(\d+)/upi$", path)
+        if mp:                                  # a UPI payment request: link, QR, and the page to send the party
+            cid, party = int(mp.group(1)), unquote(q.get("party", "")).strip()
+            if party and not self.allowed(cid, "ledger", {"name": party}, None):
+                return self.send_json({"error": "not allowed"}, 403)
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            if not co or not upi.get(co["name"]):
+                return self.send_json({"on": False})
+            try:
+                amount = round(float(q.get("amount") or 0), 2)
+            except ValueError:
+                amount = 0
+            note = unquote(q.get("note", "")) or (f"{party} to {co['name']}" if party else f"Payment to {co['name']}")
+            link = upi.uri(co["name"], amount, note)
+            out = {"on": True, "uri": link, "qr": upi.qr_svg(link), "vpa": upi.get(co["name"])["vpa"]}
+            if party and store.ledger_exists(cid, party):
+                tok = links.get(co["name"], party)
+                origin = (self.headers.get("X-Forwarded-Proto") or "http") + "://" + (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "")
+                out["pay_path"] = f"/p/{tok}/pay" + (f"?am={amount:.2f}" if amount > 0 else "")
+                out["pay_url"] = links.url(tok, origin) + "/pay" + (f"?am={amount:.2f}" if amount > 0 else "")
+                out["base"] = links.base()
+            return self.send_json(out)
+
         mp = re.match(r"^/api/c/(\d+)/party_link$", path)
         if mp:                                  # a party's customer link (made the first time it is asked for)
             cid, party = int(mp.group(1)), unquote(q.get("party", "")).strip()
@@ -815,7 +911,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "No such ledger."}, 404)
             tok = links.get(co["name"], party)
             origin = (self.headers.get("X-Forwarded-Proto") or "http") + "://" + (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "")
-            return self.send_json({"url": links.url(tok, origin), "path": f"/p/{tok}", "base": links.base()})
+            return self.send_json({"url": links.url(tok, origin), "path": f"/p/{tok}", "base": links.base(), "upi": bool(upi.get(co["name"]))})
 
         mp = re.match(r"^/api/c/(\d+)/stockmin$", path)
         if mp and method == "POST":
@@ -870,7 +966,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_pdf(pdf.ledger_pdf(d), d["ledger"]["name"] + " ledger")
             return self.send_json({"error": "not found"}, 404)
         if what == "voucher_pdf" and arg:
-            d = store.voucher(cid, int(arg))
+            d = _with_upi(store.voucher(cid, int(arg)))
             if d:
                 v = d["voucher"]
                 return self.send_pdf(pdf.voucher_pdf(d), f"{v['vtype']} {v['number']}")

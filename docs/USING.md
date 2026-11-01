@@ -417,3 +417,15 @@ Every party can have a private link to their own account: their ledger (any fina
 - **The address customers use:** set it in **Settings, Customer links** (for example `https://books.yourdomain.com`). Customers must be able to open it from the internet, for example through a Cloudflare Tunnel to Bahi on Unraid. Left empty, links use the address you open Bahi with, which only works inside your network unless that address is public.
 - **Stop a link:** Settings, Customer links, **Stop link**. It stops working at once; the party gets a new one the next time you share something with them.
 - Links are kept in `links.json` in the Bahi data folder, so they keep working after a full sync or a restored backup.
+
+## UPI payment requests
+
+Set your UPI ID once in **Settings, UPI payments** (one per company), then:
+
+- **Request payment** on any ledger: the amount due is filled in (change it if you like). **Send on WhatsApp** sends the party a link that opens their UPI app (GPay, PhonePe, Paytm, BHIM, any bank app) with your UPI ID and the amount filled in; or let a customer at the counter **scan the QR code** on your phone.
+- **Reminders** from Dues and the follow-up list, and statements you share, carry the payment link.
+- **Sales invoice PDFs** get a "Scan to pay with UPI" code for the bill amount.
+- The **customer link** page shows a **Pay with UPI** button when they owe you.
+
+The money goes straight from the customer's UPI app to your bank; Bahi never handles it and charges nothing. Enter the receipt in Tally (or in Bahi) when it arrives. UPI apps usually limit one payment to ₹1 lakh. Payment links work when customers can open Bahi's address from the internet (Settings, Customer links); the QR code on your phone and on invoices works anywhere.
+

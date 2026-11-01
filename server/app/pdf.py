@@ -706,7 +706,7 @@ def invoice_pdf(d):
     # stretch the table so the footer sits at the page bottom, like Tally
     n_hsn = len({(i.get("hsn") or "") for i in items}) if tax_lines else 0
     foot_h = 18 + 30 + 11 * len(wrap(words(party_amt), 9, R - L - 8, True)) + \
-        ((24 + 11 * (n_hsn + 1) + 24) if tax_lines else 0) + 96
+        ((24 + 11 * (n_hsn + 1) + 24) if tax_lines else 0) + 96 + (50 if d.get("upi") else 0)
     end = 34 + foot_h if y - 6 > 34 + foot_h else y - 6
     col_lines(body_top, end)
     p.line(L, end, R, end)
@@ -805,8 +805,9 @@ def invoice_pdf(d):
         p.text(L + 4 + width("Tax Amount (in words) : ", 8), y - 11, fit(words(tot_tax), 8.5, R - L - 110, True), 8.5, "B")
         y -= 18
 
-    # declaration, bank, signature
-    y = ensure(96, y)
+    # declaration, bank, signature (and a UPI "scan to pay" code, when the company has a UPI ID)
+    U = d.get("upi")
+    y = ensure(96 + (50 if U else 0), y)
     if y < top2:
         p.line(L, y, R, y, 0.3)
     half = L + (R - L) / 2
@@ -834,10 +835,14 @@ def invoice_pdf(d):
         p.text(L + 4, yy, ln, 8)
         yy -= 10
     sig_top = min(by, y - 12) - 2
-    bottom_y = y - 92
+    bottom_y = y - 92 if not U else min(y - 92, sig_top - 86)
     p.line(half, sig_top, R, sig_top, 0.6)
     p.line(half, sig_top, half, bottom_y, 0.6)
     p.text(R - 4, sig_top - 11, f"for {d['company']}", 8.5, "B", "right")
+    if U and p.qr(half + 6, bottom_y + 6, 74, U["uri"]):
+        p.text(half + 86, bottom_y + 40, "Scan to pay with UPI", 8, "B")
+        p.text(half + 86, bottom_y + 30, "₹" + inr(abs(V.get("amount") or 0)), 8)
+        p.text(half + 86, bottom_y + 20, fit(U["vpa"], 7.5, R - half - 170), 7.5)
     p.text(R - 4, bottom_y + 6, "Authorised Signatory", 8, "R", "right")
     p.line(L, top2, L, bottom_y, 0.6)
     p.line(R, top2, R, bottom_y, 0.6)
