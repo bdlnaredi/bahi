@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -217,6 +218,77 @@ namespace BahiSync
                 return "not reachable (" + e.Status + ")";
             }
             catch (Exception e) { return "not reachable (" + e.Message + ")"; }
+        }
+
+        // ------------------------------------------------------------ cloud backups
+        /// <summary>rclone.exe in the Bahi folder, downloaded from rclone.org the first time.</summary>
+        public static string Rclone()
+        {
+            string exe = Path.Combine(Dir, "rclone.exe");
+            if (File.Exists(exe)) return exe;
+            string zip = Path.Combine(Path.GetTempPath(), "rclone-bahi.zip");
+            var wc = new WebClient();
+            wc.Headers.Add("User-Agent", "BahiSync");
+            wc.DownloadFile(Environment.Is64BitOperatingSystem ? "https://downloads.rclone.org/rclone-current-windows-amd64.zip"
+                                                               : "https://downloads.rclone.org/rclone-current-windows-386.zip", zip);
+            using (var z = System.IO.Compression.ZipFile.OpenRead(zip))
+            {
+                foreach (var e in z.Entries)
+                {
+                    if (e.Name.Equals("rclone.exe", StringComparison.OrdinalIgnoreCase))
+                    {
+                        using (var src = e.Open())
+                        using (var dst = File.Create(exe + ".tmp")) src.CopyTo(dst);
+                        File.Move(exe + ".tmp", exe);
+                        break;
+                    }
+                }
+            }
+            try { File.Delete(zip); } catch { }
+            if (!File.Exists(exe)) throw new Exception("rclone.exe wasn't in the download");
+            return exe;
+        }
+
+        /// <summary>rclone opens the browser to sign in and prints the sign-in token: returns that text.</summary>
+        public static string RcloneAuthorize(string exe, string kind)
+        {
+            var p = new ProcessStartInfo(exe, "authorize \"" + kind + "\"");
+            p.UseShellExecute = false; p.CreateNoWindow = true;
+            p.RedirectStandardOutput = true; p.RedirectStandardError = true;
+            using (var pr = Process.Start(p))
+            {
+                var err = new StringBuilder();
+                pr.ErrorDataReceived += delegate (object s, DataReceivedEventArgs a) { if (a.Data != null) lock (err) err.AppendLine(a.Data); };
+                pr.BeginErrorReadLine();
+                var outTask = pr.StandardOutput.ReadToEndAsync();
+                if (!pr.WaitForExit(10 * 60 * 1000)) { try { pr.Kill(); } catch { } throw new Exception("the sign-in wasn't finished within 10 minutes"); }
+                string text = outTask.Result;
+                var m = Regex.Match(text, "\\{[\\s\\S]*\\}");
+                if (!m.Success) throw new Exception("no sign-in came back" + (err.Length > 0 ? " (" + err.ToString().Trim().Split('\n').Last() + ")" : ""));
+                return m.Value;
+            }
+        }
+
+        /// <summary>null when the server took the sign-in, else its message.</summary>
+        public static string SendCloud(string server, string token, string kind, string text, string label)
+        {
+            var body = new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "kind", kind }, { "text", text }, { "label", label ?? "" } });
+            var wc = new WebClient();
+            wc.Headers.Add("Authorization", "Bearer " + token);
+            wc.Headers.Add("Content-Type", "application/json");
+            try { wc.UploadString(server + "/agent/cloud", "POST", body); return null; }
+            catch (WebException e)
+            {
+                var res = e.Response as HttpWebResponse;
+                if (res == null) return e.Message;
+                if ((int)res.StatusCode == 404) return "this server is too old for cloud backups (update it first)";
+                using (var r = new StreamReader(res.GetResponseStream()))
+                {
+                    string j = r.ReadToEnd();
+                    var m = Regex.Match(j, "\"error\"\\s*:\\s*\"([^\"]*)\"");
+                    return m.Success ? m.Groups[1].Value : "error " + (int)res.StatusCode;
+                }
+            }
         }
 
         // ------------------------------------------------------------ start with Windows

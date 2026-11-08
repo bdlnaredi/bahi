@@ -33,6 +33,7 @@ import users  # noqa: E402
 import entries  # noqa: E402
 import bankrec  # noqa: E402
 import links  # noqa: E402
+import cloud  # noqa: E402
 import upi  # noqa: E402
 import threading  # noqa: E402
 
@@ -43,7 +44,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.8.0"
+APP_VERSION = "3.9.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -466,6 +467,14 @@ document.getElementById("a").addEventListener("change", function () {{
     def agent(self, method, path, q):
         if not self.agent_ok():
             return self.send_json({"error": "bad sync token"}, 401)
+        if path == "/agent/cloud" and method == "POST":     # Bahi Sync on the Tally PC: Tools, connect Google Drive / OneDrive
+            data = json.loads(self.body(65536) or b"{}")
+            try:
+                st = cloud.connect(str(data.get("kind", "")), str(data.get("text", "")), str(data.get("label", "")))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            threading.Thread(target=lambda: cloud.upload(backup.run()), daemon=True).start()   # a first copy now
+            return self.send_json(st)
         if path == "/agent/ping":
             return self.send_json({"ok": True, "time": time.time()})
         if path == "/agent/plan" and method == "POST":
@@ -782,6 +791,31 @@ document.getElementById("a").addEventListener("change", function () {{
                 if data.get("revoke"):
                     links.revoke(str(data["revoke"]))
             return self.send_json(links.listing())
+
+        if path == "/api/cloud":                # copies of the backups in Google Drive / OneDrive
+            if method == "POST":
+                data = json.loads(self.body(65536) or b"{}")
+                act = data.get("action")
+                try:
+                    if act == "connect":
+                        cloud.connect(str(data.get("kind", "")), str(data.get("text", "")))
+                    elif act == "disconnect":
+                        cloud.disconnect()
+                    elif act == "upload":
+                        latest = next((b for b in backup.listing() if "before-restore" not in b["name"]), None)
+                        out = backup.path_of(latest["name"]) if latest else backup.run()
+                        if not cloud.upload(out):
+                            return self.send_json({"error": (cloud.status().get("last") or {}).get("msg", "Not copied.")}, 400)
+                    elif act == "fetch":
+                        cloud.fetch(str(data.get("name", "")), backup.DIR)
+                except (ValueError, RuntimeError) as e:
+                    return self.send_json({"error": str(e)}, 400)
+            st = cloud.status()
+            try:
+                st["files"] = cloud.remote_list() if st["on"] and q.get("files") == "1" else []
+            except Exception as e:
+                st["files"], st["error"] = [], str(e)
+            return self.send_json(st)
 
         if path == "/api/backups":
             if method == "POST":

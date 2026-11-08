@@ -25,7 +25,7 @@ jobs:
           $res = @()
           foreach ($f in "TallySync.ps1", "Diagnose.ps1", "Save-Voucher.ps1", "Save-Stock.ps1") { $res += "/resource:agent\$f,$f" }
           & $csc /nologo /target:winexe /optimize+ /out:BahiSync.exe /win32icon:windows\bahi.ico `
-            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll `
+            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
             @res windows\*.cs
           if ($LASTEXITCODE -ne 0) { throw "compile failed" }
           Get-Item BahiSync.exe | Format-List Name, Length

@@ -80,6 +80,9 @@ namespace BahiSync
             tools.Items.Add("Save one voucher from Tally (for a problem report)", null, delegate { Engine.StartTool("Save-Voucher.ps1"); });
             tools.Items.Add("Save stock figures from Tally (for a problem report)", null, delegate { Engine.StartTool("Save-Stock.ps1"); });
             tools.Items.Add(new ToolStripSeparator());
+            tools.Items.Add("Back up to Google Drive (sign in once)", null, delegate { ConnectCloud("drive", "Google Drive"); });
+            tools.Items.Add("Back up to OneDrive (sign in once)", null, delegate { ConnectCloud("onedrive", "OneDrive"); });
+            tools.Items.Add(new ToolStripSeparator());
             tools.Items.Add("Send everything again (full sync, takes a while)", null, delegate { FullSync(); });
             tools.Items.Add(new ToolStripSeparator());
             tools.Items.Add("Open the log file", null, delegate { if (File.Exists(Engine.LogPath)) Process.Start("notepad.exe", "\"" + Engine.LogPath + "\""); });
@@ -337,6 +340,50 @@ namespace BahiSync
             exiting = true;
             tray.Visible = false;
             Application.Exit();
+        }
+
+        // ------------------------------------------------------------ cloud backups (Google Drive / OneDrive)
+        /// <summary>Signs in to Google Drive or OneDrive with rclone (downloaded the first time) and hands the
+        /// sign-in to the Bahi server, which then copies every night's backup there.</summary>
+        void ConnectCloud(string kind, string service)
+        {
+            if (cfg == null || !Engine.Configured(cfg)) { OpenSettings(); return; }
+            if (MessageBox.Show(this, "Bahi will open your browser to sign in to " + service + ".\n\nAfter that, the Bahi server copies every night's backup to a \"Bahi Backups\" folder in your " + service + ".",
+                    "Back up to " + service, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+            // every Bahi server this PC syncs to (the second one too) keeps its backups in its own folder
+            var servers = new List<string[]>();
+            servers.Add(new[] { Engine.Get(cfg, "ServerUrl", "").TrimEnd('/'), Engine.Get(cfg, "SyncToken", "") });
+            if (Engine.Get(cfg, "ServerUrl2", "") != "" && Engine.Get(cfg, "SyncToken2", "") != "")
+                servers.Add(new[] { Engine.Get(cfg, "ServerUrl2", "").TrimEnd('/'), Engine.Get(cfg, "SyncToken2", "") });
+            AddLine("(Bahi Sync) Connecting " + service + " for backups: getting the sign-in helper (rclone) ...");
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                string msg;
+                try
+                {
+                    string exe = Engine.Rclone();
+                    BeginInvoke((MethodInvoker)delegate { AddLine("(Bahi Sync) Sign in to " + service + " in the browser window that opens ..."); });
+                    string text = Engine.RcloneAuthorize(exe, kind);
+                    var lines = new List<string>();
+                    bool any = false;
+                    foreach (var sv in servers)
+                    {
+                        string host = sv[0];
+                        try { host = new Uri(sv[0]).Host; } catch { }
+                        string label = servers.Count > 1 ? host : "";
+                        string err = Engine.SendCloud(sv[0], sv[1], kind, text, label);
+                        if (err == null) any = true;
+                        lines.Add(host + ": " + (err == null ? "backups go to the \"Bahi Backups" + (label != "" ? " (" + label + ")" : "") + "\" folder, starting now" : "not connected - " + err));
+                    }
+                    msg = (any ? service + " connected." : "Not connected.") + "\n" + string.Join("\n", lines.ToArray());
+                }
+                catch (Exception e) { msg = "Couldn't connect " + service + ": " + e.Message; }
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    AddLine("(Bahi Sync) " + msg);
+                    MessageBox.Show(this, msg, "Back up to " + service, MessageBoxButtons.OK, msg.StartsWith(service + " connected.") ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                });
+            });
         }
 
         // ------------------------------------------------------------ new versions of this app

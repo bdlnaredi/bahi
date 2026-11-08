@@ -16,12 +16,17 @@ More than one company
   (Alt+F3, Select Company) or have TallyPrime open them when it starts (F1, Settings, Startup).
   In the app, tap the company name at the top to switch between companies.
 
+Backups in Google Drive or OneDrive
+  Tools, Back up to Google Drive (or OneDrive): sign in once in the browser, and the Bahi server copies
+  every night's backup to a "Bahi Backups" folder there.
+
 Files in this folder
   BahiSync.exe               the app
   TallySync.ps1 and others   the sync itself (kept up to date from your Bahi server)
   TallySync.config.json      your settings
   TallySync.sent             entries already put into Tally (stops one going in twice) - keep it
   TallySync.log              what happened at each sync
+  rclone.exe                 the sign-in helper for Google Drive / OneDrive (only after you connect one)
 
 Removing it
   Windows Settings, Apps, Bahi Sync, Uninstall. Your data on the Bahi server is not touched.

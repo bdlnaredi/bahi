@@ -1281,6 +1281,54 @@ async function vCheck() {
     </section>`;
 }
 
+async function cloudSection() {
+  const el = $("#cbsec");
+  if (!el) return;
+  el.innerHTML = '<div class="block-title">Backups in Google Drive or OneDrive</div><div class="info">Checking ...</div>';
+  const c = await api("/api/cloud?files=1");
+  const send = async (body) => {
+    const r = await fetch("/api/cloud", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Failed"); return j;
+  };
+  const when = (t) => new Date(t * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  if (!c.rclone) { el.innerHTML = '<div class="block-title">Backups in Google Drive or OneDrive</div><div class="info">This server can\'t copy backups to the cloud (rclone is missing).</div>'; return; }
+  el.innerHTML = c.on ? `<div class="block-title">Backups in ${h(c.service)} <span>on</span></div>
+      <div class="info"><div>Every night's backup is copied to the <b>${h(c.folder)}</b> folder in your ${h(c.service)}; the last ${c.keep} are kept there.</div>
+      ${c.last ? `<div class="${c.last.ok ? "" : "od"}">Last copy ${when(c.last.time)}: ${h(c.last.msg)}</div>` : "<div>No copy yet.</div>"}
+      ${c.error ? `<div class="od">${h(c.error)}</div>` : ""}</div>
+      ${(c.files || []).slice(0, 10).map((f) => `<div class="row"><div class="main"><div class="name">${h(f.name)}</div><div class="meta">${(f.size / 1048576).toFixed(1)} MB in ${h(c.service)}</div></div>
+        <div class="end"><button class="chip" data-fetch="${h(f.name)}">Bring back</button></div></div>`).join("")}
+      <div class="actions"><button class="btn" id="cbnow">Copy now</button><button class="btn danger" id="cboff">Disconnect</button></div>
+      <p class="hint" style="padding:0 14px 14px">"Bring back" copies a backup from ${h(c.service)} into the list above, where you can restore it. Use it to move Bahi to a new server: connect the new one to the same ${h(c.service)} and bring back the latest backup.</p>`
+    : `<div class="block-title">Backups in Google Drive or OneDrive <span>off</span></div>
+      <div class="info"><div>Keep a copy of every night's backup in your own Google Drive or OneDrive, so your Bahi data survives even if this server is lost.</div>
+      <div><b>Easiest:</b> on the Tally PC, open Bahi Sync, <b>Tools</b>, <b>Back up to Google Drive</b> (or OneDrive), and sign in.</div></div>
+      <form class="form" id="cbf">
+        <label>Or paste the sign-in text from rclone (advanced: rclone authorize drive, or onedrive)
+          <textarea name="text" rows="3" placeholder='{"access_token":"...","refresh_token":"..."}'></textarea></label>
+        <label>Service<select name="kind"><option value="drive">Google Drive</option><option value="onedrive">OneDrive</option></select></label>
+        <button class="btn primary" type="submit">Connect</button><div class="msg" id="cbmsg" role="status"></div></form>`;
+  const again = () => cloudSection().catch(fail);
+  if ($("#cbf")) $("#cbf").onsubmit = async (e) => {
+    e.preventDefault(); $("#cbmsg").textContent = "Connecting";
+    try { await send({ action: "connect", kind: e.target.kind.value, text: e.target.text.value }); toast("Connected"); again(); }
+    catch (err) { $("#cbmsg").textContent = err.message; }
+  };
+  if ($("#cbnow")) $("#cbnow").onclick = async () => {
+    $("#cbnow").disabled = true; $("#cbnow").textContent = "Copying";
+    try { await send({ action: "upload" }); toast("Copied"); } catch (err) { toast(err.message); } again();
+  };
+  if ($("#cboff")) $("#cboff").onclick = async () => {
+    if (!confirm("Stop copying backups to the cloud? Backups already there stay.")) return;
+    await send({ action: "disconnect" }); again();
+  };
+  el.querySelectorAll("[data-fetch]").forEach((b) => b.onclick = async () => {
+    b.disabled = true; b.textContent = "Bringing back";
+    try { await send({ action: "fetch", name: b.dataset.fetch }); toast("It's in the backups list now"); vSettings().catch(fail); }
+    catch (err) { toast(err.message); b.disabled = false; b.textContent = "Bring back"; }
+  });
+}
+
 async function upiSection() {
   const el = $("#upisec");
   if (!el) return;
@@ -1373,6 +1421,7 @@ async function vSettings() {
     <section class="page" id="lnsec"></section>
     <section class="page" id="stsec"></section>
     <section class="page" id="bksec"></section>
+    <section class="page" id="cbsec"></section>
     <section class="page" id="offsec"></section>
     ${androidSection()}
     <section class="page"><div class="block-title">Change app password</div>
@@ -1452,6 +1501,7 @@ async function vSettings() {
     };
   };
   showBackups();
+  cloudSection().catch(() => {});
   offlineSection();
   showStaff().catch(() => {});
   linksSection().catch(() => {});

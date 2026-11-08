@@ -9,6 +9,7 @@ import threading
 import time
 import zipfile
 
+import cloud
 import store
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -75,7 +76,8 @@ def run():
         daily = [b for b in listing() if "before-restore" not in b["name"]]
         for old in daily[KEEP:]:
             os.remove(os.path.join(DIR, old["name"]))
-        return out
+    cloud.upload_later(out)          # and a copy in Google Drive / OneDrive, when connected
+    return out
 
 
 def check(raw):

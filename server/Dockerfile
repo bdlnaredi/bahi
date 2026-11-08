@@ -2,7 +2,8 @@ FROM python:3.12-slim
 LABEL org.opencontainers.image.source=https://github.com/bdlnaredi/bahi
 WORKDIR /app
 # Pillow lays out Hindi text for PDFs; libfribidi lets its text layout (Raqm) join Devanagari letters properly
-RUN apt-get update && apt-get install -y --no-install-recommends libfribidi0 \
+# rclone copies the nightly backups to Google Drive or OneDrive
+RUN apt-get update && apt-get install -y --no-install-recommends libfribidi0 rclone ca-certificates \
     && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir "pillow>=10,<12"
 COPY server/app /app
 # the Tally PC files, which the PC downloads to update itself
