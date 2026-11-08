@@ -3,16 +3,19 @@
 # Usage:  TallySync.ps1            normal run (skips if nothing changed in Tally)
 #         TallySync.ps1 -Force     always send everything
 #         TallySync.ps1 -Now       check Tally for changes right away (the Bahi Sync app's Sync now)
-param([switch]$Force, [switch]$Verbose, [switch]$Now)
-$AgentVersion = "3.14"
+#         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
+#                                  first server starts it by itself when one is set
+param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
+$AgentVersion = "3.15"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $CfgPath = Join-Path $Here "TallySync.config.json"
 $LogPath = Join-Path $Here "TallySync.log"
 
+$script:LogTag = ""
 function Log([string]$msg, [string]$color = "Gray") {
-    $line = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + "  " + $msg
+    $line = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + "  " + $script:LogTag + $msg
     try {
         if ((Test-Path $LogPath) -and (Get-Item $LogPath).Length -gt 1MB) {
             Move-Item $LogPath ($LogPath + ".old") -Force
@@ -24,6 +27,16 @@ function Log([string]$msg, [string]$color = "Gray") {
 
 if (-not (Test-Path $CfgPath)) { Log "Config file missing. Run Setup.bat first." "Red"; exit 2 }
 $Cfg = Get-Content $CfgPath -Raw | ConvertFrom-Json
+# The second server ("Also sync to"): the same sync with its own address and token, its own state
+$Second = if ($Cfg.PSObject.Properties["ServerUrl2"] -and $Cfg.ServerUrl2 -and $Cfg.PSObject.Properties["SyncToken2"] -and $Cfg.SyncToken2) { $true } else { $false }
+$Sfx = ""
+if ($Target -eq 2) {
+    if (-not $Second) { exit 0 }
+    $Cfg | Add-Member -Force -NotePropertyName ServerUrl -NotePropertyValue ([string]$Cfg.ServerUrl2)
+    $Cfg | Add-Member -Force -NotePropertyName SyncToken -NotePropertyValue ([string]$Cfg.SyncToken2)
+    $script:LogTag = "[" + (([uri]$Cfg.ServerUrl).Host) + "] "
+    $Sfx = ".2"
+}
 $Server = $Cfg.ServerUrl.TrimEnd("/")
 $Tally  = if ($Cfg.TallyUrl) { $Cfg.TallyUrl } else { "http://localhost:9000" }
 
@@ -32,6 +45,7 @@ $Tally  = if ($Cfg.TallyUrl) { $Cfg.TallyUrl } else { "http://localhost:9000" }
 # check each file's SHA-256, replace them, and run the new version straight away.
 function Self-Update {
     if ($env:BAHI_JUST_UPDATED -eq "1") { return }
+    if ($Target -eq 2) { return }          # the files come from the main server only, so two servers can't swap them back and forth
     try {
         $wc = New-Object System.Net.WebClient
         $wc.Headers.Add("Authorization", "Bearer " + $Cfg.SyncToken)
@@ -114,6 +128,16 @@ if (-not $owned) {
 }
 function End-Run([int]$code) {
     try { Remove-Item $RunFile -ErrorAction SilentlyContinue } catch {}
+    # a finished run to the main server goes on to the second one (Tally reachable: code 0 or 1)
+    if ($Target -eq 1 -and $Second -and $code -ne 3) {
+        try { $script:Mutex.ReleaseMutex() } catch {}
+        $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $Here "TallySync.ps1"), "-Target", "2")
+        if ($Force) { $argv += "-Force" }
+        if ($Now) { $argv += "-Now" }
+        if ($Verbose) { $argv += "-Verbose" }
+        & (Get-Process -Id $PID).Path @argv
+        if ($LASTEXITCODE -ne 0 -and $code -eq 0) { $code = $LASTEXITCODE }
+    }
     exit $code
 }
 try { @{ pid = $PID; started = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss", [System.Globalization.CultureInfo]::InvariantCulture) } | ConvertTo-Json | Set-Content $RunFile } catch {}
@@ -564,7 +588,7 @@ foreach ($co in $companies) {
         # Some Tally setups don't move that counter for every entry, so even when it says "unchanged"
         # the vouchers are compared one by one every 30 minutes.
         $deepKey = "deep_" + ($co.Name -replace '[^A-Za-z0-9]', '_')
-        $deepFile = Join-Path $Here "TallySync.deep"
+        $deepFile = Join-Path $Here ("TallySync.deep" + $Sfx)
         $deep = @{}
         try { if (Test-Path $deepFile) { (Get-Content $deepFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $deep[$_.Name] = $_.Value } } } catch {}
         $deepCheck = $false

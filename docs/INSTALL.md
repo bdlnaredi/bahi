@@ -110,6 +110,10 @@ Bahi Sync then sits in the system tray (bottom-right of the taskbar), starts wit
 
 It replaces the batch files and the Windows scheduled task (it removes the old task itself). The sync files keep updating themselves from your server, and the app offers its own new versions in the window. Prefer not to install? [BahiSync.exe](https://github.com/bdlnaredi/bahi/releases/download/windows/BahiSync.exe) is the same app on its own: put it in a folder such as `C:\Bahi` and run it from there.
 
+#### Two Bahi servers at once
+
+Settings → **Also sync to**: a second server's address and sync token (for example a cloud server you're trying, besides Unraid). After each sync to the first server, the same sync goes to the second; Tally does the work twice. Leave it empty for one server.
+
 #### More than one company
 
 Every company open in TallyPrime is synced, and each one is its own company in the Bahi app: tap the company name at the top of the app to switch. **Companies** in Bahi Sync lists the companies it has seen in Tally: untick one to leave it out, or give one its own start date (an older year's company from 2023, say). Tally only lets Bahi read companies that are open in it, so open all of them together (**Alt+F3 → Select Company**, pick each one) or let TallyPrime open them when it starts (**F1 → Settings → Startup**). A company that isn't open keeps what it last synced and catches up when it is opened again.
