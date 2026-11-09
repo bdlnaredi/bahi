@@ -40,7 +40,12 @@ jobs:
           BAHI_VERSION_CODE: ${{ github.run_number }}
           BAHI_KEYSTORE_PASSWORD: ${{ secrets.BAHI_KEYSTORE_PASSWORD }}
         run: |
-          gradle -p android --no-daemon assembleRelease
+          set -o pipefail
+          if ! gradle -p android --no-daemon assembleRelease 2>&1 | tee build.log; then
+            # the reason, where it can be read without the full log
+            grep -E "error:|e: |What went wrong|FAILED|Could not|cannot find symbol|incompatible|Execution failed" build.log | head -25 | while IFS= read -r l; do echo "::warning::$l"; done
+            exit 1
+          fi
           cp android/app/build/outputs/apk/release/app-release.apk Bahi.apk
 
       - uses: actions/upload-artifact@v4
