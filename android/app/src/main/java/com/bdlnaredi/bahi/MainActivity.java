@@ -11,6 +11,8 @@ import android.graphics.Typeface;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.os.Build;
 import org.json.JSONObject;
 import com.google.mlkit.vision.barcode.common.Barcode;
@@ -552,8 +554,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private ToneGenerator tone;
+
     private void scanned(String id, String code, String error) {
         if (web == null) return;
+        if (code != null) {       // a beep, so you know it was read
+            try {
+                if (tone == null) tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90);
+                tone.startTone(ToneGenerator.TONE_PROP_BEEP, 150);
+            } catch (Exception ignored) { }
+            try { web.performHapticFeedback(android.view.HapticFeedbackConstants.CONFIRM); } catch (Exception ignored) { }
+        }
         String js = "window.bahiScanned && window.bahiScanned(" + JSONObject.quote(id) + "," + (code == null ? "null" : JSONObject.quote(code))
                 + "," + (error == null ? "null" : JSONObject.quote(error)) + ")";
         web.evaluateJavascript(js, null);

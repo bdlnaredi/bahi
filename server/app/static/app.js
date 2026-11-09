@@ -716,6 +716,32 @@ async function vDues(kind) {
 let scanSeq = 0;
 const scanWaiting = {};
 window.bahiScanned = (id, code, err) => { const f = scanWaiting[id]; delete scanWaiting[id]; if (f) f(code, err); };
+// a short beep for each barcode read (the Android app beeps by itself)
+let beepCtx = null;
+function beep() {
+  try {
+    beepCtx = beepCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (beepCtx.state === "suspended") beepCtx.resume();
+    const o = beepCtx.createOscillator(), g = beepCtx.createGain();
+    o.type = "square"; o.frequency.value = 1800; g.gain.value = 0.08;
+    o.connect(g); g.connect(beepCtx.destination);
+    o.start(); o.stop(beepCtx.currentTime + 0.12);
+  } catch (e) { /* no sound here */ }
+  try { if (navigator.vibrate) navigator.vibrate(60); } catch (e) {}
+}
+// after each scan: say what happened and wait - scan the next one only when asked
+function scanNext(message, ok = true) {
+  return new Promise((res) => {
+    const dlg = $("#sheet");
+    dlg.innerHTML = `<h3>${ok ? "✓ Scanned" : "Not added"}</h3><div style="padding:0 14px 14px">
+      <p style="margin:0 0 12px;font-size:17px">${message}</p>
+      <div class="actions" style="padding:0"><button class="btn primary" data-a="next">▥ Scan next</button><button class="btn" data-a="done">Done</button></div></div>`;
+    const finish = (v) => { dlg.close(); dlg.onclick = null; dlg.oncancel = null; res(v); };
+    dlg.onclick = (e) => { const a = e.target.closest("[data-a]")?.dataset.a; if (a) finish(a === "next"); else if (e.target === dlg) finish(false); };
+    dlg.oncancel = () => finish(false);
+    if (!dlg.open) dlg.showModal();
+  });
+}
 function scanCode(title = "Scan a barcode") {
   if (window.BahiAndroid && BahiAndroid.scan) {
     return new Promise((res) => { const id = "s" + (++scanSeq); scanWaiting[id] = (c, err) => { if (err) toast("Scanner: " + err); res(c || null); }; BahiAndroid.scan(id); });
@@ -733,8 +759,8 @@ function scanCode(title = "Scan a barcode") {
     dlg.querySelector("[data-x]").onclick = () => finish(null);
     dlg.onclick = (e) => { if (e.target === dlg) finish(null); };
     dlg.oncancel = () => finish(null);
-    $("#scf").onsubmit = (e) => { e.preventDefault(); const v = e.target.code.value.trim(); finish(v || null); };
-    if (!cam) { setTimeout(() => $("#scf").code.focus(), 50); return; }
+    $("#scf").onsubmit = (e) => { e.preventDefault(); const v = e.target.code.value.trim(); if (v) beep(); finish(v || null); };
+    if (!cam) { setTimeout(() => { const f = $("#scf"); if (f) f.code.focus(); }, 50); return; }
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
@@ -742,7 +768,7 @@ function scanCode(title = "Scan a barcode") {
         const det = new BarcodeDetector();
         while (!done) {
           const found = await det.detect(v).catch(() => []);
-          if (found.length) { finish(found[0].rawValue); break; }
+          if (found.length) { beep(); finish(found[0].rawValue); break; }
           await new Promise((r) => setTimeout(r, 200));
         }
       } catch (e) { const vd = $("#scvid"); if (vd) vd.replaceWith(Object.assign(document.createElement("p"), { className: "hint", textContent: "The camera isn't available here; type the barcode instead." })); }
@@ -778,7 +804,7 @@ async function assignBarcode(code, items, preset = "") {
       if (S.bcodes) S.bcodes[code] = item;
       finish(item);
     };
-    setTimeout(() => $("#baf").item.focus(), 50);
+    setTimeout(() => { const f = $("#baf"); if (f) f.item.focus(); }, 50);
   });
 }
 
@@ -800,7 +826,7 @@ async function vStock(q = "") {
         if (map[code]) { location.hash = `#/item/${enc(map[code])}`; return; }
         const it = await assignBarcode(code, names);
         if (!it) return;
-        toast(`${code} is now ${it}. Scan the next one, or go back.`);
+        if (!(await scanNext(`Barcode <b>${h(code)}</b> is now <b>${h(it)}</b>.`))) return;
       }
     };
   }
@@ -874,8 +900,8 @@ async function vItem(name) {
         const r = await fetch(cpath("barcodes"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, item: name }) });
         const j = await r.json().catch(() => ({}));
         if (!r.ok) { toast(j.error || "Couldn't save."); break; }
-        toast(j.moved_from ? `${code} moved here from ${j.moved_from}.` : `${code} added. Scan another (another pack size), or go back.`);
         await showCodes();
+        if (!(await scanNext(j.moved_from ? `<b>${h(code)}</b> moved here from ${h(j.moved_from)}.` : `<b>${h(code)}</b> added to ${h(name)}.`))) break;
       }
     };
     $("#bcsec").querySelectorAll("[data-rmc]").forEach((b) => b.onclick = async () => {
@@ -1860,10 +1886,13 @@ async function vNewEntry(kind) {
     const names = f.items.map((i) => i.name);
     let n = 0;
     for (;;) {
-      const code = await scanCode(n ? `${n} scanned. Scan the next item` : "Scan an item");
+      const code = await scanCode("Scan an item");
       if (!code) break;
       let item = map[code];
-      if (!item) { item = await assignBarcode(code, names); if (!item) continue; }
+      if (!item) {
+        item = await assignBarcode(code, names);
+        if (!item) { if (await scanNext(`Barcode <b>${h(code)}</b> isn't on any item, so nothing was added.`, false)) continue; break; }
+      }
       const rows = [...$("#items").querySelectorAll(".irow")];
       let row = rows.find((r) => r.querySelector("[name=item]").value === item);
       if (row) {
@@ -1881,7 +1910,8 @@ async function vNewEntry(kind) {
         q.dispatchEvent(new Event("input", { bubbles: true }));
       }
       n++;
-      toast(`${item}: ${row.querySelector("[name=qty]").value}`);
+      const qn = row.querySelector("[name=qty]").value;
+      if (!(await scanNext(`<b>${h(item)}</b> added. Quantity now <b>${h(qn)}</b>.`))) break;
     }
   };
   if (inv) {
