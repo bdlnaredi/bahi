@@ -19,9 +19,10 @@ import store
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB = os.path.join(DATA_DIR, "entries.db")
 KINDS = {"receipt": "Receipt", "payment": "Payment", "order": "Sales Order", "journal": "Journal", "contra": "Contra",
-         "sales": "Sales", "purchase": "Purchase"}
+         "sales": "Sales", "purchase": "Purchase", "stockitem": "Stock Item"}
 PERM = {"receipt": "e_receipt", "payment": "e_payment", "order": "e_order", "journal": "e_journal", "contra": "e_contra",
-        "sales": "e_sales", "purchase": "e_purchase"}
+        "sales": "e_sales", "purchase": "e_purchase", "stockitem": "e_item"}
+SLABS = [0, 0.1, 0.25, 1.5, 3, 5, 12, 18, 28, 40]
 RESEND_AFTER = 15 * 60       # an entry handed to the agent but never reported back is offered again
 
 
@@ -43,6 +44,13 @@ def _row(r):
 def form(cid, kind):
     if kind in ("sales", "purchase"):
         return invoice.form(cid, kind)
+    if kind == "stockitem":
+        with store.conn() as c:
+            rows = c.execute("SELECT name, parent, unit FROM stock WHERE company_id=?", (cid,)).fetchall()
+        groups = sorted({r["parent"] for r in rows if r["parent"]} - {"Primary"}, key=str.lower)
+        units = sorted({r["unit"] for r in rows if r["unit"]}, key=lambda u: (-sum(1 for r in rows if r["unit"] == u), u.lower()))
+        return {"kind": kind, "groups": ["Primary"] + groups, "units": units, "slabs": SLABS, "items": [r["name"] for r in rows],
+                "vtypes": ["Stock Item"], "today": date.today().isoformat()}
     with store.conn() as c:
         base = KINDS[kind]
         vtypes = [r["name"] for r in c.execute("SELECT name FROM vtype WHERE company_id=? AND base=? ORDER BY name<>?, name",
@@ -92,9 +100,43 @@ def _num(x, what):
     return v
 
 
+def clean_item(cid, d):
+    """A new stock item for Tally: name, group and unit as Tally has them; HSN and GST rate if given."""
+    f = form(cid, "stockitem")
+    name = re.sub(r"\s+", " ", str(d.get("name") or "")).strip()
+    if not name or len(name) > 100:
+        raise ValueError("Enter the item's name (up to 100 letters).")
+    if name.lower() in {x.lower() for x in f["items"]}:
+        raise ValueError(f"{name} is already a stock item in Tally.")
+    with conn() as c:          # also not waiting to go in already
+        for r in c.execute("SELECT data FROM entry WHERE company=(SELECT ?) AND kind='stockitem' AND status IN ('approval','queued','sending')",
+                           (next((x["name"] for x in store.companies() if x["id"] == cid), ""),)):
+            if json.loads(r["data"]).get("name", "").lower() == name.lower():
+                raise ValueError(f"{name} is already waiting to go into Tally.")
+    group = str(d.get("group") or "Primary")
+    if group not in f["groups"]:
+        raise ValueError("Pick a stock group from the list.")
+    unit = str(d.get("unit") or "").strip()
+    if unit not in f["units"]:
+        raise ValueError("Pick a unit Tally already has (new units are made in Tally).")
+    hsn = re.sub(r"\s", "", str(d.get("hsn") or ""))
+    if hsn and not re.fullmatch(r"\d{4,8}", hsn):
+        raise ValueError("The HSN code is 4 to 8 digits.")
+    gst = d.get("gst")
+    gst = None if gst in (None, "", "none") else float(gst)
+    if gst is not None and gst not in SLABS:
+        raise ValueError("Pick a GST rate from the list.")
+    alias = re.sub(r"\s+", " ", str(d.get("alias") or "")).strip()[:100]
+    barcode = str(d.get("barcode") or "").strip()[:64]
+    return {"name": name, "alias": alias, "group": group, "unit": unit, "hsn": hsn, "gst": gst, "barcode": barcode,
+            "vtype": "Stock Item", "party": name, "amount": 0, "date": date.today().isoformat(), "narration": ""}
+
+
 def clean(cid, kind, d):
     if kind not in KINDS:
         raise ValueError("Unknown entry type.")
+    if kind == "stockitem":
+        return clean_item(cid, d)
     f = form(cid, kind)
     day = str(d.get("date") or "")
     try:
@@ -191,6 +233,12 @@ def create(cid, kind, data, user):
                                          "queued" if direct else "approval", user["name"] or "Owner", time.time(),
                                          (user["name"] or "Owner") if direct else ""))
         new_id = cur.lastrowid
+    if kind == "stockitem" and d.get("barcode"):
+        try:
+            import barcodes
+            barcodes.add(co["name"], d["barcode"], d["name"])
+        except ValueError:
+            pass
     return get(new_id)
 
 
@@ -243,7 +291,35 @@ def _d(iso):
     return iso.replace("-", "")
 
 
+def item_xml(e):
+    """A new stock item, created in Tally (never an existing one changed: Tally refuses a name it already has)."""
+    d = e["data"]
+    co = escape(e["company"])
+    names = f"<NAME>{escape(d['name'])}</NAME>" + (f"<NAME>{escape(d['alias'])}</NAME>" if d.get("alias") else "")
+    gst = ""
+    if d.get("hsn") or d.get("gst") is not None:
+        rates = ""
+        if d.get("gst") is not None:
+            g = d["gst"]
+            rates = "".join(f"<RATEDETAILS.LIST><GSTRATEDUTYHEAD>{h}</GSTRATEDUTYHEAD><GSTRATEVALUATIONTYPE>Based on Value</GSTRATEVALUATIONTYPE>"
+                            f"<GSTRATE>{r:g}</GSTRATE></RATEDETAILS.LIST>"
+                            for h, r in (("CGST", g / 2), ("SGST/UTGST", g / 2), ("IGST", g)))
+        gst = ("<GSTAPPLICABLE>&#4; Applicable</GSTAPPLICABLE><GSTTYPEOFSUPPLY>Goods</GSTTYPEOFSUPPLY>"
+               "<GSTDETAILS.LIST><APPLICABLEFROM>20170701</APPLICABLEFROM><CALCULATIONTYPE>On Value</CALCULATIONTYPE>"
+               + (f"<HSNCODE>{escape(d['hsn'])}</HSNCODE>" if d.get("hsn") else "")
+               + (f"<TAXABILITY>{'Exempt' if d.get('gst') == 0 else 'Taxable'}</TAXABILITY>" if d.get("gst") is not None else "")
+               + (f"<STATEWISEDETAILS.LIST><STATENAME>&#4; Any</STATENAME>{rates}</STATEWISEDETAILS.LIST>" if rates else "")
+               + "</GSTDETAILS.LIST>")
+    return (f'<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA>'
+            f'<REQUESTDESC><REPORTNAME>All Masters</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>{co}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC>'
+            f'<REQUESTDATA><TALLYMESSAGE xmlns:UDF="TallyUDF"><STOCKITEM NAME="{escape(d["name"])}" ACTION="Create">'
+            f'<NAME.LIST>{names}</NAME.LIST><PARENT>{escape(d["group"]) if d["group"] != "Primary" else ""}</PARENT>'
+            f'<BASEUNITS>{escape(d["unit"])}</BASEUNITS>{gst}</STOCKITEM></TALLYMESSAGE></REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>')
+
+
 def build_xml(e):
+    if e["kind"] == "stockitem":
+        return item_xml(e)
     d = e["data"]
     co = escape(e["company"])
     vt = escape(d["vtype"])
@@ -318,11 +394,17 @@ _UNSAFE = re.compile(r'<(GUID|REMOTEID|MASTERID|ALTERID|VOUCHERKEY|VCHKEY|ISDELE
 
 
 def safe_for_tally(xml):
-    """Only new vouchers, never a change to or deletion of anything already in Tally (the Tally PC checks again)."""
+    """Only new vouchers or new stock items, never a change to or deletion of anything already in Tally
+    (the Tally PC checks again)."""
     actions = re.findall(r'ACTION\s*=\s*"([^"]*)"', xml, re.I)
     objs = re.findall(r'<TALLYMESSAGE[^>]*>\s*<([A-Za-z.]+)', xml)
-    return (bool(actions) and all(a.lower() == "create" for a in actions) and objs and all(o.upper() == "VOUCHER" for o in objs)
-            and "<REPORTNAME>Vouchers</REPORTNAME>" in xml and not _UNSAFE.search(xml))
+    if not (actions and all(a.lower() == "create" for a in actions) and objs) or _UNSAFE.search(xml):
+        return False
+    if "<REPORTNAME>Vouchers</REPORTNAME>" in xml:
+        return all(o.upper() == "VOUCHER" for o in objs)
+    if "<REPORTNAME>All Masters</REPORTNAME>" in xml:
+        return all(o.upper() == "STOCKITEM" for o in objs)
+    return False
 
 
 def outbox(company):
@@ -356,4 +438,6 @@ def result(eid, ok, error="", retry=False):
 
 def label(e):
     d = e["data"]
+    if e["kind"] == "stockitem":
+        return f"New stock item {d['name']}"
     return f"{d['vtype']} {d['party']} {d['amount']:.2f}"

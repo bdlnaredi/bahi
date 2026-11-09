@@ -40,7 +40,7 @@ On a computer, Bahi switches to a wide layout with a menu down the left:
 - **Nightly backups** on your server, the last 7 kept.
 - **Android app** with a full **offline copy**: every ledger, stock item, dues, reports and the last year's vouchers on the phone, shared to WhatsApp in a tap.
 - **Bahi Sync for Windows:** a small app on the Tally PC, installed with BahiSync-Setup.exe (tray icon, status, log, Sync now) that keeps the sync running and updates itself. It syncs every company open in Tally (pick which, and from when, under Companies); switch between them in the app.
-- **Never deletes or changes anything in Tally:** syncing only reads, and phone entries are only ever added as new vouchers. Every request is checked on the Tally PC before it reaches Tally.
+- **Never deletes or changes anything in Tally:** syncing only reads, and phone entries are only ever added as new vouchers or new stock items. Every request is checked on the Tally PC before it reaches Tally.
 - **Private:** your data lives on your own server. The app needs a password, and you can put Cloudflare Access in front of it.
 
 ## How it works

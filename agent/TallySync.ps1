@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.15"
+$AgentVersion = "3.16"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -158,11 +158,14 @@ function Assert-Safe([string]$xml) {
         return
     }
     if ($req -eq "IMPORT DATA") {
-        if ([regex]::Match($u, '<REPORTNAME>\s*(.*?)\s*</REPORTNAME>').Groups[1].Value -ne "VOUCHERS") { throw "Blocked: only vouchers may be added to Tally" }
+        # new vouchers, or new stock items; nothing else
+        $report = [regex]::Match($u, '<REPORTNAME>\s*(.*?)\s*</REPORTNAME>').Groups[1].Value
+        $allowed = if ($report -eq "VOUCHERS") { "VOUCHER" } elseif ($report -eq "ALL MASTERS") { "STOCKITEM" } else { $null }
+        if (-not $allowed) { throw "Blocked: only vouchers and stock items may be added to Tally" }
         $actions = @([regex]::Matches($u, 'ACTION\s*=\s*"([^"]*)"') | ForEach-Object { $_.Groups[1].Value })
         $objects = @([regex]::Matches($u, '<TALLYMESSAGE[^>]*>\s*<([A-Z.]+)') | ForEach-Object { $_.Groups[1].Value })
         if (-not $actions.Count -or ($actions | Where-Object { $_ -ne "CREATE" })) { throw "Blocked: an entry that would change or delete something in Tally" }
-        if ($objects | Where-Object { $_ -ne "VOUCHER" }) { throw "Blocked: only new vouchers may be added to Tally" }
+        if (-not $objects.Count -or ($objects | Where-Object { $_ -ne $allowed })) { throw "Blocked: only new vouchers or new stock items may be added to Tally" }
         if ($u -match '<(GUID|REMOTEID|MASTERID|ALTERID|VOUCHERKEY|VCHKEY|ISDELETED|ISCANCELLED|IMPORTDUPS)[\s>]|REMOTEID\s*=|VCHKEY\s*=|TAGNAME|TAGVALUE|<TDL|<DELETE|<ALTER|<CANCEL') {
             throw "Blocked: an entry that points at something already in Tally" }
         return

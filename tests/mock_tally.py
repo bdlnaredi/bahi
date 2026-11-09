@@ -371,6 +371,21 @@ def apply_edit():
 IMPORTED = []
 
 
+def import_item(req):
+    """Tally's Import Data for a new stock item: a name it already has is refused, never changed."""
+    m = re.search(r'<STOCKITEM NAME="([^"]*)" ACTION="Create">', req)
+    if not m:
+        return "<RESPONSE><LINEERROR>Unknown request</LINEERROR><CREATED>0</CREATED><ERRORS>1</ERRORS></RESPONSE>"
+    name = m.group(1).replace("&amp;", "&")
+    if any(n.lower() == name.lower() for n, *_ in STOCK):
+        return f"<RESPONSE><LINEERROR>Stock Item '{escape(name)}' already exists!</LINEERROR><CREATED>0</CREATED><ERRORS>1</ERRORS></RESPONSE>"
+    unit = (re.search(r"<BASEUNITS>(.*?)</BASEUNITS>", req) or [None, "Nos"])[1]
+    grp = (re.search(r"<PARENT>(.*?)</PARENT>", req) or [None, ""])[1] or "Primary"
+    STOCK.append((name, grp, unit, 0, 0.0))
+    print("mock: stock item created:", name, grp, unit, re.findall(r"<HSNCODE>(.*?)</HSNCODE>|<GSTRATE>(.*?)</GSTRATE>", req), flush=True)
+    return "<RESPONSE><CREATED>1</CREATED><ALTERED>0</ALTERED><DELETED>0</DELETED><ERRORS>0</ERRORS></RESPONSE>"
+
+
 def import_voucher(req):
     """Tally's Import Data for one voucher, with the checks Tally makes."""
     import xml.etree.ElementTree as ET
@@ -491,7 +506,9 @@ class H(BaseHTTPRequestHandler):
         typ, rid = g("TYPE"), g("ID")
         f, t = tdate(g("SVFROMDATE")), tdate(g("SVTODATE"))
         co = g("SVCURRENTCOMPANY").replace("&amp;", "&")
-        if "<TALLYREQUEST>Import Data</TALLYREQUEST>" in req:
+        if "<TALLYREQUEST>Import Data</TALLYREQUEST>" in req and "<REPORTNAME>All Masters</REPORTNAME>" in req:
+            out = import_item(req)
+        elif "<TALLYREQUEST>Import Data</TALLYREQUEST>" in req:
             out = import_voucher(req)
         elif co and co != COMPANY and co != os.environ.get("SECOND_CO"):
             out = "<ENVELOPE><LINEERROR>Could not find Company</LINEERROR></ENVELOPE>"

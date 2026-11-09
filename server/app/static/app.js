@@ -10,7 +10,7 @@ const S = {
 };
 const can = (p) => S.me.owner || S.me.perms.includes(p);
 const canLedgers = () => can("ledgers") || can("parties");
-const ENTRY = { sales: ["Sales invoice", "e_sales"], purchase: ["Purchase", "e_purchase"], receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], journal: ["Journal", "e_journal"], contra: ["Contra", "e_contra"], order: ["Sales order", "e_order"] };
+const ENTRY = { sales: ["Sales invoice", "e_sales"], purchase: ["Purchase", "e_purchase"], receipt: ["Receipt", "e_receipt"], payment: ["Payment", "e_payment"], journal: ["Journal", "e_journal"], contra: ["Contra", "e_contra"], order: ["Sales order", "e_order"], stockitem: ["Stock item", "e_item"] };
 const entryKinds = () => Object.keys(ENTRY).filter((k) => can(ENTRY[k][1]));
 function applyTabs() {
   const show = { home: true, sales: can("sales"), parties: canLedgers(), vouchers: can("vouchers"), dues: can("dues"), reports: true };
@@ -789,11 +789,14 @@ async function assignBarcode(code, items, preset = "") {
       <p class="hint" style="margin:0 0 8px">Barcode <b>${h(code)}</b> isn't on any item yet. Which item is it?</p>
       <form id="baf" class="form" style="padding:0"><label>Item<input name="item" list="balist" value="${h(preset)}" placeholder="Start typing an item" required></label>
       <datalist id="balist">${items.map((x) => `<option value="${h(x)}">`).join("")}</datalist>
-      <div class="actions"><button class="btn primary" type="submit">Save barcode</button><button class="btn" type="button" data-x>Skip</button></div><div class="msg" role="status"></div></form></div>`;
+      <div class="actions"><button class="btn primary" type="submit">Save barcode</button><button class="btn" type="button" data-x>Skip</button></div><div class="msg" role="status"></div></form>
+      ${can("e_item") ? `<p class="hint" style="margin:10px 0 0">A product you don't have in Tally yet? <a href="#/new/stockitem" data-new>Make a new stock item</a> with this barcode.</p>` : ""}</div>`;
     const finish = (v) => { dlg.close(); res(v); };
     dlg.showModal();
     dlg.querySelector("[data-x]").onclick = () => finish(null);
     dlg.oncancel = () => finish(null);
+    const nw = dlg.querySelector("[data-new]");
+    if (nw) nw.onclick = (e) => { e.preventDefault(); S.newBarcode = code; finish(null); location.hash = "#/new/stockitem"; };
     $("#baf").onsubmit = async (e) => {
       e.preventDefault();
       const item = e.target.item.value;
@@ -847,7 +850,7 @@ async function vStock(q = "") {
         <div class="sc"><span class="lbl">In / Out</span><b class="up">+${nfq.format(i.in_qty)}</b><b class="down">−${nfq.format(i.out_qty)}</b></div>
         <div class="sc"><span class="lbl">Closing</span><b>${qty(i.close_qty, i.unit)}</b><span class="meta">${i.close_exact ? "" : "≈ "}${money(i.close_value)}</span></div></a>`).join("")
       || '<div class="empty">No stock item matches that name.</div>'}</section>
-    <div class="actions" style="padding:0 0 4px"><a class="btn" href="#/godowns">Stock by godown</a>${excelBtn("stock", periodParams())}</div>
+    <div class="actions" style="padding:0 0 4px">${can("e_item") ? '<a class="btn primary" href="#/new/stockitem">+ New item</a>' : ""}<a class="btn" href="#/godowns">Stock by godown</a>${excelBtn("stock", periodParams())}</div>
     <p class="note" style="border:0">Set a minimum on an item's page to be told on Telegram when it runs low. Negative stock (all godowns together) is flagged too.</p>
     <p class="note" style="border:0;margin-top:0">Opening and closing are Tally's own figures for whole months, quarters and years, across all godowns. For other dates Bahi works them out from the nearest month-end and marks them ≈.</p>`;
   const sf = $("#sflag"); if (sf) sf.onclick = (e) => { e.preventDefault(); S.sflag = !S.sflag; vStock(S.sq || "").catch(fail); };
@@ -1728,7 +1731,7 @@ function vMySettings() {
 }
 
 /* ---------------------------------------------------------------- staff logins (owner) */
-const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_sales", "e_purchase", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order"] };
+const PRESETS = { Salesman: ["parties", "dues", "stock", "e_receipt", "e_order"], Accountant: ["accounts", "sales", "ledgers", "vouchers", "dues", "stock", "e_sales", "e_purchase", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order", "e_item"] };
 async function showStaff() {
   const d = await api("/api/users");
   const sec = $("#stsec");
@@ -1739,7 +1742,7 @@ async function showStaff() {
       <label><span><input type="checkbox" name="allco" ${!sel.length ? "checked" : ""}> All companies</span></label>
       ${S.companies.map((c) => `<label><span><input type="checkbox" name="co" value="${h(c.name)}" ${sel.includes(c.name) ? "checked" : ""}> ${h(c.name)}</span></label>`).join("")}` : "";
   const summary = (u) => u.perms.filter((p) => !p.startsWith("e_")).map((p) => ({ accounts: "money figures", sales: "sales", ledgers: "all ledgers", parties: "party ledgers", vouchers: "vouchers", dues: "dues", stock: "stock" }[p])).join(", ") +
-    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_sales", "e_purchase", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order"].includes(p)).map((p) => ({ e_sales: "sales invoices", e_purchase: "purchases", e_receipt: "receipts", e_payment: "payments", e_journal: "journals", e_contra: "contras", e_order: "orders" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
+    (u.perms.some((p) => p.startsWith("e_") && p !== "e_direct") ? `; enters ${u.perms.filter((p) => ["e_sales", "e_purchase", "e_receipt", "e_payment", "e_journal", "e_contra", "e_order", "e_item"].includes(p)).map((p) => ({ e_sales: "sales invoices", e_purchase: "purchases", e_receipt: "receipts", e_payment: "payments", e_journal: "journals", e_contra: "contras", e_order: "orders", e_item: "stock items" }[p])).join(", ")}${u.perms.includes("e_direct") ? " (no approval)" : ""}` : "");
   sec.innerHTML = `<div class="block-title">Staff logins <span>${d.users.length}</span></div>
     <div class="info"><div>Staff log in with their name and their own password, and see only what you tick. You always log in with the app password and see everything.</div></div>
     ${d.users.map((u, i) => `<div class="party"><button class="row" aria-expanded="false" data-su="${i}"><div class="main"><div class="name">${h(u.name)}${u.active ? "" : ' <span class="badge">switched off</span>'}</div>
@@ -1815,17 +1818,18 @@ async function vEntries() {
         : e.kind === "order" ? x.items.map((i) => `${h(i.item)}: ${nfq.format(i.qty)} ${h(i.unit)} at ₹${nf2.format(i.rate)}`).join("<br>")
         : e.kind === "journal" ? x.lines.map((l) => `${l.side === "dr" ? "Dr" : "Cr"} ${h(l.ledger)} ₹${nf2.format(l.amount)}`).join("<br>")
         : e.kind === "contra" ? `From ${h(x.account)} to ${h(x.to)}`
+        : e.kind === "stockitem" ? [`Group ${h(x.group)}, unit ${h(x.unit)}`, x.hsn ? `HSN ${h(x.hsn)}` : "", x.gst !== null && x.gst !== undefined ? `GST ${x.gst}%` : "", x.alias ? `alias ${h(x.alias)}` : "", x.barcode ? `barcode ${h(x.barcode)}` : ""].filter(Boolean).join(", ")
         : `${e.kind === "receipt" ? "Into" : "From"} ${h(x.account)}${x.bills.length ? `, against ${x.bills.map((b) => h(b.ref)).join(", ")}` : ""}`;
       const btn = [];
       if (S.me.owner && e.status === "approval") btn.push(`<button class="btn primary" data-act="approve" data-id="${e.id}">Approve</button><button class="btn" data-act="reject" data-id="${e.id}">Reject</button>`);
       if (e.status === "failed" && (S.me.owner || e.by === me)) btn.push(`<button class="btn" data-act="retry" data-id="${e.id}">Try again</button>`);
       if (["approval", "queued", "failed"].includes(e.status) && (S.me.owner || e.by === me)) btn.push(`<button class="btn" data-act="cancel" data-id="${e.id}">Cancel</button>`);
-      return `<div class="entry"><div class="row" style="cursor:default"><div class="main"><div class="name">${h(x.vtype)}: ${h(x.party)}</div>
+      return `<div class="entry"><div class="row" style="cursor:default"><div class="main"><div class="name">${e.kind === "stockitem" ? "New stock item" : h(x.vtype)}: ${h(x.party)}</div>
           <div class="meta">${fdate(x.date)}, by ${h(e.by)}${e.approved_by && e.approved_by !== e.by ? `, approved by ${h(e.approved_by)}` : ""}</div>
           <div class="meta">${detail}${x.narration ? `<br><i>${h(x.narration)}</i>` : ""}</div>
           <div class="meta"><span class="est ${cls}">${st}</span>${e.status === "done" && e.done ? ` ${ago(e.done)}` : ""}</div>
           ${e.error ? `<div class="meta od">${h(e.error)}</div>` : ""}</div>
-        <div class="end">${money(x.amount)}</div></div>${btn.length ? `<div class="actions" style="padding:0 14px 12px">${btn.join("")}</div>` : ""}</div>`;
+        <div class="end">${e.kind === "stockitem" ? "" : money(x.amount)}</div></div>${btn.length ? `<div class="actions" style="padding:0 14px 12px">${btn.join("")}</div>` : ""}</div>`;
     }).join("") || '<div class="empty">No entries made in the app yet.</div>'}</section>
     <p class="note" style="border:0">Entries go into Tally the next time the Tally PC syncs (every 10 minutes while Tally is open), then show up in the app like any other voucher. Each has "entered on phone by …" in its narration.</p>`;
   view.querySelectorAll("[data-act]").forEach((b) => b.onclick = async () => {
@@ -1838,9 +1842,41 @@ async function vEntries() {
   });
 }
 
+async function vNewItem() {
+  const f = await api(cpath("entry_form", { kind: "stockitem" }));
+  const opt = (arr, sel) => arr.map((x) => `<option ${x === sel ? "selected" : ""}>${h(x)}</option>`).join("");
+  view.innerHTML = `<h1 class="title">New stock item</h1>
+    <section class="page"><form class="form" id="nif" style="padding-top:14px" autocomplete="off">
+      <label>Name<input name="name" required maxlength="100" placeholder="As it should appear in Tally, e.g. Kaju 1 kg"></label>
+      <label>Stock group<select name="group">${opt(f.groups, "Primary")}</select></label>
+      <label>Unit<select name="unit">${opt(f.units, f.units[0])}</select>${f.units.length ? "" : '<span class="hint">No units yet: make the units in Tally first.</span>'}</label>
+      <div class="two"><label>HSN code (optional)<input name="hsn" inputmode="numeric" pattern="\\d{4,8}" placeholder="e.g. 0801"></label>
+        <label>GST rate<select name="gst"><option value="">Not set</option>${f.slabs.map((g) => `<option value="${g}">${g}%</option>`).join("")}</select></label></div>
+      <label>Alias (optional)<input name="alias" maxlength="100" placeholder="Another name to find it by in Tally"></label>
+      <label>Barcode (optional)<span style="display:flex;gap:8px"><input name="barcode" style="flex:1" autocapitalize="off" placeholder="Scan or type"><button class="btn" type="button" id="nibc">▥ Scan</button></span></label>
+      <button class="btn primary" type="submit">Save</button><div class="msg" id="nimsg" role="status"></div>
+      <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs, then shows under Stock." : "The owner approves it first, then it goes into Tally at the next sync."} Bahi only ever creates the item; an item Tally already has is never changed.</p>
+    </form></section>`;
+  const form = $("#nif");
+  $("#nibc").onclick = async () => { const c = await scanCode("Scan the item's barcode"); if (c) form.barcode.value = c; };
+  if (S.newBarcode) { form.barcode.value = S.newBarcode; S.newBarcode = ""; }
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { kind: "stockitem", name: form.name.value, group: form.group.value, unit: form.unit.value, hsn: form.hsn.value, gst: form.gst.value, alias: form.alias.value, barcode: form.barcode.value };
+    const btn = form.querySelector("button[type=submit]"); btn.disabled = true; $("#nimsg").textContent = "Saving";
+    const r = await fetch(cpath("entry"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    btn.disabled = false;
+    if (!r.ok) { $("#nimsg").textContent = j.error || "Couldn't save."; return; }
+    toast(j.entry.status === "approval" ? "Saved. It goes to the owner for approval." : "Saved. It goes into Tally at the next sync.");
+    location.hash = "#/entries";
+  };
+}
+
 async function vNewEntry(kind) {
   setTitle(true);
   if (!ENTRY[kind] || !can(ENTRY[kind][1])) { view.innerHTML = '<div class="empty">You can\'t make this kind of entry.</div>'; return; }
+  if (kind === "stockitem") return vNewItem();
   const f = await api(cpath("entry_form", { kind }));
   const order = kind === "order", rec = kind === "receipt", jv = kind === "journal", contra = kind === "contra";
   const inv = kind === "sales" || kind === "purchase", sale = kind === "sales";

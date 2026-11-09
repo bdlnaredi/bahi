@@ -1,5 +1,5 @@
 /* Bahi service worker: always try the server first, fall back to the saved copy when offline */
-const SHELL = "bahi-shell-v26", DATA = "bahi-data-v1";
+const SHELL = "bahi-shell-v27", DATA = "bahi-data-v1";
 // saved data is found whatever order a screen puts its settings in (the app's "download for offline" uses the same key)
 function dataKey(u) {
   const url = new URL(u);
