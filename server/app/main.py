@@ -35,6 +35,7 @@ import bankrec  # noqa: E402
 import links  # noqa: E402
 import cloud  # noqa: E402
 import upi  # noqa: E402
+import barcodes  # noqa: E402
 import threading  # noqa: E402
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
@@ -946,6 +947,29 @@ document.getElementById("a").addEventListener("change", function () {{
             tok = links.get(co["name"], party)
             origin = (self.headers.get("X-Forwarded-Proto") or "http") + "://" + (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "")
             return self.send_json({"url": links.url(tok, origin), "path": f"/p/{tok}", "base": links.base(), "upi": bool(upi.get(co["name"]))})
+
+        mp = re.match(r"^/api/c/(\d+)/barcodes$", path)
+        if mp:                                  # barcodes of stock items (kept by Bahi; Tally isn't changed)
+            cid = int(mp.group(1))
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            if not co:
+                return self.send_json({"error": "not found"}, 404)
+            if method == "POST":
+                if not self.allowed(cid, "stock", q, None):
+                    return self.send_json({"error": "Only users who can see stock can set barcodes."}, 403)
+                data = json.loads(self.body(4096) or b"{}")
+                try:
+                    if data.get("remove"):
+                        barcodes.remove(co["name"], str(data.get("code", "")))
+                        return self.send_json({"ok": True})
+                    item = str(data.get("item", ""))
+                    if item not in store.stock_names(cid):
+                        return self.send_json({"error": "No such stock item in Tally."}, 400)
+                    moved = barcodes.add(co["name"], str(data.get("code", "")), item)
+                    return self.send_json({"ok": True, "moved_from": moved})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            return self.send_json({"codes": barcodes.codes(co["name"])})
 
         mp = re.match(r"^/api/c/(\d+)/stockmin$", path)
         if mp and method == "POST":

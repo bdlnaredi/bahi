@@ -46,4 +46,6 @@ android {
 dependencies {
     implementation "androidx.core:core:1.13.1"
     implementation "androidx.webkit:webkit:1.11.0"
+    // barcode scanning with Google's ready-made scanner screen (no camera permission needed)
+    implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
 }

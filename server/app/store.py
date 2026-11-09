@@ -1907,6 +1907,11 @@ def collections(cid, days=7):
             "parties": out}
 
 
+def stock_names(cid):
+    with conn() as c:
+        return {r["name"] for r in c.execute("SELECT name FROM stock WHERE company_id=?", (cid,))}
+
+
 def ledger_exists(cid, name):
     with conn() as c:
         return c.execute("SELECT 1 FROM ledger WHERE company_id=? AND name=?", (cid, name)).fetchone() is not None

@@ -712,16 +712,101 @@ async function vDues(kind) {
   });
 }
 
+// ---- barcodes: scan with the Android app's scanner, the browser's camera, or type / use a USB scanner
+let scanSeq = 0;
+const scanWaiting = {};
+window.bahiScanned = (id, code, err) => { const f = scanWaiting[id]; delete scanWaiting[id]; if (f) f(code, err); };
+function scanCode(title = "Scan a barcode") {
+  if (window.BahiAndroid && BahiAndroid.scan) {
+    return new Promise((res) => { const id = "s" + (++scanSeq); scanWaiting[id] = (c, err) => { if (err) toast("Scanner: " + err); res(c || null); }; BahiAndroid.scan(id); });
+  }
+  return new Promise((res) => {
+    const dlg = $("#sheet");
+    const cam = "BarcodeDetector" in window && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    dlg.innerHTML = `<h3>${h(title)}</h3><div style="padding:0 14px 14px">
+      ${cam ? '<video id="scvid" playsinline muted style="width:100%;border-radius:8px;background:#000;max-height:50vh"></video><p class="hint">Point the camera at the barcode.</p>' : ""}
+      <form id="scf" class="form" style="padding:0"><label>${cam ? "Or type it" : "Type the barcode, or scan it with a barcode scanner"}<input name="code" autocomplete="off" autocapitalize="off" inputmode="text" ${cam ? "" : "autofocus"}></label>
+      <div class="actions"><button class="btn primary" type="submit">OK</button><button class="btn" type="button" data-x>Cancel</button></div></form></div>`;
+    let stream = null, done = false;
+    const finish = (v) => { if (done) return; done = true; if (stream) stream.getTracks().forEach((t) => t.stop()); dlg.close(); dlg.onclick = null; res(v); };
+    dlg.showModal();
+    dlg.querySelector("[data-x]").onclick = () => finish(null);
+    dlg.onclick = (e) => { if (e.target === dlg) finish(null); };
+    dlg.oncancel = () => finish(null);
+    $("#scf").onsubmit = (e) => { e.preventDefault(); const v = e.target.code.value.trim(); finish(v || null); };
+    if (!cam) { setTimeout(() => $("#scf").code.focus(), 50); return; }
+    (async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        const v = $("#scvid"); v.srcObject = stream; await v.play();
+        const det = new BarcodeDetector();
+        while (!done) {
+          const found = await det.detect(v).catch(() => []);
+          if (found.length) { finish(found[0].rawValue); break; }
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      } catch (e) { const vd = $("#scvid"); if (vd) vd.replaceWith(Object.assign(document.createElement("p"), { className: "hint", textContent: "The camera isn't available here; type the barcode instead." })); }
+    })();
+  });
+}
+async function barcodeMap() {
+  const d = await api(cpath("barcodes"));
+  S.bcodes = d.codes || {};
+  return S.bcodes;
+}
+// a barcode no item has yet: pick the item for it (users who can see stock)
+async function assignBarcode(code, items, preset = "") {
+  if (!can("stock")) { toast(`Barcode ${code} isn't set on any item.`); return null; }
+  return new Promise((res) => {
+    const dlg = $("#sheet");
+    dlg.innerHTML = `<h3>New barcode</h3><div style="padding:0 14px 14px">
+      <p class="hint" style="margin:0 0 8px">Barcode <b>${h(code)}</b> isn't on any item yet. Which item is it?</p>
+      <form id="baf" class="form" style="padding:0"><label>Item<input name="item" list="balist" value="${h(preset)}" placeholder="Start typing an item" required></label>
+      <datalist id="balist">${items.map((x) => `<option value="${h(x)}">`).join("")}</datalist>
+      <div class="actions"><button class="btn primary" type="submit">Save barcode</button><button class="btn" type="button" data-x>Skip</button></div><div class="msg" role="status"></div></form></div>`;
+    const finish = (v) => { dlg.close(); res(v); };
+    dlg.showModal();
+    dlg.querySelector("[data-x]").onclick = () => finish(null);
+    dlg.oncancel = () => finish(null);
+    $("#baf").onsubmit = async (e) => {
+      e.preventDefault();
+      const item = e.target.item.value;
+      if (!items.includes(item)) { dlg.querySelector(".msg").textContent = "Pick an item from the list."; return; }
+      const r = await fetch(cpath("barcodes"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, item }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { dlg.querySelector(".msg").textContent = j.error || "Couldn't save."; return; }
+      if (S.bcodes) S.bcodes[code] = item;
+      finish(item);
+    };
+    setTimeout(() => $("#baf").item.focus(), 50);
+  });
+}
+
 async function vStock(q = "") {
   setTitle(false);
   S.sq = q;
   const d = await api(cpath("stock", { q, ...periodParams() }));
   if (!$("#ssearch")) {
-    view.innerHTML = `<div id="speriod"></div><input class="search" id="ssearch" type="search" placeholder="Search items" aria-label="Search stock items" value="${h(q)}"><div id="slist"></div>`;
+    view.innerHTML = `<div id="speriod"></div><div style="display:flex;gap:8px;align-items:center"><input class="search" id="ssearch" type="search" placeholder="Search items" aria-label="Search stock items" value="${h(q)}" style="flex:1">
+      <button class="btn" id="sscan" type="button" title="Scan a barcode">▥ Scan</button></div><div id="slist"></div>`;
     $("#ssearch").oninput = (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => vStock(e.target.value).catch(fail), 200); };
+    // scan: a known barcode opens its item; a new one is given to an item (then scan the next)
+    $("#sscan").onclick = async () => {
+      const map = await barcodeMap();
+      const names = S.stockNames && S.stockNames.length ? S.stockNames : d.items.map((i) => i.name);
+      for (;;) {
+        const code = await scanCode("Scan a barcode");
+        if (!code) return;
+        if (map[code]) { location.hash = `#/item/${enc(map[code])}`; return; }
+        const it = await assignBarcode(code, names);
+        if (!it) return;
+        toast(`${code} is now ${it}. Scan the next one, or go back.`);
+      }
+    };
   }
   $("#speriod").innerHTML = periodBar(d.from, d.to);
   wirePeriod(d.from, d.to);
+  if (!q) S.stockNames = d.items.map((i) => i.name);
   const flagged = d.items.filter((i) => i.flag);
   const shown = S.sflag ? flagged : d.items;
   $("#slist").innerHTML = `<section class="page"><div class="hero">
@@ -759,6 +844,7 @@ async function vItem(name) {
     ${can("stock") ? `<section class="page"><form class="form" id="minf" style="padding-top:12px">
       <label>Alert me on Telegram when stock falls below<span style="display:flex;gap:8px;align-items:center"><input type="number" name="min" min="0" step="any" value="${d.period.min ?? ""}" placeholder="no minimum" style="flex:1"> ${h(I.unit || "")}</span></label>
       <button class="btn" type="submit">Save minimum</button></form></section>` : ""}
+    <section class="page" id="bcsec"></section>
     ${d.godowns && d.godowns.length ? `<section class="page"><div class="block-title">In each godown now</div>
       ${d.godowns.map((g) => `<div class="row"><div class="main"><div class="name">${h(g.godown)}</div></div>
         <div class="end"><span class="amt${g.qty < 0 ? " down" : ""}">${qty(g.qty, I.unit)}</span></div></div>`).join("")}
@@ -772,6 +858,33 @@ async function vItem(name) {
         || '<div class="empty">No movement in this period.</div>'}
     </section>`;
   wirePeriod(d.from, d.to);
+  const showCodes = async () => {
+    const map = await barcodeMap();
+    const mine = Object.keys(map).filter((c) => map[c] === name).sort();
+    $("#bcsec").innerHTML = `<div class="block-title">Barcodes <span>${mine.length || "none yet"}</span></div>
+      ${mine.map((c) => `<div class="row" style="cursor:default"><div class="main"><div class="name" style="font-family:ui-monospace,monospace">${h(c)}</div></div>
+        ${can("stock") ? `<button class="chip" data-rmc="${h(c)}">Remove</button>` : ""}</div>`).join("")}
+      ${can("stock") ? `<div class="actions"><button class="btn primary" id="bcadd">▥ Scan a barcode for this item</button></div>
+      <p class="hint" style="padding:0 14px 12px">Kept in Bahi (Tally isn't changed). Scan these when making a sales or purchase entry to add the item.</p>` : ""}`;
+    const add = $("#bcadd");
+    if (add) add.onclick = async () => {
+      for (;;) {
+        const code = await scanCode(`Barcode for ${name}`);
+        if (!code) break;
+        const r = await fetch(cpath("barcodes"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, item: name }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { toast(j.error || "Couldn't save."); break; }
+        toast(j.moved_from ? `${code} moved here from ${j.moved_from}.` : `${code} added. Scan another (another pack size), or go back.`);
+        await showCodes();
+      }
+    };
+    $("#bcsec").querySelectorAll("[data-rmc]").forEach((b) => b.onclick = async () => {
+      if (!confirm(`Remove barcode ${b.dataset.rmc} from ${name}?`)) return;
+      await fetch(cpath("barcodes"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: b.dataset.rmc, remove: true }) });
+      showCodes().catch(fail);
+    });
+  };
+  showCodes().catch(() => { $("#bcsec").remove(); });
   const mf = $("#minf");
   if (mf) mf.onsubmit = async (e) => {
     e.preventDefault();
@@ -1716,7 +1829,7 @@ async function vNewEntry(kind) {
           : `<div class="two"><label>Supplier's invoice no.<input name="number" required></label><label>Invoice date<input type="date" name="ref_date" value="${f.today}" required></label></div>`}
         <label><span><input type="checkbox" name="igst"> ${sale ? "Customer" : "Supplier"} is in another state (IGST)</span></label>
         <p class="hint" id="pstate"></p>
-        <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
+        <div id="items"></div><div class="actions" style="padding:0"><button class="btn" type="button" id="additem">+ Add item</button><button class="btn" type="button" id="scanitem">▥ Scan items</button></div>${list("ilist", f.items.map((i) => i.name))}
         <div class="block-title" style="padding:14px 0 0">Other charges</div>
         <div id="charges"></div><button class="btn" type="button" id="addcharge">+ Add charge (labour, loading, packing, cartage…)</button>${list("clist", f.charge_ledgers)}
         ${f.item_ledgers.length > 1 ? `<label>${sale ? "Sales" : "Purchase"} ledger<select name="ledger"><option value="">Automatic (by GST rate)</option>${f.item_ledgers.map((x) => `<option>${h(x)}</option>`).join("")}</select></label>` : ""}
@@ -1728,7 +1841,7 @@ async function vNewEntry(kind) {
         <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`
       : `<label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>`}
       ${jv || contra || inv ? "" : order ? `
-        <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${list("ilist", f.items.map((i) => i.name))}
+        <div id="items"></div><div class="actions" style="padding:0"><button class="btn" type="button" id="additem">+ Add item</button><button class="btn" type="button" id="scanitem">▥ Scan items</button></div>${list("ilist", f.items.map((i) => i.name))}
         <div class="total">Total before tax <b id="otot">₹0</b></div>
         <label>Deliver by (optional)<input type="date" name="due"></label>
         ${f.sales_ledgers.length > 1 ? `<label>Sales ledger${sel("sales_ledger", f.sales_ledgers)}</label>` : ""}
@@ -1741,6 +1854,36 @@ async function vNewEntry(kind) {
       <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs." : "The owner approves it first, then it goes into Tally at the next sync."}</p>
     </form></section>`;
   const form = $("#ef");
+  // scanning items: each scan adds the item (or one more of it); keeps scanning until the scanner is closed
+  const scanItems = async (addRow) => {
+    const map = await barcodeMap();
+    const names = f.items.map((i) => i.name);
+    let n = 0;
+    for (;;) {
+      const code = await scanCode(n ? `${n} scanned. Scan the next item` : "Scan an item");
+      if (!code) break;
+      let item = map[code];
+      if (!item) { item = await assignBarcode(code, names); if (!item) continue; }
+      const rows = [...$("#items").querySelectorAll(".irow")];
+      let row = rows.find((r) => r.querySelector("[name=item]").value === item);
+      if (row) {
+        const q = row.querySelector("[name=qty]");
+        q.value = String((+q.value || 0) + 1);
+        q.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        row = rows.find((r) => !r.querySelector("[name=item]").value);
+        if (!row) { addRow(); row = [...$("#items").querySelectorAll(".irow")].pop(); }
+        const it = row.querySelector("[name=item]");
+        it.value = item;
+        it.dispatchEvent(new Event("change", { bubbles: true }));
+        const q = row.querySelector("[name=qty]");
+        q.value = "1";
+        q.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      n++;
+      toast(`${item}: ${row.querySelector("[name=qty]").value}`);
+    }
+  };
   if (inv) {
     const items = Object.fromEntries(f.items.map((i) => [i.name, i]));
     const r2 = (x) => Math.round(x * 100) / 100;
@@ -1821,6 +1964,7 @@ async function vNewEntry(kind) {
     };
     $("#addcharge").onclick = addCharge;
     $("#additem").onclick = add; add(); tot();
+    $("#scanitem").onclick = () => scanItems(add).catch(fail);
   } else if (jv) {
     const tot = () => {
       let dr = 0, cr = 0;
@@ -1862,6 +2006,7 @@ async function vNewEntry(kind) {
       $("#otot").textContent = rupees(t);
     };
     $("#additem").onclick = add; add();
+    $("#scanitem").onclick = () => scanItems(add).catch(fail);
   } else {
     let typed = false;
     form.amount.oninput = () => { typed = true; };

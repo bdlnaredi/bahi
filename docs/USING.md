@@ -429,3 +429,9 @@ Set your UPI ID once in **Settings, UPI payments** (one per company), then:
 
 The money goes straight from the customer's UPI app to your bank; Bahi never handles it and charges nothing. Enter the receipt in Tally (or in Bahi) when it arrives. UPI apps usually limit one payment to ₹1 lakh. Payment links work when customers can open Bahi's address from the internet (Settings, Customer links); the QR code on your phone and on invoices works anywhere.
 
+## Barcodes
+
+- **Give items their barcodes:** Stock → **Scan** → scan a product. A barcode Bahi doesn't know asks which item it is; then scan the next. Or open an item and tap **Scan a barcode for this item** (one item can have several: different pack sizes, the maker's code and your own). Barcodes are kept in Bahi; Tally's item masters aren't changed.
+- **Bill by scanning:** in a new sales or purchase entry (or an order), tap **Scan items**. Each scan adds the item with quantity 1 and its usual rate; scanning the same item again adds one more. Close the scanner when done, check the entry and save; it goes to Tally as usual.
+- The Android app uses Google's scanner (no camera permission needed). In a browser, the camera is used where the browser can read barcodes; otherwise type the code, or use a USB / Bluetooth barcode scanner (they type the code for you).
+

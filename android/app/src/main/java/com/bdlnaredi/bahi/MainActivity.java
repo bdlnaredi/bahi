@@ -12,6 +12,11 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
+import org.json.JSONObject;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -382,6 +387,24 @@ public class MainActivity extends Activity {
             ui.post(() -> fetchFile(url, name, true));
         }
 
+        /** Opens Google's barcode scanner; the page gets window.bahiScanned(id, code), code null when cancelled. */
+        @JavascriptInterface
+        public void scan(String id) {
+            ui.post(() -> {
+                try {
+                    GmsBarcodeScannerOptions o = new GmsBarcodeScannerOptions.Builder()
+                            .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS).build();
+                    GmsBarcodeScanner sc = GmsBarcodeScanning.getClient(MainActivity.this, o);
+                    sc.startScan()
+                            .addOnSuccessListener(b -> scanned(id, b.getRawValue(), null))
+                            .addOnCanceledListener(() -> scanned(id, null, null))
+                            .addOnFailureListener(e -> scanned(id, null, e.getMessage() == null ? "the scanner didn't start" : e.getMessage()));
+                } catch (Throwable e) {
+                    scanned(id, null, "the scanner isn't available on this phone (" + e.getMessage() + ")");
+                }
+            });
+        }
+
         @JavascriptInterface
         public void shareWithText(String url, String name, String text) {
             ui.post(() -> { shareText = text; fetchFile(url, name, true); });
@@ -527,6 +550,13 @@ public class MainActivity extends Activity {
         } catch (ActivityNotFoundException e) {
             toast("This phone couldn't open the installer.");
         }
+    }
+
+    private void scanned(String id, String code, String error) {
+        if (web == null) return;
+        String js = "window.bahiScanned && window.bahiScanned(" + JSONObject.quote(id) + "," + (code == null ? "null" : JSONObject.quote(code))
+                + "," + (error == null ? "null" : JSONObject.quote(error)) + ")";
+        web.evaluateJavascript(js, null);
     }
 
     @Override
