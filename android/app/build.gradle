@@ -48,4 +48,6 @@ dependencies {
     implementation "androidx.webkit:webkit:1.11.0"
     // barcode scanning with Google's ready-made scanner screen (no camera permission needed)
     implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
+    // one Kotlin version for every library (the scanner brings an older one; two copies won't build)
+    implementation platform("org.jetbrains.kotlin:kotlin-bom:1.8.22")
 }
