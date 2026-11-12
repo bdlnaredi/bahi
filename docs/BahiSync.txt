@@ -3,7 +3,7 @@ Bahi Sync
 
 Bahi Sync copies your TallyPrime books to your Bahi server, so you can see them in the Bahi app on your
 phone or computer. It only reads from Tally; the only thing it ever puts into Tally is a new entry you made
-in the Bahi app (receipts, payments, orders, sales, purchases). It never changes or deletes anything in Tally.
+in the Bahi app (receipts, payments, orders, sales, purchases, new stock items). It never changes or deletes anything in Tally.
 
 Getting started
   1. Open Bahi Sync (Start menu, Bahi Sync).

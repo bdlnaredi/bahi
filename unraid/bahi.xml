@@ -8,22 +8,34 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/bdlnaredi/bahi/issues</Support>
   <Project>https://github.com/bdlnaredi/bahi</Project>
-  <Overview>Bahi: see your TallyPrime ledgers, vouchers, stock, bill-wise outstanding and GST on your phone. A sync agent on the Tally PC sends data here; open the web UI on your phone and install it to the home screen.</Overview>
+  <ReadMe>https://github.com/bdlnaredi/bahi#readme</ReadMe>
+  <Overview>Bahi puts your TallyPrime books on your phone, from your own server: a free, self-hosted alternative to Credflow and Livekeeping. A small sync app on the Windows PC that runs TallyPrime (Bahi Sync) copies ledgers, vouchers, stock, bill-wise outstanding and GST data to this container, and you open it in the Android app or as a web app on any phone or computer. See ledgers and statements, search vouchers, track dues with ageing and follow-ups, stock by godown, Balance Sheet, Profit and Loss, GST summary, cash and bank book, bank reconciliation and sales analysis. Share Tally-style invoice and ledger PDFs (with e-invoice QR and e-way bill) on WhatsApp, send customers their own ledger link and UPI payment requests, get a Telegram morning summary, scan barcodes, and enter receipts, payments, orders, sales, purchases and new stock items from the phone. Staff logins with your approval, several companies, nightly backups (also to Google Drive or OneDrive). Bahi never deletes or changes anything in Tally: it only reads, and phone entries only ever go in as new vouchers or new stock items.</Overview>
   <Category>Productivity: Tools:</Category>
-  <TemplateURL>https://raw.githubusercontent.com/bdlnaredi/bahi/main/unraid/bahi.xml</TemplateURL>
-  <Requires>A Windows PC running TallyPrime with the Bahi sync agent (see the installation guide at https://github.com/bdlnaredi/bahi/blob/main/docs/INSTALL.md). Set an app password and a sync token below.</Requires>
-  <Changes>
-### 1.4
-- Invoice, voucher and ledger PDFs laid out like TallyPrime prints
-- View PDF button, vouchers load in pages of 200, bills open their invoice
-### 1.2
-- Bill-wise outstanding with ageing, GST summary, Vouchers tab, PDF sharing
-  </Changes>
+  <ExtraSearchTerms>tally tallyprime accounting gst ledger invoice credflow livekeeping india</ExtraSearchTerms>
   <WebUI>http://[IP]:[PORT:8780]/</WebUI>
-  <ExtraParams>--security-opt=no-new-privileges:true</ExtraParams>
+  <TemplateURL>https://raw.githubusercontent.com/bdlnaredi/mediahub/main/unraid/bahi.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/bdlnaredi/bahi/main/server/app/static/icon-512.png</Icon>
-  <Config Name="Web UI port" Target="8780" Default="8780" Mode="tcp" Description="Port for the phone app and the sync agent" Type="Port" Display="always" Required="true" Mask="false">8780</Config>
-  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/bahi/data" Mode="rw" Description="Synced Tally data (can always be rebuilt by a full sync)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/bahi/data</Config>
-  <Config Name="App password" Target="APP_PASSWORD" Default="" Mode="" Description="Password you type in the phone app" Type="Variable" Display="always" Required="true" Mask="true"></Config>
-  <Config Name="Sync token" Target="SYNC_TOKEN" Default="" Mode="" Description="Secret shared with the Tally PC sync agent (Setup.bat asks for it)" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <License>GPL-3.0</License>
+  <Requires>A Windows PC running TallyPrime with its data server on (port 9000) and Bahi Sync installed. Setup guide: https://github.com/bdlnaredi/bahi/blob/main/docs/INSTALL.md. Set an app password and a sync token below. To use it away from home, put it behind Cloudflare Tunnel or Tailscale.</Requires>
+  <Changes>
+### 3.10
+- New stock items from the app (name, group, unit, HSN, GST rate, barcode)
+- Barcode scanning: give items barcodes, scan items into sales and purchases
+- Sync to two Bahi servers at once; backups to Google Drive or OneDrive
+- UPI payment requests, customer links, figures by month, week or day
+- Tally PC 3.17: big companies' voucher lists no longer time out
+Full list: https://github.com/bdlnaredi/bahi/blob/main/CHANGELOG.md
+  </Changes>
+  <Screenshot>https://raw.githubusercontent.com/bdlnaredi/bahi/main/docs/images/home.png</Screenshot>
+  <Screenshot>https://raw.githubusercontent.com/bdlnaredi/bahi/main/docs/images/ledger.png</Screenshot>
+  <Screenshot>https://raw.githubusercontent.com/bdlnaredi/bahi/main/docs/images/dues-bills.png</Screenshot>
+  <Screenshot>https://raw.githubusercontent.com/bdlnaredi/bahi/main/docs/images/desktop-ledger.png</Screenshot>
+  <Screenshot>https://raw.githubusercontent.com/bdlnaredi/bahi/main/docs/images/pdf-invoice.png</Screenshot>
+  <ExtraParams>--security-opt=no-new-privileges:true</ExtraParams>
+  <Config Name="Web UI port" Target="8780" Default="8780" Mode="tcp" Description="Port for the app and for Bahi Sync on the Tally PC" Type="Port" Display="always" Required="true" Mask="false">8780</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/bahi/data" Mode="rw" Description="Synced Tally data, phone entries, settings and nightly backups" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/bahi/data</Config>
+  <Config Name="App password" Target="APP_PASSWORD" Default="" Mode="" Description="Owner password for the app (staff get their own logins inside the app)" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Sync token" Target="SYNC_TOKEN" Default="" Mode="" Description="A long random secret; type the same one into Bahi Sync on the Tally PC" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="Backup time" Target="BACKUP_TIME" Default="02:30" Mode="" Description="Time of the nightly backup (24-hour, HH:MM)" Type="Variable" Display="advanced" Required="false" Mask="false">02:30</Config>
+  <Config Name="Time zone" Target="TZ" Default="IST-5:30" Mode="" Description="Time zone for backups, summaries and reminders (IST-5:30 is India)" Type="Variable" Display="advanced" Required="false" Mask="false">IST-5:30</Config>
 </Container>

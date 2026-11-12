@@ -54,20 +54,20 @@ Keep both secrets somewhere safe, such as a password manager.
 
 ## 3. Install the server on Unraid
 
-### Option A: Unraid template (recommended, one-click updates)
+### Option A: Community Apps (recommended, one-click updates)
 
-Bahi isn't listed in Community Apps, so add its template by hand once:
-
-1. Open the Unraid terminal (`>_`) and run this to download the template:
+1. In Unraid, open the **Apps** tab and search for **bahi**.
+2. Click **Install**.
+3. If it doesn't show up yet (the Apps list is rebuilt every few hours), add the template by hand instead: open the Unraid terminal (`>_`) and run
    ```
    wget -O /boot/config/plugins/dockerMan/templates-user/my-bahi.xml https://raw.githubusercontent.com/bdlnaredi/bahi/main/unraid/bahi.xml
    ```
-2. Go to the **Docker** tab and click **Add Container**.
-3. In the **Template** dropdown, choose **bahi** (under *User templates*).
+   then **Docker** tab → **Add Container** → **Template**: **bahi** (under *User templates*).
 4. Fill in:
    - **App password**: your app password from step 2
    - **Sync token**: your sync token from step 2
    - Leave **Web UI port** as `8780` and **Data** as `/mnt/user/appdata/bahi/data`.
+   - Under *Show more settings* you can change the nightly **Backup time** (02:30) and the **Time zone** (India by default).
 5. Click **Apply**. Unraid downloads the image and starts the container.
 6. From any computer at home, open `http://UNRAID-IP:8780`, using your Unraid server's IP address. You should see the **Open your books** login page.
 
@@ -223,7 +223,7 @@ Continue with the **[user guide](USING.md)**.
 |---|---|
 | **Server** | Unraid Docker tab → **update ready** → click it. On Compose: **Compose Pull**, then **Compose Up**. |
 | **Phone app** | The web app updates itself the next time you open it while online. The Android app offers new versions when you open it: tap **Download**, then install. Check **Reports → Sync** for the version number. |
-| **Tally PC agent** | Download the latest `agent` folder and copy the files into `C:\Bahi`, replacing the old ones. Your settings are kept. Then run `Sync-Now.bat` once. |
+| **Tally PC** | Nothing to do: the sync files update themselves from your server after it's updated (in Settings: *Update the Tally PC files automatically*, on by default). Bahi Sync offers its own new versions in its window: click the "new version is ready" line. |
 
 When an update changes how data is stored, the server clears its copy and the next sync refills it automatically.
 
