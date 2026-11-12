@@ -567,6 +567,12 @@ class H(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
+            # SLOW_LIST=1: the voucher list for more than two months in one go never comes (a big company)
+            if (ctype == "Voucher" and os.environ.get("SLOW_LIST") and "IsOptional" in req and f and t
+                    and (t - f).days > 62):
+                self.close_connection = True
+                self.connection.close()
+                return
             out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC><CMPINFO><COMPANY>0</COMPANY><GROUP>0</GROUP><LEDGER>0</LEDGER><VOUCHER>51</VOUCHER></CMPINFO></DESC><DATA><COLLECTION>"
             WANT_RATES[0] = "RateDetails" in req
             if ctype == "Voucher":

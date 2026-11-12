@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.16"
+$AgentVersion = "3.17"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -173,11 +173,39 @@ function Assert-Safe([string]$xml) {
     throw "Blocked: unknown request to Tally"
 }
 
-function Tally-Raw([string]$xml) {
+function Tally-Raw([string]$xml, [int]$seconds = 600) {
     Assert-Safe $xml
-    $wc = New-Object System.Net.WebClient
-    $wc.Headers.Add("Content-Type", "text/xml;charset=utf-8")
-    return $wc.UploadData($Tally, "POST", [System.Text.Encoding]::UTF8.GetBytes($xml))
+    # Tally can take minutes on a big company; Windows' usual 100-second limit cut those off
+    $body = [System.Text.Encoding]::UTF8.GetBytes($xml)
+    $req = [System.Net.HttpWebRequest]::Create($Tally)
+    $req.Method = "POST"; $req.ContentType = "text/xml;charset=utf-8"
+    $req.Timeout = $seconds * 1000; $req.ReadWriteTimeout = $seconds * 1000
+    $req.ContentLength = $body.Length
+    $rs = $req.GetRequestStream(); $rs.Write($body, 0, $body.Length); $rs.Close()
+    $resp = $req.GetResponse()
+    try {
+        $ms = New-Object System.IO.MemoryStream
+        $resp.GetResponseStream().CopyTo($ms)
+        return ,$ms.ToArray()
+    } finally { $resp.Close() }
+}
+
+# The voucher list one month at a time, joined into one answer (for when the whole period in one go fails)
+function Light-ByMonth([string]$company, [datetime]$from, [datetime]$to, [string]$fetch) {
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append("<ENVELOPE><BODY><DATA><COLLECTION>")
+    $m = New-Object DateTime $from.Year, $from.Month, 1
+    while ($m -le $to) {
+        $a = if ($m -lt $from) { $from } else { $m }
+        $b = $m.AddMonths(1).AddDays(-1); if ($b -gt $to) { $b = $to }
+        $t = [System.Text.Encoding]::UTF8.GetString((Tally-Raw (VchCollection-Xml $company $a $b $fetch)))
+        if ($t -notmatch '<ENVELOPE') { throw ("Tally's answer for " + $a.ToString("MMM yyyy") + " wasn't a voucher list") }
+        $mc = [regex]::Match($t, '<COLLECTION(?:\s[^>]*)?>([\s\S]*)</COLLECTION>')
+        if ($mc.Success) { [void]$sb.Append($mc.Groups[1].Value) }
+        $m = $m.AddMonths(1)
+    }
+    [void]$sb.Append("</COLLECTION></DATA></BODY></ENVELOPE>")
+    return ,[System.Text.Encoding]::UTF8.GetBytes($sb.ToString())
 }
 
 function Static-Vars([string]$company, [datetime]$from, [datetime]$to) {
@@ -607,9 +635,16 @@ foreach ($co in $companies) {
         $run = [guid]::NewGuid().ToString("N")
 
         # 1. A light list of every voucher (GUID, change counter, date): tells the server what changed
-        $light = $null; $expected = $null
+        $light = $null; $expected = $null; $lightErr = ""
+        $lf = "Date, GUID, AlterID, IsCancelled, IsOptional"
+        try { $light = Tally-Raw (VchCollection-Xml $co.Name $FromDate $ToDate $lf) }
+        catch {
+            $lightErr = $_.Exception.Message
+            Log ("Tally didn't send the whole voucher list for " + $co.Name + " (" + $lightErr + "); asking month by month ...") "Yellow"
+            try { $light = Light-ByMonth $co.Name $FromDate $ToDate $lf } catch { $light = $null; $lightErr = $_.Exception.Message }
+        }
         try {
-            $light = Tally-Raw (VchCollection-Xml $co.Name $FromDate $ToDate "Date, GUID, AlterID, IsCancelled, IsOptional")
+            if (-not $light) { throw "no list" }
             $lx = Parse-Xml $light
             $expected = @{}
             if ($lx) {
@@ -629,7 +664,7 @@ foreach ($co in $companies) {
         # Without Tally's list of vouchers nothing can be checked: try again at the next run rather than
         # sending months that can't be counted
         if (-not $light) {
-            Log ("Tally didn't send its list of vouchers for " + $co.Name + " (busy?). Trying again at the next sync.") "Yellow"
+            Log ("Tally didn't send its list of vouchers for " + $co.Name + $(if ($lightErr) { " (" + $lightErr + ")" } else { "" }) + ". Is a window or message open in Tally? Trying again at the next sync.") "Yellow"
             $exitCode = 1
             continue
         }
