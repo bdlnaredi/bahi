@@ -204,12 +204,14 @@ async function loadCompanies() {
   S.companies = d.companies;
   S.approvals = d.approvals || 0;
   S.sync = d.sync || { mode: "auto", every: 10 };
+  if (d.now && Date.now() / 1000 - d.now > 300) S.sync.running = null;   // an offline copy: that sync is long over
   if (!S.companies.find((c) => c.id === S.cid)) {
     // start with the company holding the most recent vouchers (usually the current year's)
     const latest = S.companies.slice().sort((a, b) => (b.last_vch || "").localeCompare(a.last_vch || ""))[0];
     S.cid = latest?.id ?? null;
   }
   renderCover();
+  watchSync();
 }
 
 function renderCover() {
@@ -217,15 +219,31 @@ function renderCover() {
   $("#company").textContent = c ? c.name : "Bahi";
   if (c && S.companies.length > 1) $("#company").insertAdjacentHTML("beforeend", ' <span class="caret" aria-hidden="true">▾</span>');
   const st = $("#status");
-  if (!c) { st.innerHTML = ""; return; }
+  if (!c) { st.innerHTML = S.sync && S.sync.running ? '<span class="dot busy"></span>Syncing from Tally now, for the first time' : ""; return; }
   const online = c.last_seen && Date.now() / 1000 - c.last_seen < 30 * 60;
   if (c.paused || S.sync.mode === "manual") {
     st.innerHTML = `<span class="dot off"></span>${c.paused ? "Sync paused" : "Manual sync"}. Figures as of ${new Date(c.last_sync * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`;
     return;
   }
+  const run = S.sync.running;
+  if (run) {
+    const which = run.company && S.companies.length > 1 ? (run.company === c.name ? "this company" : run.company) : "";
+    st.innerHTML = `<span class="dot busy"></span>Syncing from Tally now${which ? ` (${h(which)})` : ""}, started ${ago(run.since)}. Last change synced ${ago(c.last_sync)}`;
+    return;
+  }
   st.innerHTML = `<span class="dot ${online ? "" : "off"}"></span>` +
     (online ? `Tally connected. Last change synced ${ago(c.last_sync)}` :
       `Tally offline since ${ago(c.last_seen)}. Figures as of ${new Date(c.last_sync * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`);
+}
+
+// While the Tally PC is syncing, check every 15 seconds; when it finishes, show the new figures
+let runWatch = null, wasRunning = false;
+function watchSync() {
+  const run = !!(S.sync && S.sync.running);
+  if (wasRunning && !run && !syncPoll) route();
+  wasRunning = run;
+  clearTimeout(runWatch);
+  if (run) runWatch = setTimeout(() => { if (!document.hidden) loadCompanies().then(watchSync).catch(() => {}); else watchSync(); }, 15000);
 }
 
 /* ---------------------------------------------------------------- shared bits */
@@ -1030,9 +1048,9 @@ async function syncNow() {
     const c = S.companies.find((x) => x.id === S.cid);
     const picked = S.sync.last_run * 1000 >= t0 - 1000;
     if ((c && c.last_sync > before) || (picked && c && c.last_seen * 1000 > t0)) {
-      clearInterval(syncPoll); toast(c && c.last_sync > before ? "Sync finished. Showing the latest figures." : "Synced. Nothing had changed in Tally."); route();
+      clearInterval(syncPoll); syncPoll = null; toast(c && c.last_sync > before ? "Sync finished. Showing the latest figures." : "Synced. Nothing had changed in Tally."); route();
     } else if (Date.now() - t0 > 5 * 60000) {
-      clearInterval(syncPoll); toast("The Tally PC didn't respond. Is it on, with Tally open?");
+      clearInterval(syncPoll); syncPoll = null; toast("The Tally PC didn't respond. Is it on, with Tally open?");
     }
   }, 10000);
 }
@@ -1063,7 +1081,7 @@ function vReports() {
   ${R.length ? "</section>" : "</div>"}
   ${c && S.me.owner ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
-    <div>Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
+    <div>${S.sync.running ? `<b>Syncing from Tally now</b>${S.sync.running.company ? ` (${h(S.sync.running.company)})` : ""}, started ${ago(S.sync.running.since)}. ` : ""}Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
     <div>App version ${APP_VERSION}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
   <section class="page">

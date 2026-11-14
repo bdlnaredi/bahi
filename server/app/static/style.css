@@ -62,6 +62,9 @@ a { color: inherit; }
 .status { max-width: 680px; margin: 0 auto; padding: 0 16px; font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
 .status .dot { width: 8px; height: 8px; border-radius: 50%; background: #1f9d55; flex: none; }
 .status .dot.off { background: #d08a0a; }
+.status .dot.busy { background: #1d5fc4; animation: syncpulse 1.2s ease-in-out infinite; }
+@keyframes syncpulse { 50% { opacity: .25; transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .status .dot.busy { animation: none; } }
 .offline { background: #fff3cd; color: #5c4400; font-size: 13px; padding: 8px 16px; text-align: center; }
 
 main { max-width: 680px; margin: 0 auto; padding: 14px 12px 24px; outline: none; }

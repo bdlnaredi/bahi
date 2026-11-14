@@ -45,7 +45,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.10.1"
+APP_VERSION = "3.10.2"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -478,6 +478,8 @@ document.getElementById("a").addEventListener("change", function () {{
             return self.send_json(st)
         if path == "/agent/ping":
             return self.send_json({"ok": True, "time": time.time()})
+        if path in ("/agent/plan", "/agent/part", "/agent/commit", "/agent/state", "/agent/outbox") or path.startswith("/agent/outbox/"):
+            store.sync_step(q.get("company", ""))
         if path == "/agent/plan" and method == "POST":
             items = tp.parse_voucher_list(tp.parse_xml(self.body()))
             return self.send_json(store.plan(q.get("company", ""), q.get("from", ""), q.get("to", ""), items))
@@ -729,7 +731,8 @@ document.getElementById("a").addEventListener("change", function () {{
 
         if path == "/api/companies":
             return self.send_json({"companies": [c for c in store.companies() if users.can_company(u, c["name"])],
-                                   "now": time.time(), "sync": {**{k: v for k, v in store.sync_settings().items() if k != "companies"}, "agent_latest": agent_version()},
+                                   "now": time.time(), "sync": {**{k: v for k, v in store.sync_settings().items() if k != "companies"}, "agent_latest": agent_version(),
+                                            "running": store.sync_running()},
                                    "approvals": sum(entries.pending_count(c["name"]) for c in store.companies()) if u["owner"] else 0})
 
         # everything below the staff list is for the owner only, except the company screens

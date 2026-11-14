@@ -135,7 +135,30 @@ def company_id(c, name):
     return c.execute("INSERT INTO company(name) VALUES(?)", (name,)).lastrowid
 
 
+# A sync in progress on the Tally PC (kept in memory: only for showing "syncing now" in the app)
+_running = {}
+RUN_IDLE = 20 * 60        # nothing heard from the Tally PC this long: it isn't syncing any more
+
+
+def sync_step(company=None):
+    """The Tally PC is busy with a sync (and, once known, with this company)."""
+    now = time.time()
+    if not _running:
+        _running.update(since=now, company="")
+    _running["seen"] = now
+    if company:
+        _running["company"] = company
+
+
+def sync_running():
+    if _running and time.time() - _running.get("seen", 0) < RUN_IDLE:
+        return {"since": _running["since"], "company": _running.get("company", "")}
+    _running.clear()
+    return None
+
+
 def heartbeat(names):
+    _running.clear()       # sent at the end of every sync, and on every check that doesn't sync
     with _lock, conn() as c:
         for n in names:
             cid = company_id(c, n)
@@ -226,6 +249,8 @@ def sync_due(forced=False):
         if forced or asked or due:
             d["last_run"] = now
             _save_sync(d)
+            _running.clear()
+            sync_step()
             return {"run": True, "why": "asked" if asked else "forced" if forced else "schedule"}
         return {"run": False, "why": "manual" if d["mode"] == "manual" else "not yet"}
 
