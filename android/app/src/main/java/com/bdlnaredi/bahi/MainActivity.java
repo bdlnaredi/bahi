@@ -557,9 +557,7 @@ public class MainActivity extends Activity {
         updateAsked = System.currentTimeMillis();
         new AlertDialog.Builder(this)
                 .setTitle("Please update the Bahi app")
-                .setMessage("Version 1." + latest + " is ready (you have " + BuildConfig.VERSION_NAME + ").
-
-"
+                .setMessage("Version 1." + latest + " is ready (you have " + BuildConfig.VERSION_NAME + ").\n\n"
                         + "Newer versions are faster, fix problems and keep working with your Bahi server. "
                         + "It takes under a minute, and your login and saved data stay.")
                 .setPositiveButton("Update now", (d, w) -> downloadUpdate())
