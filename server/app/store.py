@@ -852,7 +852,7 @@ LEDGER_SORTS = {"name": "name COLLATE NOCASE", "balance": "ABS(closing) DESC, na
 def ledgers(cid, q="", sort="name"):
     order = LEDGER_SORTS.get(sort, LEDGER_SORTS["name"])
     with conn() as c:
-        return _rows(c, f"""SELECT l.name, l.parent, l.closing,
+        return _rows(c, f"""SELECT l.name, l.parent, l.closing, l.chain,
             (SELECT MAX(v.date) FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
               WHERE vl.ledger=l.name AND v.company_id=l.company_id) last_txn
             FROM ledger l WHERE l.company_id=? AND l.name LIKE ? ORDER BY {order}""", (cid, f"%{q}%"))

@@ -14,14 +14,14 @@ Bahi never deletes or changes anything in Tally.
 <tr>
 <td><img src="docs/images/home.png" width="230" alt="Home screen"></td>
 <td><img src="docs/images/ledger.png" width="230" alt="Party ledger"></td>
-<td><img src="docs/images/dues-bills.png" width="230" alt="Bill-wise dues"></td>
+<td><img src="docs/images/dues-bills.png" width="230" alt="A party's pending bills"></td>
 <td><img src="docs/images/voucher.png" width="230" alt="Voucher view"></td>
 </tr>
 </table>
 
 On a computer, Bahi switches to a wide layout with a menu down the left:
 
-<img src="docs/images/desktop-ledger.png" width="720" alt="Ledger on a computer: statement with pending bills beside it">
+<img src="docs/images/desktop-ledger.png" width="720" alt="A party ledger on a computer: balance card, Statement and Pending bills tabs, monthly figures">
 
 *Screenshots use made-up demo data.*
 
@@ -38,7 +38,8 @@ To reach Bahi away from home, use Cloudflare Tunnel or Tailscale. The **[install
 ### Your books
 - **Home:** what you'll receive, what you owe, cash, bank, stock value and sales at a glance.
 - **Sales by day, week or month:** the steps follow the period you pick. Tap a day to see its bills.
-- **Ledgers:** sort by name, balance or recent activity, and open any statement with its running balance. Call, WhatsApp or share a PDF from there.
+- **Ledgers:** sort by name, balance or recent activity. Each ledger opens on a balance card that says what it means ("You will receive", "You owe"), with **Statement** and **Pending bills** on separate tabs. Share, WhatsApp or call from there.
+- **Colours that mean something:** in a party's ledger, Dr is red and Cr green. In bank and cash accounts they swap, so money in is green and money out or an overdraft is red.
 - **Vouchers:** search by party, number, amount or narration. Each opens as an invoice with items, GST, bill references and narration.
 - **Dues:** bill-wise receivables and payables with ageing (0-30, 31-60, 61-90 and 90+ days), plus interest on overdue bills.
 - **Follow-up list:** overdue customers, with your notes and promised payment dates.
@@ -68,7 +69,7 @@ To reach Bahi away from home, use Cloudflare Tunnel or Tailscale. The **[install
   - ledger lookups: send the bot a party's name, spelt any way.
 
 ### Entries from the phone
-- **Receipts, payments, journals, contras, sales orders, sales invoices and purchases.** They go into Tally at the next sync.
+- **Receipts, payments, journals, contras, sales orders, sales invoices and purchases,** all behind one **New entry** button. They go into Tally at the next sync.
 - **New stock items:** name, group, unit, HSN, GST rate and barcode.
 - **Barcodes:** scan to give items their barcodes, then scan items straight into a bill. Each scan beeps.
 - **Staff logins:** each person sees only what you allow, and their entries wait for your approval.

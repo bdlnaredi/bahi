@@ -17,13 +17,38 @@ function applyTabs() {
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.hidden = !show[a.dataset.tab]);
   document.querySelectorAll("#tabs a[data-need]").forEach((a) => a.hidden = !a.dataset.need.split(" ").some((p) => p === "owner" ? S.me.owner : can(p)));
 }
+const EICON = { sales: "M6 3h12v18l-3-2-3 2-3-2-3 2z M9 8h6 M9 12h6", purchase: "M4 6h16l-2 9H6z M6 6L5 3H2 M8 20a1 1 0 1 0 0-.1 M17 20a1 1 0 1 0 0-.1",
+  receipt: "M12 19V5 M6 13l6 6 6-6", payment: "M12 5v14 M6 11l6-6 6 6", journal: "M5 4h14v16H5z M9 9h6 M9 13h6",
+  contra: "M7 7h12l-3-3 M17 17H5l3 3", order: "M9 4h6v3H9z M6 6h12v15H6z M9 12h6 M9 16h4", stockitem: "M4 8l8-4 8 4v8l-8 4-8-4z M4 8l8 4 8-4 M12 12v8" };
 function entryBar() {
   const ks = entryKinds();
   if (!ks.length && !S.approvals) return "";
-  return `<section class="page entrybar">
-    ${S.me.owner && S.approvals ? `<a class="row" href="#/entries"><div class="main"><div class="name od">${S.approvals} ${S.approvals === 1 ? "entry waits" : "entries wait"} for your approval</div><div class="meta">Made by staff on their phones</div></div><span class="chev"></span></a>` : ""}
-    ${ks.length ? `<div class="actions">${ks.map((k) => `<a class="btn" href="#/new/${k}">+ ${ENTRY[k][0]}</a>`).join("")}<a class="btn" href="#/entries">Entries</a></div>` : ""}</section>`;
+  return `<div class="entrybar">
+    ${S.me.owner && S.approvals ? `<a class="approve" href="#/entries"><b>${S.approvals}</b> ${S.approvals === 1 ? "entry waits" : "entries wait"} for your approval<span class="chev"></span></a>` : ""}
+    ${ks.length ? `<div class="newrow"><button class="btn primary big" id="newentry">${ICON.plus}New entry</button><a class="btn big" href="#/entries">Entries</a></div>` : ""}</div>`;
 }
+function wireEntryBar() {
+  const b = $("#newentry");
+  if (b) b.onclick = () => {
+    const dlg = $("#sheet");
+    dlg.innerHTML = `<h3>New entry</h3><div class="kinds">${entryKinds().map((k) => `<a href="#/new/${k}"><span class="ki"><svg viewBox="0 0 24 24"><path d="${EICON[k] || "M12 5v14 M5 12h14"}"/></svg></span>${ENTRY[k][0]}</a>`).join("")}</div>
+      <div class="actions" style="justify-content:flex-end"><button class="btn" value="close" formmethod="dialog" onclick="this.closest('dialog').close()">Close</button></div>`;
+    dlg.querySelectorAll(".kinds a").forEach((a) => a.addEventListener("click", () => dlg.close()));
+    dlg.showModal();
+  };
+}
+/* a sheet of extra actions behind a "More" button */
+function moreSheet(title, items) {
+  const dlg = $("#sheet");
+  dlg.innerHTML = `<h3>${h(title)}</h3><div class="menu">${items.map((it, i) => it.href ? `<a href="${it.href}" ${it.blank ? 'target="_blank" rel="noopener"' : ""} ${it.download ? "download" : ""} data-mi="${i}">${it.icon || ""}<span>${it.label}</span></a>`
+      : `<button data-mi="${i}">${it.icon || ""}<span>${it.label}</span></button>`).join("")}</div>
+    <div class="actions" style="justify-content:flex-end"><button class="btn" onclick="this.closest('dialog').close()">Close</button></div>`;
+  dlg.querySelectorAll("[data-mi]").forEach((el) => el.addEventListener("click", () => { dlg.close(); const f = items[+el.dataset.mi].run; if (f) f(); }));
+  dlg.showModal();
+}
+/* bank, cash and overdraft accounts: money in (Dr) is good news, so the colours swap */
+const CASHBANK = /\|(Bank Accounts|Bank OD A\/c|Cash-in-Hand)\|/;
+const isCashBank = (chain, ...names) => CASHBANK.test(chain || "") || names.some((n) => ["Bank Accounts", "Bank OD A/c", "Cash-in-Hand"].includes(n));
 try { S.cid = Number(localStorage.getItem("cid")) || null; } catch (e) {}
 try { S.lsort = localStorage.getItem("lsort") || "name"; S.esort = localStorage.getItem("esort") || "old"; S.lview = localStorage.getItem("lview") || "grouped"; } catch (e) { S.lsort = "name"; S.esort = "old"; S.lview = "grouped"; }
 function savePref(k, v) { S[k] = v; try { localStorage.setItem(k, v); } catch (e) {} }
@@ -252,6 +277,11 @@ const ICON = {
   wa: '<svg viewBox="0 0 24 24"><path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z M9 9.5c.5 2 2.5 4 5 5l1.2-1.2 1.8.9-.4 1.6c-3.5.2-8-4.3-8-7.8L10.2 7l.9 1.8z"/></svg>',
   share: '<svg viewBox="0 0 24 24"><path d="M12 3v12 M7 8l5-5 5 5 M5 14v6h14v-6"/></svg>',
   print: '<svg viewBox="0 0 24 24"><path d="M7 9V3h10v6 M7 17H4v-7h16v7h-3 M7 14h10v7H7z"/></svg>',
+  plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></svg>',
+  more: '<svg viewBox="0 0 24 24"><path d="M5 12h.01 M12 12h.01 M19 12h.01" stroke-width="3.2"/></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
+  rupee: '<svg viewBox="0 0 24 24"><path d="M7 4h11 M7 9h11 M7 4c6 0 6 9 0 9h-1l8 8"/></svg>',
+  xl: '<svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z M14 3v5h5 M8 12l5 6 M13 12l-5 6"/></svg>',
 };
 
 const PERIODS = [
@@ -268,18 +298,18 @@ function periodFor(key) {
 function periodBar(from, to, slot = "period") {
   const P = slot === "period" ? S.period : ledgerPeriod();
   const key = P ? P.key : "year";
-  return `<div class="toolbar" role="group" aria-label="Period">${PERIODS.map(([k, l]) =>
-    `<button class="chip ${k === key ? "on" : ""}" data-period="${k}" aria-pressed="${k === key}">${l}</button>`).join("")}</div>
-    ${key === "custom" ? `<div class="dates"><input type="date" id="pf" value="${from}" aria-label="From date"> to <input type="date" id="pt" value="${to}" aria-label="To date"> <button class="chip" id="papply">Show</button></div>` :
-      `<p class="subtitle">${key === "all" ? "All synced dates" : `${fdate(from)} to ${fdate(to)}`}</p>`}`;
+  return `<div class="periodbar"><label class="pselect"><span class="sr">Period</span><select data-period aria-label="Period">${PERIODS.map(([k, l]) =>
+    `<option value="${k}" ${k === key ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    ${key === "custom" ? `<div class="dates"><input type="date" id="pf" value="${from}" aria-label="From date"> to <input type="date" id="pt" value="${to}" aria-label="To date"> <button class="chip on" id="papply">Show</button></div>` :
+      `<span class="prange">${key === "all" ? "All synced dates" : `${fdate(from)} – ${fdate(to)}`}</span>`}</div>`;
 }
 function wirePeriod(from, to, slot = "period") {
   const set = (v) => {
     if (slot === "period") { S.period = v; try { localStorage.setItem("period", JSON.stringify(S.period)); } catch (e) {} }
     else S.lperiod = v || { key: "year" };     // a ledger's period lasts until the app is closed
   };
-  view.querySelectorAll("[data-period]").forEach((b) => b.onclick = () => {
-    const k = b.dataset.period;
+  view.querySelectorAll("select[data-period]").forEach((b) => b.onchange = () => {
+    const k = b.value;
     set(k === "year" ? null : k === "custom" ? { key: "custom", from: from < "2001" ? iso(new Date(Date.now() - 30 * 864e5)) : from, to: to > "2098" ? iso(new Date()) : to } : periodFor(k));
     route();
   });
@@ -311,16 +341,14 @@ async function vHome() {
   const d = await api(cpath("dashboard", periodParams()));
   const thisMonth = new Date().toISOString().slice(0, 7);
   view.innerHTML = `${entryBar()}
-  <section class="page">
-    <div class="hero">
-      <a href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div></a>
-      <a href="#/dues/payable"><div class="label">You owe</div><div class="big owe">${short(d.payable)}</div></a>
-    </div>
-    <div class="tiles">
-      <a href="#/group/${enc("Cash-in-Hand")}"><div class="label">Cash</div><div class="val">${short(d.cash)}</div></a>
-      <a href="#/group/${enc("Bank Accounts")}"><div class="label">Bank</div><div class="val">${short(d.bank_total)}</div></a>
-      <a href="#/stock"><div class="label">Stock</div><div class="val">${short(d.stock_value)}</div></a>
-    </div>
+  <section class="herocards">
+    <a class="bold in" href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div><div class="go">See dues</div></a>
+    <a class="bold out" href="#/dues/payable"><div class="label">You owe</div><div class="big">${short(d.payable)}</div><div class="go">See dues</div></a>
+  </section>
+  <section class="minis">
+    <a href="#/group/${enc("Cash-in-Hand")}"><div class="label">Cash</div><div class="val">${short(d.cash)}</div></a>
+    <a href="#/group/${enc("Bank Accounts")}"><div class="label">Bank</div><div class="val ${d.bank_total < -0.5 ? "neg" : ""}">${short(d.bank_total)}</div></a>
+    <a href="#/stock"><div class="label">Stock</div><div class="val">${short(d.stock_value)}</div></a>
   </section>
 
   <section class="page">
@@ -333,7 +361,7 @@ async function vHome() {
     <div class="chart" id="chart"></div>
   </section>
 
-  ${d.banks.length > 1 ? `<section class="page"><div class="block-title">Bank balances</div>
+  ${d.banks.length > 1 ? `<section class="page flip"><div class="block-title">Bank balances</div>
     ${d.banks.map((b) => `<a class="row" href="#/ledger/${enc(b.name)}"><div class="main name">${h(b.name)}</div><div class="end">${drcr(b.closing)}</div><span class="chev"></span></a>`).join("")}
   </section>` : ""}
 
@@ -410,7 +438,7 @@ async function vParties(q) {
   $("#lsortbar").querySelectorAll("[data-sort]").forEach((b) => b.onclick = () => { savePref("lsort", b.dataset.sort); vParties().catch(fail); });
   const list = d.ledgers;
   $("#llist").innerHTML = (list.length ? "" : '<div class="empty">No ledger matches that name.</div>') +
-    list.slice(0, 300).map((l) => `<a class="row" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div>
+    list.slice(0, 300).map((l) => `<a class="row${isCashBank(l.chain, l.parent) ? " flip" : ""}" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${h(l.name)}</div>
       <div class="meta">${h(l.parent)}${l.last_txn ? `, last entry ${fdate(l.last_txn)}` : ""}</div></div>
       <div class="end">${drcr(l.closing)}</div></a>`).join("") +
     (list.length > 300 ? `<div class="note">Showing 300 of ${list.length}. Type to narrow down.</div>` : "");
@@ -598,32 +626,44 @@ async function vLedger(name) {
           <span class="p">${h(e.against || e.vtype)}</span>${drcr(e.amount)}
           <span class="v">${h(e.vtype)} ${h(e.number)}</span><span class="bal">Bal ${drcr(e.balance)}</span>
         </a>`;
+  const flip = isCashBank(L.chain, L.parent);
+  const cl = d.closing;
+  // the balance in plain words: what it means for you
+  const word = flip ? (cl > 0.5 ? "Balance" : cl < -0.5 ? "Overdrawn" : "Nil balance")
+    : cl > 0.5 ? (d.bill_kind === "payable" ? "Advance paid to them" : "You will receive") : cl < -0.5 ? (d.bill_kind === "receivable" ? "Advance from them" : "You owe") : "Settled, nothing due";
+  const tone = flip ? (cl < -0.5 ? "out" : "in") : cl > 0.5 ? "in" : cl < -0.5 ? "out" : "nil";
+  const tab = pending.length && S.ltab === "bills" ? "bills" : "stmt";
+  view.classList.toggle("flip", flip);
   view.innerHTML = `
     <div class="crumbs"><a href="#/group/${enc(L.parent)}">${h(L.parent)}</a></div>
     <h1 class="title">${h(L.name)}</h1>
-    ${periodBar(d.from, d.to, "ledger")}
+    ${L.gstin || L.mobile || L.phone ? `<p class="subtitle">${[L.gstin ? "GSTIN " + h(L.gstin) : "", h(L.mobile || L.phone || "")].filter(Boolean).join(" · ")}</p>` : ""}
     ${d.difference ? `<p class="note od" style="border:0">Tally's closing on ${fdate(d.to)} is ${nf2.format(Math.abs(d.tally_closing))} ${d.tally_closing < 0 ? "Cr" : "Dr"}; the entries listed here add up to ${nf2.format(Math.abs(d.entries_total))} ${d.entries_total < 0 ? "Cr" : "Dr"}. The difference, ${nf2.format(Math.abs(d.difference))}, is entries in Tally that haven't reached Bahi yet; nothing has been adjusted. Bahi fetches them again by itself. <a href="#/check">Sync check</a></p>` : ""}
-    <section class="page">
-      ${L.gstin || L.mobile || L.phone || L.email ? `<div class="info" style="padding-top:12px">${L.gstin ? `<div>GSTIN ${h(L.gstin)}</div>` : ""}${L.mobile || L.phone ? `<div>${h(L.mobile || L.phone)}</div>` : ""}${L.email ? `<div>${h(L.email)}</div>` : ""}</div>` : ""}
-      <div class="actions" style="${L.gstin || L.mobile || L.phone || L.email ? "" : "padding-top:12px"}">
-        <button class="btn primary" id="sharepdf">${ICON.share}Share PDF</button>
-        <a class="btn" href="${pdfUrl}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
-        ${excelBtn("ledger", { name, ...ledgerParams() })}
-        <button class="btn" id="plink">${ICON.share}Customer link</button>
-        <button class="btn" id="preq">₹ Request payment</button>
-        ${phone ? `<a class="btn wa" data-wa-party="${h(L.name)}" ${isDebtor ? 'data-wa-pay="1"' : ""} href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}">${ICON.call}Call</a>` : ""}
+    <section class="bold balcard ${tone}">
+      <div class="label">${word} <span class="asof">on ${fdate(d.to > iso(new Date()) ? iso(new Date()) : d.to)}</span></div>
+      <div class="big">${rupees(cl)}<span class="side">${cl > 0.005 ? "Dr" : cl < -0.005 ? "Cr" : ""}</span></div>
+      <div class="mini3">
+        <div><span>Opening</span>${drcr(d.opening)}</div>
+        <div><span>${flip ? "Money in" : "Debit"}</span><b>${nf2.format(d.debit || 0)}</b></div>
+        <div><span>${flip ? "Money out" : "Credit"}</span><b>${nf2.format(d.credit || 0)}</b></div>
       </div>
-      <div class="totals">
-        <div><div class="label">Opening</div>${drcr(d.opening)}</div>
-        <div><div class="label">Closing</div>${drcr(d.closing)}</div>
-        <div><div class="label">Debits</div>${money(d.debit, "dr")}</div>
-        <div><div class="label">Credits</div>${money(d.credit, "cr")}</div>
-      </div>
+      ${overdue.length ? `<div class="odline">${overdue.length} bill${overdue.length === 1 ? "" : "s"} overdue${d.interest > 0.5 ? `, interest ${rupees(d.interest, false)}` : ""}</div>` : ""}
     </section>
+    <div class="actions top">
+      <button class="btn primary" id="sharepdf">${ICON.share}Share</button>
+      ${phone ? `<a class="btn wa" data-wa-party="${h(L.name)}" ${isDebtor ? 'data-wa-pay="1"' : ""} href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}" aria-label="Call">${ICON.call}Call</a>` : ""}
+      <button class="btn" id="lmore" aria-label="More">${ICON.more}More</button>
+    </div>
+    ${pending.length ? `<div class="seg" role="tablist">
+        <button role="tab" data-ltab="stmt" aria-selected="${tab === "stmt"}">Statement</button>
+        <button role="tab" data-ltab="bills" aria-selected="${tab === "bills"}">Pending bills <span class="cnt">${pending.length}</span>${overdue.length ? '<span class="dotred" title="overdue"></span>' : ""}</button></div>` : ""}
+    ${tab === "bills" ? `<section class="page billsec">${billRows(pending)}</section>
+      <p class="hint" style="margin:0 4px 12px">Bills not yet settled, as on today. Tap one to open it.</p>` : `
+    ${periodBar(d.from, d.to, "ledger")}
     ${d.entries.length > 1 ? `<div class="toolbar" role="group" aria-label="Show">
         <button class="chip ${S.lview !== "all" ? "on" : ""}" data-lview="grouped">${GRAIN_WORD[grain]} figures</button>
-        <button class="chip ${S.lview === "all" ? "on" : ""}" data-lview="all">All entries</button></div>` : ""}
-    ${d.entries.length > 1 && S.lview === "all" ? sortChips("esorts", [["old", "Oldest first"], ["new", "Newest first"], ["amount", "Largest amount"]], S.esort) : ""}
+        <button class="chip ${S.lview === "all" ? "on" : ""}" data-lview="all">All entries</button>
+        ${S.lview === "all" ? `<label class="pselect small"><span class="sr">Sort</span><select id="esort" aria-label="Sort">${[["old", "Oldest first"], ["new", "Newest first"], ["amount", "Largest amount"]].map(([k, l]) => `<option value="${k}" ${k === S.esort ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}</div>` : ""}
     <section class="page ruled stmt">
       <div class="carry"><span>Opening balance</span>${drcr(d.opening)}</div>
       ${!d.entries.length ? '<div class="empty">No entries in this period.</div>' : S.lview === "all" || d.entries.length < 2 ? sortEntries(d.entries).map(entryRow).join("") :
@@ -631,29 +671,29 @@ async function vLedger(name) {
           const dr = g.items.reduce((t, e) => t + (e.amount > 0 ? e.amount : 0), 0), cr = g.items.reduce((t, e) => t + (e.amount < 0 ? -e.amount : 0), 0);
           return `<button class="entry grp" data-g="${i}" aria-expanded="false">
               <span class="d">${g.items.length} entr${g.items.length === 1 ? "y" : "ies"}</span>
-              <span class="p">${h(bucketLabel(g.key, grain, d.from, d.to))}</span><span class="gdc">${dr ? `<span>Dr ${nf2.format(dr)}</span>` : ""}${cr ? `<span class="crt">Cr ${nf2.format(cr)}</span>` : ""}</span>
+              <span class="p">${h(bucketLabel(g.key, grain, d.from, d.to))}</span><span class="gdc">${dr ? `<span class="gdr">Dr ${nf2.format(dr)}</span>` : ""}${cr ? `<span class="crt">Cr ${nf2.format(cr)}</span>` : ""}</span>
               <span class="v">tap to see the entries</span><span class="bal">Bal ${drcr(g.items[g.items.length - 1].balance)}</span></button>
             <div class="gitems" id="g${i}" hidden>${g.items.map(entryRow).join("")}</div>`; }).join("")}
       <div class="closing"><span>Closing balance</span>${drcr(d.closing)}</div>
-    </section>
-    ${pending.length ? `<section class="page billsec"><div class="block-title">Pending bills <span>${overdue.length ? `${overdue.length} overdue` : ""}${d.interest > 0.5 ? `, interest ${rupees(d.interest, false)}` : ""}</span></div>${billRows(pending.slice(0, 5))}
-      ${pending.length > 5 ? `<div id="morebills" hidden>${billRows(pending.slice(5))}</div><button class="row" id="showbills" style="justify-content:center;color:var(--ink-2);font-weight:500">Show all ${pending.length} bills</button>` : ""}</section>` : ""}`;
-  wirePeriod(d.from, d.to, "ledger");
+    </section>`}`;
+  if (tab === "stmt") wirePeriod(d.from, d.to, "ledger");
+  const again = () => { const y = window.scrollY; vLedger(name).then(() => window.scrollTo(0, y)).catch(fail); };
+  view.querySelectorAll("[data-ltab]").forEach((b) => b.onclick = () => { S.ltab = b.dataset.ltab; again(); });
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`, L.name, d.closing > 0.5);
-  $("#plink").onclick = () => linkDialog(L.name).catch(fail);
-  $("#preq").onclick = () => payDialog(L.name, d.closing > 0.5 ? d.closing : 0, phone).catch(fail);
-  view.querySelectorAll("[data-lview]").forEach((b) => b.onclick = () => {
-    const y = window.scrollY; savePref("lview", b.dataset.lview); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);
-  });
+  $("#lmore").onclick = () => moreSheet(L.name, [
+    { label: "View statement PDF", icon: ICON.print, href: pdfUrl, blank: true },
+    { label: "Download Excel", icon: ICON.xl, href: cpath("export", { what: "ledger", name, ...ledgerParams() }), download: true },
+    { label: "Customer link", icon: ICON.link, run: () => linkDialog(L.name).catch(fail) },
+    { label: "Request payment (UPI)", icon: ICON.rupee, run: () => payDialog(L.name, d.closing > 0.5 ? d.closing : 0, phone).catch(fail) },
+    ...(L.email ? [{ label: "E-mail " + h(L.email), icon: ICON.share, href: "mailto:" + L.email }] : []),
+  ]);
+  view.querySelectorAll("[data-lview]").forEach((b) => b.onclick = () => { savePref("lview", b.dataset.lview); again(); });
   view.querySelectorAll("button.grp").forEach((b) => b.onclick = () => {
     const box = $("#g" + b.dataset.g), open = box.hidden;
     box.hidden = !open; b.setAttribute("aria-expanded", String(open));
   });
-  view.querySelectorAll("#esorts [data-sort]").forEach((b) => b.onclick = () => {
-    const y = window.scrollY; savePref("esort", b.dataset.sort); vLedger(name).then(() => window.scrollTo(0, y)).catch(fail);
-  });
-  const sb = $("#showbills");
-  if (sb) sb.onclick = () => { $("#morebills").hidden = false; sb.remove(); };
+  const es = $("#esort");
+  if (es) es.onchange = () => { savePref("esort", es.value); again(); };
 }
 
 function reminderText(name, co, total, overdue, interest = 0, rate = 0) {
@@ -670,6 +710,7 @@ function reminderText(name, co, total, overdue, interest = 0, rate = 0) {
 async function vGroup(name) {
   setTitle(true);
   const d = await api(cpath("group", { name }));
+  view.classList.toggle("flip", !!name && isCashBank("", name, ...(d.path || [])));
   view.innerHTML = `
     ${name ? `<div class="crumbs"><a href="#/groups">All groups</a>${d.path.map((p) => ` / <a href="#/group/${enc(p)}">${h(p)}</a>`).join("")}</div>` : ""}
     <h1 class="title">${name ? h(name) : "Group summary"}</h1>
@@ -1225,7 +1266,7 @@ async function vVoucher(id) {
       ${tax > 0.005 ? `<div class="sumline"><span>Taxable value</span>${money(taxable)}</div><div class="sumline"><span>GST</span>${money(tax)}</div>` : ""}
       </section>` : ""}
     <section class="page"><div class="block-title"><span>Accounts</span><span>Dr / Cr</span></div>
-      ${lines.map((l) => `<a class="row" href="#/ledger/${enc(l.ledger)}"><div class="main"><div class="name">${h(l.ledger)}</div>${l.kind === "tax" ? '<div class="meta">GST</div>' : ""}</div><div class="end">${drcr(l.amount)}</div></a>`).join("")}
+      ${lines.map((l) => `<a class="row${l.cashbank || isCashBank(l.chain) ? " flip" : ""}" href="#/ledger/${enc(l.ledger)}"><div class="main"><div class="name">${h(l.ledger)}</div>${l.kind === "tax" ? '<div class="meta">GST</div>' : ""}</div><div class="end">${drcr(l.amount)}</div></a>`).join("")}
     </section>
     ${d.bills.length ? `<section class="page"><div class="block-title">Bill references</div>
       ${d.bills.map((b) => { const inner = `<div class="main"><div class="name">${h(b.name || b.btype)}</div><div class="meta">${h(b.btype)}${b.days ? `, ${b.days} days credit` : ""}${b.vid ? ", tap to open the bill" : ""}</div></div><div class="end">${drcr(b.amount)}</div>${b.vid ? '<span class="chev"></span>' : ""}`;
@@ -2212,6 +2253,7 @@ async function vBS() {
 async function vCashbook() {
   setTitle(true);
   const d = await api(cpath("cashbank", periodParams()));
+  view.classList.add("flip");
   view.innerHTML = `<h1 class="title">Cash and bank book</h1>${periodBar(d.from, d.to)}
     <section class="page"><div class="hero"><div><div class="label">Opening, ${fdate(d.from)}</div><div class="big" style="font-size:22px">${short(d.opening)}</div></div>
       <div><div class="label">Closing, ${fdate(d.to)}</div><div class="big">${short(d.closing)}</div></div>
@@ -2343,6 +2385,8 @@ async function route() {
     return;
   }
   view.dataset.view = parts[0] || "home";
+  view.classList.remove("flip");
+  if ($("#sheet").open) $("#sheet").close();     // the phone's back button leaves an open sheet behind
   loading();
   try {
     switch (parts[0]) {
@@ -2374,6 +2418,7 @@ async function route() {
       case "vouchers": await vVouchers(); break;
       default: await vHome();
     }
+    wireEntryBar();
     $("#offline").hidden = !offlineSeen;
     window.scrollTo(0, 0);
   } catch (e) { fail(e); }

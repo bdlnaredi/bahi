@@ -2,6 +2,19 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.11.0 (14 November 2026)
+
+- **A simpler, calmer look:**
+  - a soft grey background with white cards, and bold colour only on the figures that matter;
+  - Home has one **New entry** button that opens a sheet of entry types, instead of a row of nine buttons;
+  - the period is one dropdown (This month, This year ...) instead of six buttons.
+- **Ledgers:**
+  - a bold balance card says in plain words what the balance means: "You will receive", "You owe", "Advance from them", or "Balance" and "Overdrawn" for banks;
+  - **Statement** and **Pending bills** are now separate tabs instead of one long page;
+  - Share, WhatsApp and Call stay on the screen; PDF, Excel, customer link and UPI request are under **More**.
+- **Bank and cash accounts swap the colours:** money in (Dr) is green and money out or an overdraft (Cr) is red, in the ledger, lists, Home and vouchers. A party's ledger keeps Dr red and Cr green.
+- On a phone, menus and sheets rise from the bottom of the screen.
+
 ## 3.10.2 (14 November 2026)
 
 - While the Tally PC is syncing, the app says so at the top: **Syncing from Tally now** (with the company, when you have several), with a blinking blue dot and when it started. When the sync finishes, the app shows the new figures by itself.

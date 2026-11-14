@@ -6,21 +6,23 @@ The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues a
 
 - **Tap the company name** to switch company, if you sync more than one.
 - **Tap ↻** to reload the figures.
-- **The period buttons** (This year, This month, Last month, This quarter, All dates, Custom) appear on most screens and decide which dates are shown. The app remembers your choice.
+- **The period dropdown** (This year, This month, Last month, This quarter, All dates, Custom) appears on most screens and decides which dates are shown; the dates it covers are written beside it. The app remembers your choice.
 
 ---
 
 ## Look and layout
 
 - The app always opens in the **light** theme, whatever your phone's dark-mode setting. To use dark, tap **Switch light/dark** at the bottom of **Reports**.
-- Amounts marked **Dr** are red and **Cr** are green.
+- Amounts marked **Dr** are red and **Cr** are green. In **bank and cash accounts** the colours swap: money in (Dr) is green, and money out or an overdraft (Cr) is red.
+- The few figures that matter most (what you'll receive, what you owe, a ledger's balance) sit on bold coloured cards: blue when money comes to you, red when you owe it.
 - On a **phone** the sections are tabs along the bottom. Even if Chrome's *Desktop site* is switched on, Bahi shows its phone layout.
-- On a **computer** the sections, and the main reports, are in a menu down the left. Home shows its cards in two columns, and a ledger shows the statement with pending bills beside it.
+- On a **computer** the sections, and the main reports, are in a menu down the left. Home shows its cards in two columns.
 
 ## Home
 
 <img src="images/home.png" width="260" align="right" alt="Home screen">
 
+- **New entry** opens a sheet with every kind of entry you're allowed to make (sales invoice, purchase, receipt, payment, journal, contra, sales order, stock item). **Entries** lists the ones already made.
 - **You will receive / You owe:** total of Sundry Debtors and Sundry Creditors. Tap either to open Dues.
 - **Cash, Bank, Stock:** current balances. Tap to see the ledgers behind them.
 - **Sales:** sales this financial year, this month, and purchases, with a bar for each month. Tap a bar to see the exact figure.
@@ -52,13 +54,12 @@ Type in the search box to find any ledger. The chips below the search box jump s
 
 <img src="images/ledger.png" width="260" align="right" alt="Party ledger">
 
-A ledger opens on **this month**, starting from the opening balance on the 1st. Tap another period (This year, Last month, Custom…) to see more. Your choice stays while you go from ledger to ledger, and goes back to this month the next time you open the app. The PDF and Excel follow the period on screen.
-
-- The top shows phone, GSTIN, and **Opening, Closing, Debits and Credits** for the selected period.
-- **Share PDF** sends a Tally-style *Ledger Account* PDF, e.g. to the party on WhatsApp. **View PDF** opens it on the phone.
-- **Remind** opens WhatsApp with a ready-made payment reminder. It only appears for parties who owe you and have a mobile number in Tally.
-- **Pending bills** lists unpaid bills with days overdue. Tap a bill to open its invoice.
-- **Sort** the statement oldest first, newest first or by largest amount.
+- The **balance card** at the top shows the closing balance and says what it means: *You will receive*, *You owe*, *Advance from them* (a customer who paid ahead), or for a bank, *Balance* or *Overdrawn*. Below it: opening, debits and credits for the period, and how many bills are overdue.
+- **Share** sends a Tally-style *Ledger Account* PDF, e.g. to the party on WhatsApp. **Remind** opens WhatsApp with a ready-made payment reminder (only for parties who owe you and have a mobile number in Tally); **Call** rings them.
+- **More** has the rest: view the PDF, download Excel, the party's customer link, and a UPI payment request.
+- Two tabs: **Statement** and **Pending bills**. Pending bills lists every unpaid bill with days overdue (a red dot on the tab means some are overdue); tap a bill to open its invoice.
+- The statement opens on **this month**, starting from the opening balance on the 1st. Pick another period from the dropdown (This year, Last month, Custom…). Your choice stays while you go from ledger to ledger, and goes back to this month the next time you open the app. The PDF and Excel follow the period on screen.
+- **Monthly / Weekly / Daily figures** groups the entries; **All entries** lists each one, sorted oldest first, newest first or by largest amount.
 - The statement below is laid out like a ruled account book: each entry shows the other ledger, voucher type and number, amount (Dr or Cr) and the running balance. Tap an entry to open the voucher.
 
 The closing balance always matches Tally, because running balances are worked back from Tally's own closing figure.
