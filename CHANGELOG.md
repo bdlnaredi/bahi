@@ -2,6 +2,13 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.12.0 (14 November 2026)
+
+- **Ledgers open on the month of their last entry** (choose *Month of last entry* again from the period list at any time), so a party you last billed in August opens on August instead of an empty month.
+- **Print** on ledgers and vouchers. In the Android app it uses the phone's own printing (any printer the phone knows, or Save as PDF); on a computer the print window opens straight away. The Android app needs updating for this (Reports, Update app).
+- The figures you will receive are on a **green** card now (what you owe stays red).
+- The period picker has a calendar icon and the word *Showing* in front, so it reads as "Showing: This month".
+
 ## 3.11.0 (14 November 2026)
 
 - **A simpler, calmer look:**

@@ -14,6 +14,13 @@ import android.net.Uri;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Build;
+import android.os.CancellationSignal;
+import android.os.ParcelFileDescriptor;
+import android.print.PageRange;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintDocumentInfo;
+import android.print.PrintManager;
 import org.json.JSONObject;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
@@ -49,6 +56,7 @@ import android.widget.Toast;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -314,7 +322,13 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ files: PDFs, Excel, backups
     private void fetchFile(final String url, final String name, final boolean share) {
-        toast(share ? "Preparing to share" : "Opening");
+        fetchFile(url, name, share ? 1 : 0);
+    }
+
+    /** mode 0 opens the file, 1 shares it, 2 prints it */
+    private void fetchFile(final String url, final String name, final int mode) {
+        final boolean share = mode == 1;
+        toast(mode == 2 ? "Preparing to print" : share ? "Preparing to share" : "Opening");
         // WebView may only be touched on this (the main) thread: read what the download needs first
         final String agent = web != null ? web.getSettings().getUserAgentString() : "BahiAndroid";
         new Thread(() -> {
@@ -348,11 +362,47 @@ public class MainActivity extends Activity {
                 c.disconnect();
                 final String type = mime;
                 final File file = out;
-                ui.post(() -> handOver(file, type, share));
+                ui.post(() -> { if (mode == 2) printFile(file); else handOver(file, type, share); });
             } catch (Exception e) {
                 ui.post(() -> toast("Couldn't get the file: " + e.getMessage()));
             }
         }).start();
+    }
+
+    /** Hands a PDF to Android's printing (any printer the phone knows, or Save as PDF) */
+    private void printFile(final File file) {
+        try {
+            PrintManager pm = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+            final String job = file.getName().replaceAll("\\.pdf$", "");
+            pm.print(job, new PrintDocumentAdapter() {
+                @Override
+                public void onLayout(PrintAttributes oldA, PrintAttributes newA, CancellationSignal cancel,
+                                     LayoutResultCallback cb, Bundle extras) {
+                    if (cancel.isCanceled()) { cb.onLayoutCancelled(); return; }
+                    cb.onLayoutFinished(new PrintDocumentInfo.Builder(file.getName())
+                            .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).build(), true);
+                }
+
+                @Override
+                public void onWrite(PageRange[] pages, ParcelFileDescriptor dest, CancellationSignal cancel,
+                                    WriteResultCallback cb) {
+                    try (InputStream in = new FileInputStream(file);
+                         OutputStream out = new FileOutputStream(dest.getFileDescriptor())) {
+                        byte[] buf = new byte[16384];
+                        int n;
+                        while ((n = in.read(buf)) > 0) {
+                            if (cancel.isCanceled()) { cb.onWriteCancelled(); return; }
+                            out.write(buf, 0, n);
+                        }
+                        cb.onWriteFinished(new PageRange[]{PageRange.ALL_PAGES});
+                    } catch (Exception e) {
+                        cb.onWriteFailed(e.getMessage());
+                    }
+                }
+            }, null);
+        } catch (Exception e) {
+            toast("Printing isn't available: " + e.getMessage());
+        }
     }
 
     private void handOver(File file, String mime, boolean share) {
@@ -410,6 +460,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void shareWithText(String url, String name, String text) {
             ui.post(() -> { shareText = text; fetchFile(url, name, true); });
+        }
+
+        @JavascriptInterface
+        public void print(String url, String name) {
+            ui.post(() -> fetchFile(url, name, 2));
         }
 
         @JavascriptInterface

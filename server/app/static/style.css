@@ -22,7 +22,7 @@
   --focus: #2457d6;
   --seg: #e6eaf1;
   --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 3px 12px rgba(15, 23, 42, .05);
-  --in-bg: linear-gradient(135deg, #1f4fc7 0%, #3a72ee 100%);
+  --in-bg: linear-gradient(135deg, #0f7a45 0%, #22a35f 100%);
   --out-bg: linear-gradient(135deg, #b3202a 0%, #e0544a 100%);
   --nil-bg: linear-gradient(135deg, #334155 0%, #52627a 100%);
   --age0: #cfd5df; --age1: #f7c9c4; --age2: #ea958c; --age3: #c9473d; --age4: #8a1c15;
@@ -36,7 +36,7 @@
   --ink: #eef1f6; --ink-2: #c5ccda; --ink-3: #95a0b4; --rule: #263042; --margin: #6a3330; --seg: #1d2533;
   --cr: #ff8f85; --dr: #eef1f6; --good: #6fd19e; --debit: #ff8f85; --credit: #6fd19e; --bar: #7fa6ff; --bar2: #2f4166; --focus: #7fa6ff;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3);
-  --in-bg: linear-gradient(135deg, #1c3f9e 0%, #2f5fcf 100%);
+  --in-bg: linear-gradient(135deg, #0d5e37 0%, #1b8a50 100%);
   --out-bg: linear-gradient(135deg, #8c1d24 0%, #b9423b 100%);
   --nil-bg: linear-gradient(135deg, #2a3445 0%, #3d4a60 100%);
   --age0: #4a5263; --age1: #5c2c2a; --age2: #8e3a35; --age3: #c9564d; --age4: #f19a92;
@@ -582,3 +582,12 @@ dialog h3 { font-size: 18px; font-weight: 800; padding: 18px 18px 10px; }
 
 :root[data-theme="dark"] .btn.primary { background: #3567df; border-color: #3567df; color: #fff; }
 :root[data-theme="dark"] .chip.on { background: #3567df; color: #fff; }
+
+.plabel { font-size: 13px; font-weight: 600; color: var(--ink-3); }
+.pselect select { padding-left: 36px; }
+.pselect::before { content: ""; position: absolute; left: 13px; top: 50%; width: 15px; height: 14px; margin-top: -7px; pointer-events: none;
+  background: no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232457d6' stroke-width='2.2' stroke-linecap='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E"); }
+.pselect.small select { padding-left: 14px; }
+.pselect.small::before { display: none; }
+@media (max-width: 480px) { .actions.top .btn.ic { flex: 0 0 48px; padding: 0; } .actions.top .btn.ic .bl { display: none; } }
+.btn svg { flex: none; }

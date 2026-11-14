@@ -6,7 +6,7 @@ The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues a
 
 - **Tap the company name** to switch company, if you sync more than one.
 - **Tap ↻** to reload the figures.
-- **The period dropdown** (This year, This month, Last month, This quarter, All dates, Custom) appears on most screens and decides which dates are shown; the dates it covers are written beside it. The app remembers your choice.
+- **The period** ("Showing: This month", with a calendar icon) appears on most screens and decides which dates are shown. Tap it to choose This year, This month, Last month, This quarter, All dates or Custom; the exact dates are written next to it. The app remembers your choice.
 
 ---
 
@@ -14,7 +14,7 @@ The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues a
 
 - The app always opens in the **light** theme, whatever your phone's dark-mode setting. To use dark, tap **Switch light/dark** at the bottom of **Reports**.
 - Amounts marked **Dr** are red and **Cr** are green. In **bank and cash accounts** the colours swap: money in (Dr) is green, and money out or an overdraft (Cr) is red.
-- The few figures that matter most (what you'll receive, what you owe, a ledger's balance) sit on bold coloured cards: blue when money comes to you, red when you owe it.
+- The few figures that matter most (what you'll receive, what you owe, a ledger's balance) sit on bold coloured cards: green when money comes to you, red when you owe it.
 - On a **phone** the sections are tabs along the bottom. Even if Chrome's *Desktop site* is switched on, Bahi shows its phone layout.
 - On a **computer** the sections, and the main reports, are in a menu down the left. Home shows its cards in two columns.
 
@@ -55,10 +55,11 @@ Type in the search box to find any ledger. The chips below the search box jump s
 <img src="images/ledger.png" width="260" align="right" alt="Party ledger">
 
 - The **balance card** at the top shows the closing balance and says what it means: *You will receive*, *You owe*, *Advance from them* (a customer who paid ahead), or for a bank, *Balance* or *Overdrawn*. Below it: opening, debits and credits for the period, and how many bills are overdue.
+- **Print** prints the statement: in the Android app through the phone's printing (any printer it knows, or Save as PDF), on a computer straight to the print window.
 - **Share** sends a Tally-style *Ledger Account* PDF, e.g. to the party on WhatsApp. **Remind** opens WhatsApp with a ready-made payment reminder (only for parties who owe you and have a mobile number in Tally); **Call** rings them.
 - **More** has the rest: view the PDF, download Excel, the party's customer link, and a UPI payment request.
 - Two tabs: **Statement** and **Pending bills**. Pending bills lists every unpaid bill with days overdue (a red dot on the tab means some are overdue); tap a bill to open its invoice.
-- The statement opens on **this month**, starting from the opening balance on the 1st. Pick another period from the dropdown (This year, Last month, Custom…). Your choice stays while you go from ledger to ledger, and goes back to this month the next time you open the app. The PDF and Excel follow the period on screen.
+- The statement opens on the **month of the ledger's last entry**, starting from the opening balance on the 1st of that month. Tap the period (the box with the calendar, after *Showing*) to pick another: This year, This month, Last month, Custom…. Your choice stays while you go from ledger to ledger, and goes back to the last entry's month the next time you open the app. The PDF and Excel follow the period on screen.
 - **Monthly / Weekly / Daily figures** groups the entries; **All entries** lists each one, sorted oldest first, newest first or by largest amount.
 - The statement below is laid out like a ruled account book: each entry shows the other ledger, voucher type and number, amount (Dr or Cr) and the running balance. Tap an entry to open the voucher.
 

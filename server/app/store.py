@@ -902,6 +902,15 @@ def ledger(cid, name, d_from=None, d_to=None):
         info["extra"] = json.loads(info.get("extra") or "{}")
         comp = c.execute("SELECT from_date, to_date, name, info FROM company WHERE id=?", (cid,)).fetchone()
         sync_from = comp["from_date"] or "2000-01-01"
+        if d_from == "last":
+            # the month of this ledger's latest entry (or the whole year when it has none)
+            r = c.execute("""SELECT MAX(v.date) m FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+                WHERE vl.ledger=? AND v.company_id=? AND v.status=''""", (name, cid)).fetchone()
+            d_from = d_to = None
+            if r and r["m"]:
+                y, m = int(r["m"][:4]), int(r["m"][5:7])
+                d_from = f"{y:04d}-{m:02d}-01"
+                d_to = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)).isoformat()
         f, t = period(c, cid, d_from, d_to)
         f = max(f, sync_from)
         # Opening as Tally has it (its month-end balance plus the entries after it); nothing is adjusted

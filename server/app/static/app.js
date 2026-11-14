@@ -277,6 +277,7 @@ const ICON = {
   wa: '<svg viewBox="0 0 24 24"><path d="M4 20l1.3-4A8 8 0 1 1 8 18.7z M9 9.5c.5 2 2.5 4 5 5l1.2-1.2 1.8.9-.4 1.6c-3.5.2-8-4.3-8-7.8L10.2 7l.9 1.8z"/></svg>',
   share: '<svg viewBox="0 0 24 24"><path d="M12 3v12 M7 8l5-5 5 5 M5 14v6h14v-6"/></svg>',
   print: '<svg viewBox="0 0 24 24"><path d="M7 9V3h10v6 M7 17H4v-7h16v7h-3 M7 14h10v7H7z"/></svg>',
+  view: '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></svg>',
   more: '<svg viewBox="0 0 24 24"><path d="M5 12h.01 M12 12h.01 M19 12h.01" stroke-width="3.2"/></svg>',
   link: '<svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>',
@@ -298,7 +299,8 @@ function periodFor(key) {
 function periodBar(from, to, slot = "period") {
   const P = slot === "period" ? S.period : ledgerPeriod();
   const key = P ? P.key : "year";
-  return `<div class="periodbar"><label class="pselect"><span class="sr">Period</span><select data-period aria-label="Period">${PERIODS.map(([k, l]) =>
+  const opts = slot === "period" ? PERIODS : [["lastentry", "Month of last entry"], ...PERIODS];
+  return `<div class="periodbar"><span class="plabel">Showing</span><label class="pselect"><span class="sr">Period</span><select data-period aria-label="Period">${opts.map(([k, l]) =>
     `<option value="${k}" ${k === key ? "selected" : ""}>${l}</option>`).join("")}</select></label>
     ${key === "custom" ? `<div class="dates"><input type="date" id="pf" value="${from}" aria-label="From date"> to <input type="date" id="pt" value="${to}" aria-label="To date"> <button class="chip on" id="papply">Show</button></div>` :
       `<span class="prange">${key === "all" ? "All synced dates" : `${fdate(from)} – ${fdate(to)}`}</span>`}</div>`;
@@ -310,7 +312,7 @@ function wirePeriod(from, to, slot = "period") {
   };
   view.querySelectorAll("select[data-period]").forEach((b) => b.onchange = () => {
     const k = b.value;
-    set(k === "year" ? null : k === "custom" ? { key: "custom", from: from < "2001" ? iso(new Date(Date.now() - 30 * 864e5)) : from, to: to > "2098" ? iso(new Date()) : to } : periodFor(k));
+    set(k === "year" ? null : k === "lastentry" ? { key: "lastentry" } : k === "custom" ? { key: "custom", from: from < "2001" ? iso(new Date(Date.now() - 30 * 864e5)) : from, to: to > "2098" ? iso(new Date()) : to } : periodFor(k));
     route();
   });
   const ap = $("#papply");
@@ -318,10 +320,10 @@ function wirePeriod(from, to, slot = "period") {
 }
 /* Ledgers open on this month unless another period was picked on a ledger */
 function ledgerPeriod() {
-  const p = S.lperiod || periodFor("month");
+  const p = S.lperiod || { key: "lastentry" };
   return p.key === "year" ? null : p;
 }
-function ledgerParams() { const p = ledgerPeriod(); return p ? { from: p.from, to: p.to } : {}; }
+function ledgerParams() { const p = ledgerPeriod(); return !p ? {} : p.key === "lastentry" ? { from: "last", to: "last" } : { from: p.from, to: p.to }; }
 
 function loading() { view.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>'; }
 function setTitle(back) {
@@ -537,6 +539,26 @@ async function payDialog(party, amount, phone) {
   };
 }
 
+/* Print a PDF: the Android app hands it to the phone's printing; a computer prints it straight from the page */
+function printPdf(url, name) {
+  const abs = new URL(url, location.origin).href;
+  if (window.BahiAndroid) {
+    if (typeof BahiAndroid.print === "function") BahiAndroid.print(abs, name.replace(/[^\w .-]+/g, "").slice(0, 80) + ".pdf");
+    else { toast("Update the Bahi app to print from it (Reports, Update app). Opening the PDF instead."); BahiAndroid.open(abs, ""); }
+    return;
+  }
+  if (matchMedia("(pointer: fine)").matches) {
+    toast("Preparing to print");
+    const f = document.createElement("iframe");
+    f.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0";
+    f.src = abs;
+    f.onload = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { window.open(abs, "_blank"); } setTimeout(() => f.remove(), 60000); };
+    document.body.appendChild(f);
+    return;
+  }
+  window.open(abs, "_blank");      // a phone browser: the PDF opens, print it from there (menu, Print)
+}
+
 async function sharePdf(url, name, party, pay = false) {
   const text = party ? linkLine(await partyLink(party), pay).trim() : "";
   if (window.BahiAndroid) {      // the Android app downloads it and opens the phone's share sheet (WhatsApp, email...)
@@ -617,7 +639,7 @@ async function vLedger(name) {
   const isDebtor = d.closing > 0.5 && d.bill_kind === "receivable";
   const overdue = (d.bills || []).filter((b) => b.overdue > 0 && b.amount > 0);
   const waText = isDebtor ? reminderText(L.name, co, d.closing, overdue, d.interest, d.interest_rate) : `Dear ${L.name}, greetings from ${co}.`;
-  const pdfUrl = cpath("ledger_pdf", { name, ...ledgerParams() });
+  const pdfUrl = cpath("ledger_pdf", { name, from: d.from, to: d.to });
   const pending = (d.bills || []).filter((b) => Math.abs(b.amount) > 0.5);
   const grain = grainOf(d.from, d.to);
   const groups = groupBy(d.entries, grain, (e) => e.date);
@@ -651,8 +673,9 @@ async function vLedger(name) {
     </section>
     <div class="actions top">
       <button class="btn primary" id="sharepdf">${ICON.share}Share</button>
-      ${phone ? `<a class="btn wa" data-wa-party="${h(L.name)}" ${isDebtor ? 'data-wa-pay="1"' : ""} href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn" href="tel:+${phone}" aria-label="Call">${ICON.call}Call</a>` : ""}
-      <button class="btn" id="lmore" aria-label="More">${ICON.more}More</button>
+      <button class="btn" id="printpdf">${ICON.print}Print</button>
+      ${phone ? `<a class="btn wa" data-wa-party="${h(L.name)}" ${isDebtor ? 'data-wa-pay="1"' : ""} href="https://wa.me/${phone}?text=${enc(waText)}" target="_blank" rel="noopener">${ICON.wa}${isDebtor ? "Remind" : "WhatsApp"}</a><a class="btn ic" href="tel:+${phone}" aria-label="Call">${ICON.call}<span class="bl">Call</span></a>` : ""}
+      <button class="btn ${phone ? "ic" : ""}" id="lmore" aria-label="More">${ICON.more}<span class="bl">More</span></button>
     </div>
     ${pending.length ? `<div class="seg" role="tablist">
         <button role="tab" data-ltab="stmt" aria-selected="${tab === "stmt"}">Statement</button>
@@ -680,9 +703,10 @@ async function vLedger(name) {
   const again = () => { const y = window.scrollY; vLedger(name).then(() => window.scrollTo(0, y)).catch(fail); };
   view.querySelectorAll("[data-ltab]").forEach((b) => b.onclick = () => { S.ltab = b.dataset.ltab; again(); });
   $("#sharepdf").onclick = () => sharePdf(pdfUrl, `${L.name} statement`, L.name, d.closing > 0.5);
+  $("#printpdf").onclick = () => printPdf(pdfUrl, `${L.name} statement`);
   $("#lmore").onclick = () => moreSheet(L.name, [
-    { label: "View statement PDF", icon: ICON.print, href: pdfUrl, blank: true },
-    { label: "Download Excel", icon: ICON.xl, href: cpath("export", { what: "ledger", name, ...ledgerParams() }), download: true },
+    { label: "View statement PDF", icon: ICON.view, href: pdfUrl, blank: true },
+    { label: "Download Excel", icon: ICON.xl, href: cpath("export", { what: "ledger", name, from: d.from, to: d.to }), download: true },
     { label: "Customer link", icon: ICON.link, run: () => linkDialog(L.name).catch(fail) },
     { label: "Request payment (UPI)", icon: ICON.rupee, run: () => payDialog(L.name, d.closing > 0.5 ? d.closing : 0, phone).catch(fail) },
     ...(L.email ? [{ label: "E-mail " + h(L.email), icon: ICON.share, href: "mailto:" + L.email }] : []),
@@ -1257,7 +1281,8 @@ async function vVoucher(id) {
       ${V.party ? `<a class="vparty" href="#/ledger/${enc(V.party)}"><div class="name">${h(V.party)}</div>${gstin ? `<div class="meta">GSTIN ${h(gstin)}</div>` : ""}</a>` : ""}
       <div class="vtotal">${rupees(V.amount)}</div>
       <div class="actions" style="padding:12px 0 0"><button class="btn primary" id="vpdf">${ICON.share}Share PDF</button>
-        <a class="btn" href="/api/c/${S.cid}/voucher_pdf/${id}" target="_blank" rel="noopener">${ICON.print}View PDF</a>
+        <button class="btn" id="vprint">${ICON.print}Print</button>
+        <a class="btn" href="/api/c/${S.cid}/voucher_pdf/${id}" target="_blank" rel="noopener">${ICON.view}View PDF</a>
         ${V.party ? `<a class="btn" href="#/ledger/${enc(V.party)}">Party ledger</a>` : ""}</div>
     </section>
     ${d.items.length ? `<section class="page"><div class="block-title"><span>Items</span><span>Amount</span></div>
@@ -1281,6 +1306,7 @@ async function vVoucher(id) {
     ${V.narration ? `<section class="page"><div class="block-title">Narration</div><div class="info" style="white-space:pre-line">${h(V.narration)}</div></section>` : ""}
     ${!V.balanced ? '<p class="note warn">This voucher\'s debits and credits did not match when it was synced.</p>' : ""}`;
   $("#vpdf").onclick = () => sharePdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`, V.party, V.base === "Sales");
+  $("#vprint").onclick = () => printPdf(`/api/c/${S.cid}/voucher_pdf/${id}`, `${V.vtype} ${V.number}`);
 }
 
 async function vSales(kind) {
