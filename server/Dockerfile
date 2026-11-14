@@ -6,6 +6,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libfribidi0 rclone ca-certificates \
     && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir "pillow>=10,<12"
 COPY server/app /app
+# the What's new page in the app
+COPY CHANGELOG.md /app/CHANGELOG.md
 # the Tally PC files, which the PC downloads to update itself
 COPY agent/*.ps1 agent/*.bat agent/*.vbs /app/agent_files/
 ENV DATA_DIR=/data PORT=8780 PYTHONUNBUFFERED=1 TZ=IST-5:30

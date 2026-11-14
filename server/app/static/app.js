@@ -107,7 +107,7 @@ async function api(path) {
   const r = await fetch(path, { credentials: "same-origin" });
   if (r.headers.get("X-From-Cache")) offlineSeen = true;
   if (r.status === 401) { throw Object.assign(new Error("login"), { login: true }); }
-  if (r.status === 503 && !r.headers.get("X-From-Cache")) throw new Error("offline");
+  if (r.status >= 502 && !r.headers.get("X-From-Cache")) throw new Error("offline");   // server down (Cloudflare 502/530) and nothing saved
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Server error " + r.status);
   return r.json();
 }
@@ -329,7 +329,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
+  const map = { "": "home", whatsnew: "reports", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
   document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
@@ -342,7 +342,7 @@ async function vHome() {
   if (!can("accounts")) return vStaffHome();
   const d = await api(cpath("dashboard", periodParams()));
   const thisMonth = new Date().toISOString().slice(0, 7);
-  view.innerHTML = `${entryBar()}
+  view.innerHTML = `${updatedCard()}${entryBar()}
   <section class="herocards">
     <a class="bold in" href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div><div class="go">See dues</div></a>
     <a class="bold out" href="#/dues/payable"><div class="label">You owe</div><div class="big">${short(d.payable)}</div><div class="go">See dues</div></a>
@@ -537,6 +537,56 @@ async function payDialog(party, amount, phone) {
     if (a === "share") { try { await navigator.share({ text: cur.msg }); } catch (e) { if (e.name !== "AbortError") { try { await navigator.clipboard.writeText(cur.msg); toast("Message copied"); } catch (x) {} } } }
     if (a === "copy") { try { await navigator.clipboard.writeText(cur.pay); toast("Payment link copied"); } catch (e) { toast(cur.pay); } }
   };
+}
+
+/* ---------------------------------------------------------------- what's new */
+function seenVersion() { try { return localStorage.getItem("seenVersion") || ""; } catch (e) { return ""; } }
+function markSeen() { try { localStorage.setItem("seenVersion", S.me.version || ""); } catch (e) {} }
+function updatedCard() {
+  if (!S.me.version || seenVersion() === S.me.version) return "";
+  return `<a class="newver" href="#/whatsnew"><span class="nv-i">✨</span><span><b>Bahi has been updated</b> to version ${h(S.me.version)}. See what's new</span><span class="chev"></span></a>`;
+}
+/* CHANGELOG.md as a page: each version a card, newest first */
+function mdInline(t) {
+  return h(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<i>$2</i>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function mdBlocks(lines) {
+  let out = "", cur = -1;
+  const close = (to) => { while (cur > to) { out += "</li></ul>"; cur--; } };
+  for (const raw of lines) {
+    const m = raw.match(/^(\s*)- (.*)$/);
+    if (m) {
+      const d = Math.floor(m[1].length / 2);
+      if (d > cur) { while (cur < d) { out += "<ul><li>"; cur++; } }
+      else { close(d); out += "</li><li>"; }
+      out += mdInline(m[2]);
+    } else if (raw.trim()) {
+      close(-1);
+      out += "<p>" + mdInline(raw.trim()) + "</p>";
+    }
+  }
+  close(-1);
+  return out;
+}
+async function vWhatsNew() {
+  setTitle(true);
+  const d = await api("/api/whatsnew");
+  const parts = (d.text || "").split(/^## /m).slice(1);
+  markSeen();
+  const card = (p, i) => {
+    const [head, ...rest] = p.split("\n");
+    const m = head.match(/^(.*?)\s*\((.*)\)\s*$/);
+    const ver = m ? m[1] : head, when = m ? m[2] : "";
+    return `<section class="page wn${i >= 8 ? " older" : ""}"${i >= 8 ? " hidden" : ""}><div class="wn-head"><span class="wn-v">${i === 0 ? '<span class="wn-new">Latest</span>' : ""}Version ${h(ver)}</span><span class="wn-d">${h(when)}</span></div>
+      <div class="wn-body">${mdBlocks(rest)}</div></section>`;
+  };
+  view.innerHTML = `<h1 class="title">What's new</h1>
+    <p class="subtitle">You have version ${h(d.version)}${window.BahiAndroid && BahiAndroid.version ? `, Android app ${h(BahiAndroid.version())}` : ""}. Newest changes first.</p>
+    ${parts.map(card).join("") || '<div class="page"><div class="empty">No list of changes on this server.</div></div>'}
+    ${parts.length > 8 ? '<button class="btn" id="wnolder" style="width:100%;justify-content:center;margin-bottom:14px">Show older versions</button>' : ""}`;
+  const b = $("#wnolder");
+  if (b) b.onclick = () => { view.querySelectorAll(".wn.older").forEach((x) => x.hidden = false); b.remove(); };
 }
 
 /* Android app out of date: a bar under the header until it's updated */
@@ -1165,8 +1215,11 @@ function vReports() {
   ${c && S.me.owner ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
     <div>${S.sync.running ? `<b>Syncing from Tally now</b>${S.sync.running.company ? ` (${h(S.sync.running.company)})` : ""}, started ${ago(S.sync.running.since)}. ` : ""}Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
-    <div>App version ${APP_VERSION}</div></div>
+    <div>App version ${h(S.me.version || APP_VERSION)}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
+  <section class="page">
+    <a class="row" href="#/whatsnew"><div class="main"><div class="name">What's new</div><div class="meta">Version ${h(S.me.version || "")}: what changed in each update</div></div><span class="chev"></span></a>
+  </section>
   <section class="page">
     <a class="row" href="#/settings"><div class="main"><div class="name">Settings</div><div class="meta">${S.me.owner ? `Staff logins, Telegram summaries, backups, change password, delete old data${S.companies.length > 1 ? ", companies" : ""}` : "Change your password"}</div></div><span class="chev"></span></a>
     <div class="actions" style="padding-top:12px">
@@ -2460,6 +2513,7 @@ async function route() {
       case "sales": await vSales(parts[1] === "purchase" ? "purchase" : "sales"); break;
       case "day": await vDay(parts[1], parts[2]); break;
       case "vouchers": await vVouchers(); break;
+      case "whatsnew": await vWhatsNew(); break;
       default: await vHome();
     }
     wireEntryBar();

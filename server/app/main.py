@@ -45,7 +45,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.12.1"
+APP_VERSION = "3.13.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -693,6 +693,18 @@ document.getElementById("a").addEventListener("change", function () {{
             return self.send_json({"error": "login required"}, 401)
 
         u = self.user
+        if path == "/api/whatsnew":
+            here = os.path.dirname(os.path.abspath(__file__))
+            text = ""
+            for f in (os.path.join(here, "CHANGELOG.md"), os.path.join(here, "..", "..", "CHANGELOG.md")):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        text = fh.read()
+                    break
+                except OSError:
+                    pass
+            return self.send_json({"version": APP_VERSION, "text": text})
+
         if path == "/api/me":
             out = {"name": u["name"], "owner": u["owner"], "perms": u["perms"], "version": APP_VERSION}
             if u["owner"]:

@@ -2,6 +2,13 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.13.0 (14 November 2026)
+
+- **The app keeps working when the server is down.** If Unraid is off, the internet at the shop is down, or Cloudflare can't reach the server, the app opens straight away with the copy saved on the phone. An orange line says it's showing the saved copy. Before, it could show Cloudflare's error page or keep loading for minutes.
+  - When the server is only slow, the saved copy shows after a few seconds, and fresh figures replace it as soon as the server answers.
+  - New entries, PDFs and sharing still need the server.
+- **What's new:** Reports, What's new lists the changes in every version, newest first. After an update, Home shows a "Bahi has been updated" card that opens it.
+
 ## 3.12.1 (14 November 2026)
 
 - **The Android app keeps itself up to date:**

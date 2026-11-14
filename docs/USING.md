@@ -20,6 +20,8 @@ The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues a
 
 ## Home
 
+*After Bahi is updated, a "Bahi has been updated" card at the top opens **What's new** (also in Reports), which lists the changes in every version.*
+
 <img src="images/home.png" width="260" align="right" alt="Home screen">
 
 - **New entry** opens a sheet with every kind of entry you're allowed to make (sales invoice, purchase, receipt, payment, journal, contra, sales order, stock item). **Entries** lists the ones already made.
@@ -392,7 +394,7 @@ The PDF follows Tally's *Ledger Account* layout:
 
 ## Offline copy
 
-**Settings → Offline copy → Save offline copy now** keeps everything on the phone, so the app works with no internet: every ledger (this month and this year), every stock item, dues, all the reports, and the last 12 months' vouchers. With **Update it by itself** ticked, the copy is refreshed every 6 hours while the app is open. When the phone is offline, a bar at the top says you're looking at the saved copy. Other periods (say, last quarter) need a connection. The copy needs the `https://` address.
+**Settings → Offline copy → Save offline copy now** keeps everything on the phone, so the app works with no internet: every ledger (this month and this year), every stock item, dues, all the reports, and the last 12 months' vouchers. With **Update it by itself** ticked, the copy is refreshed every 6 hours while the app is open. When the phone is offline, **or the server is down** (Unraid switched off, the shop's internet down, Cloudflare showing an error), the app still opens with this copy and a bar at the top says you're looking at the saved copy. New entries, PDFs and sharing wait until the server is back. Other periods (say, last quarter) need a connection. The copy needs the `https://` address.
 
 ## Good to know
 

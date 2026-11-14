@@ -1,5 +1,5 @@
 /* Bahi service worker: always try the server first, fall back to the saved copy when offline */
-const SHELL = "bahi-shell-v31", DATA = "bahi-data-v1";
+const SHELL = "bahi-shell-v32", DATA = "bahi-data-v1";
 // saved data is found whatever order a screen puts its settings in (the app's "download for offline" uses the same key)
 function dataKey(u) {
   const url = new URL(u);
@@ -16,14 +16,29 @@ self.addEventListener("activate", (e) => {
     .then(() => self.clients.claim()));
 });
 
-async function networkFirst(req, cacheName, key) {
-  const cache = await caches.open(cacheName);
+/* The server counts as down when it doesn't answer, answers with a gateway error (Cloudflare's 502/530 when
+   Unraid is off), or takes too long; then the saved copy is used, so the app keeps working with the server off. */
+const DOWN = (res) => res.status >= 500;
+const later = (ms) => new Promise((r) => setTimeout(() => r("slow"), ms));
+
+async function serverOr(req, cache, key, ms, mark) {
+  const net = fetch(req, { cache: "no-store" }).then((res) => {
+    if (res.ok || res.type === "opaque") cache.put(key, res.clone());
+    return res;
+  });
+  const saved = async () => {
+    const hit = await cache.match(key);
+    if (!hit || !mark) return hit;
+    const headers = new Headers(hit.headers); headers.set("X-From-Cache", "1");
+    return new Response(await hit.blob(), { status: hit.status, headers });
+  };
   try {
-    const res = await fetch(req, { cache: "no-store" });
-    if (res.ok || res.type === "opaque") cache.put(key || req, res.clone());
+    const res = await Promise.race([net, later(ms)]);
+    if (res === "slow") return (await saved()) || (await net);     // slow: the saved copy now, the server's answer refreshes it
+    if (DOWN(res)) return (await saved()) || res;
     return res;
   } catch (err) {
-    const hit = await cache.match(key || req);
+    const hit = await saved();
     if (!hit) throw err;
     return hit;
   }
@@ -38,14 +53,9 @@ self.addEventListener("fetch", (e) => {
   if (url.origin === location.origin && url.pathname.startsWith("/api/")) {
     e.respondWith((async () => {
       try {
-        const res = await fetch(req);
-        if (res.ok) (await caches.open(DATA)).put(dataKey(req.url), res.clone());
-        return res;
+        return await serverOr(req, await caches.open(DATA), dataKey(req.url), 8000, true);
       } catch (err) {
-        const hit = await (await caches.open(DATA)).match(dataKey(req.url));
-        if (!hit) return new Response(JSON.stringify({ error: "offline" }), { status: 503, headers: { "Content-Type": "application/json" } });
-        const headers = new Headers(hit.headers); headers.set("X-From-Cache", "1");
-        return new Response(await hit.blob(), { status: hit.status, headers });
+        return new Response(JSON.stringify({ error: "offline" }), { status: 503, headers: { "Content-Type": "application/json" } });
       }
     })());
     return;
@@ -53,7 +63,7 @@ self.addEventListener("fetch", (e) => {
 
   if (url.origin === location.origin) {
     const key = !url.pathname.includes(".") ? "/index.html" : url.pathname;
-    e.respondWith(networkFirst(req, SHELL, key).catch(() => new Response("Offline", { status: 503 })));
+    e.respondWith((async () => serverOr(req, await caches.open(SHELL), key, 4000, false))().catch(() => new Response("Offline", { status: 503 })));
     return;
   }
   // fonts: saved copy first, refresh in background
