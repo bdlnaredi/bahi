@@ -190,7 +190,7 @@ async function downloadOffline(onProgress = () => {}) {
 }
 function androidSection() {
   if (!window.BahiAndroid) return "";
-  return `<section class="page"><div class="block-title">Android app <span>version ${h(BahiAndroid.version())}</span></div>
+  return `<section class="page" data-sec="android"><div class="block-title">Android app <span>version ${h(BahiAndroid.version())}</span></div>
     <div class="info"><div>Server: ${h(BahiAndroid.server())}</div><div>Update app checks for a newer version and installs it here, keeping your login and saved data. The app also checks by itself twice a day.</div></div>
     <div class="actions"><button class="btn" onclick="BahiAndroid.changeServer()">Change server address</button><button class="btn primary" onclick="BahiAndroid.checkUpdate()">Update app</button></div></section>`;
 }
@@ -1622,7 +1622,7 @@ async function cloudSection() {
   };
   el.querySelectorAll("[data-fetch]").forEach((b) => b.onclick = async () => {
     b.disabled = true; b.textContent = "Bringing back";
-    try { await send({ action: "fetch", name: b.dataset.fetch }); toast("It's in the backups list now"); vSettings().catch(fail); }
+    try { await send({ action: "fetch", name: b.dataset.fetch }); toast("It's in the backups list now"); vSettings(settingsPart()).catch(fail); }
     catch (err) { toast(err.message); b.disabled = false; b.textContent = "Bring back"; }
   });
 }
@@ -1678,10 +1678,61 @@ async function linksSection() {
   });
 }
 
-async function vSettings() {
+/* Settings: a short menu; each part opens on its own screen */
+const SETTINGS = [
+  ["Tally and this phone", [
+    ["sync", "Syncing from Tally", "M4 12a8 8 0 0 1 14-5.3L20 5v5h-5 M20 12a8 8 0 0 1-14 5.3L4 19v-5h5"],
+    ["offline", "Offline copy", "M12 3v12 M7 10l5 5 5-5 M5 21h14"],
+    ["android", "Android app", "M7 3h10v18H7z M11 18h2"],
+  ]],
+  ["Customers and money", [
+    ["upi", "UPI payments", "M7 4h11 M7 9h11 M7 4c6 0 6 9 0 9h-1l8 8"],
+    ["links", "Customer links", "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
+    ["interest", "Interest on overdue bills", "M19 5L5 19 M7 7h.01 M17 17h.01"],
+    ["telegram", "Telegram summary and alerts", "M21 4L3 11l6 2 2 6 3-4 5 4z M9 13l12-9"],
+  ]],
+  ["People and security", [
+    ["staff", "Staff logins", "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M2 21a7 7 0 0 1 14 0 M17 11a3 3 0 1 0 0-6 M22 21a6 6 0 0 0-4-5.6"],
+    ["password", "App password", "M6 11h12v10H6z M8 11V7a4 4 0 0 1 8 0v4"],
+  ]],
+  ["Your data", [
+    ["backups", "Backups", "M4 7h16v13H4z M4 7l2-4h12l2 4 M10 12h4"],
+    ["companies", "Companies and old data", "M4 21V7l8-4 8 4v14 M9 21v-6h6v6"],
+  ]],
+];
+const settingsPart = () => (location.hash.split("/")[2] || "").split("?")[0] || undefined;
+async function vSettingsMenu() {
+  view.innerHTML = '<h1 class="title">Settings</h1><div class="empty">Loading ...</div>';
+  const get = (u) => api(u).catch(() => null);
+  const [tg, it, upi, ln, us, bk, cl] = await Promise.all([get("/api/telegram"), get("/api/interest"), get("/api/upi"), get("/api/links"), get("/api/users"), get("/api/backups"), get("/api/cloud")]);
+  const off = typeof offlineInfo === "function" ? offlineInfo() : null;
+  const upiOn = upi && upi.companies.some((c) => c.vpa);
+  const st = {
+    sync: S.sync.mode === "auto" ? `Every ${S.sync.every} min` : S.sync.mode === "manual" ? "Manual" : '<span class="od">Paused</span>',
+    offline: off ? `Saved ${ago(off.at / 1000)}` : "Not saved",
+    android: window.BahiAndroid ? "Version " + h(BahiAndroid.version()) : "",
+    upi: upiOn ? "On" : '<span class="off">Off</span>',
+    links: ln ? `${ln.links.length} given out` : "",
+    interest: it ? (it.on ? `${it.rate}% a year` : '<span class="off">Off</span>') : "",
+    telegram: tg ? (tg.configured ? "On" : '<span class="off">Off</span>') : "",
+    staff: us ? (us.users.length ? `${us.users.length} ${us.users.length === 1 ? "person" : "people"}` : "None") : "",
+    password: "Change",
+    backups: bk ? (bk.backups.length ? `Last ${ago(bk.backups[0].time)}` : "None yet") + (cl && cl.on ? ` · ${h(cl.service)}` : "") : "",
+    companies: `${S.companies.length}`,
+  };
+  view.innerHTML = `<h1 class="title">Settings</h1>
+    ${SETTINGS.map(([group, rows]) => {
+      const vis = rows.filter(([k]) => k !== "android" || window.BahiAndroid);
+      return `<div class="setgroup">${h(group)}</div><section class="page setmenu">${vis.map(([k, name, icon]) =>
+        `<a class="row" href="#/settings/${k}"><span class="si"><svg viewBox="0 0 24 24"><path d="${icon}"/></svg></span><div class="main"><div class="name">${name}</div></div><span class="sv">${st[k] || ""}</span><span class="chev"></span></a>`).join("")}</section>`;
+    }).join("")}`;
+}
+
+async function vSettings(part) {
   setTitle(true);
   await loadCompanies();
   if (!S.me.owner) return vMySettings();
+  if (!part) return vSettingsMenu();
   const range = (c) => c.first_vch ? `${fdate(c.first_vch)} to ${fdate(c.last_vch)}` : "no vouchers yet";
   let tg = {};
   try { tg = await api("/api/telegram"); } catch (e) {}
@@ -1722,7 +1773,7 @@ async function vSettings() {
     <section class="page" id="cbsec"></section>
     <section class="page" id="offsec"></section>
     ${androidSection()}
-    <section class="page"><div class="block-title">Change app password</div>
+    <section class="page" data-sec="password"><div class="block-title">Change app password</div>
       <form id="pwf" class="form">
         <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
         <label>New password<input type="password" id="pw1" autocomplete="new-password" minlength="8" required></label>
@@ -1745,6 +1796,13 @@ async function vSettings() {
       ${c.paused && S.sync.mode !== "paused" ? '<p class="hint" style="padding:0 14px"><span class="od">Syncing is paused for this company.</span></p>' : ""}
       <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
     </section>`).join("")}`;
+  const PART = { sync: "#syncsec", offline: "#offsec", android: "[data-sec=android]", telegram: "#tgsec", interest: "#intsec", upi: "#upisec",
+    links: "#lnsec", staff: "#stsec", password: "[data-sec=password]", backups: "#bksec, #cbsec", companies: "[data-cid]" };
+  const keep = PART[part] || "#syncsec";
+  view.querySelectorAll(":scope > section.page").forEach((sec) => { sec.hidden = !sec.matches(keep); });
+  view.classList.toggle("onepart", !["backups", "companies"].includes(part));
+  const label = SETTINGS.flatMap((g) => g[1]).find((r) => r[0] === part);
+  view.querySelector("h1.title").outerHTML = `<div class="crumbs"><a href="#/settings">Settings</a></div><h1 class="title">${label ? label[1] : "Settings"}</h1>`;
   const post = async (url, body) => {
     const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || "Failed"); return j;
@@ -1752,7 +1810,7 @@ async function vSettings() {
   if ($("#tgc")) $("#tgc").onsubmit = async (e) => {
     e.preventDefault(); $("#tgmsg").textContent = "Connecting";
     try { const j = await post("/api/telegram/find", { token: $("#tgtoken").value.trim() });
-      await post("/api/telegram/test", {}); toast(`Connected to ${j.chat_name || "your chat"}.`); vSettings().catch(fail);
+      await post("/api/telegram/test", {}); toast(`Connected to ${j.chat_name || "your chat"}.`); vSettings(settingsPart()).catch(fail);
     } catch (err) { $("#tgmsg").textContent = err.message; }
   };
   if ($("#tgf")) {
@@ -1763,7 +1821,7 @@ async function vSettings() {
     };
     $("#tgtest").onclick = async () => { $("#tgmsg").textContent = "Sending";
       try { await post("/api/telegram/test", { cid: S.cid }); $("#tgmsg").textContent = "Sent. Check Telegram."; } catch (err) { $("#tgmsg").textContent = err.message; } };
-    $("#tgoff").onclick = async () => { if (!confirm("Stop Telegram messages?")) return; await post("/api/telegram", { off: true }); vSettings().catch(fail); };
+    $("#tgoff").onclick = async () => { if (!confirm("Stop Telegram messages?")) return; await post("/api/telegram", { off: true }); vSettings(settingsPart()).catch(fail); };
   }
   const showBackups = async (b) => {
     b = b || await api("/api/backups").catch(() => null);
@@ -1816,7 +1874,7 @@ async function vSettings() {
         <p class="hint">Simple interest from each bill's due date (or its bill date when it has no credit period). It shows on Dues, ledgers and the follow-up list, goes into WhatsApp reminders, and the ledger PDF gets an interest table at the end. Nothing is posted in Tally.</p></form>`;
     $("#intf").onsubmit = async (e) => {
       e.preventDefault(); const f = e.target;
-      try { await post("/api/interest", { on: f.on.checked, rate: f.rate.value, grace: f.grace.value }); toast("Saved."); vSettings().catch(fail); } catch (err) { toast(err.message); }
+      try { await post("/api/interest", { on: f.on.checked, rate: f.rate.value, grace: f.grace.value }); toast("Saved."); vSettings(settingsPart()).catch(fail); } catch (err) { toast(err.message); }
     };
   })();
   $("#pwf").onsubmit = async (e) => {
@@ -1834,18 +1892,18 @@ async function vSettings() {
     const f = e.target, mode = f.querySelector("[name=mode]:checked").value;
     try { await post("/api/sync", { mode, every: +f.every.value }); } catch (err) { toast(err.message); return; }
     toast({ auto: `Syncing every ${f.every.value} minutes.`, manual: "Manual sync: tap Sync now when you want fresh figures.", paused: "Syncing paused. Nothing more is sent from Tally until you resume." }[mode]);
-    await loadCompanies(); renderCover(); vSettings().catch(fail);
+    await loadCompanies(); renderCover(); vSettings(settingsPart()).catch(fail);
   };
   if ($("#syncnow")) $("#syncnow").onclick = () => syncNow();
   $("#agentauto").onchange = async (e) => { await post("/api/sync", { agent_auto: e.target.checked }); toast(e.target.checked ? "The Tally PC will update itself." : "Automatic updates of the Tally PC are off."); };
   view.querySelectorAll("[data-pause]").forEach((b) => b.onclick = async () => {
     await post("/api/sync", { company: b.dataset.pause, paused: !!b.dataset.on });
     toast(b.dataset.on ? "Syncing paused for this company." : "Syncing resumed for this company.");
-    await loadCompanies(); renderCover(); vSettings().catch(fail);
+    await loadCompanies(); renderCover(); vSettings(settingsPart()).catch(fail);
   });
   view.querySelectorAll("[data-use]").forEach((b) => b.onclick = () => {
     S.cid = Number(b.dataset.use); try { localStorage.setItem("cid", S.cid); } catch (e) {}
-    renderCover(); vSettings().catch(fail);
+    renderCover(); vSettings(settingsPart()).catch(fail);
   });
   view.querySelectorAll("[data-purge]").forEach((f) => f.onsubmit = async (e) => {
     e.preventDefault();
@@ -1854,7 +1912,7 @@ async function vSettings() {
     const r = await fetch(`/api/c/${f.dataset.purge}/purge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ before: day }) });
     const j = await r.json().catch(() => ({}));
     toast(r.ok ? `Deleted ${nf0.format(j.deleted)} vouchers.` : (j.error || "Couldn't delete."));
-    vSettings().catch(fail);
+    vSettings(settingsPart()).catch(fail);
   });
   view.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
     const c = S.companies.find((x) => x.id === Number(b.dataset.del));
@@ -2482,7 +2540,7 @@ async function route() {
     return;
   }
   view.dataset.view = parts[0] || "home";
-  view.classList.remove("flip");
+  view.classList.remove("flip", "onepart");
   if ($("#sheet").open) $("#sheet").close();     // the phone's back button leaves an open sheet behind
   loading();
   try {
@@ -2509,7 +2567,7 @@ async function route() {
       case "gst": await vGST(); break;
       case "check": await vCheck(); break;
       case "analysis": await vAnalysis(parts[1]); break;
-      case "settings": await vSettings(); break;
+      case "settings": await vSettings(parts[1]); break;
       case "sales": await vSales(parts[1] === "purchase" ? "purchase" : "sales"); break;
       case "day": await vDay(parts[1], parts[2]); break;
       case "vouchers": await vVouchers(); break;
