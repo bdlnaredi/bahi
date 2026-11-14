@@ -101,7 +101,7 @@ To reach Bahi away from home, use Cloudflare Tunnel or Tailscale. The **[install
 
 - **Server:** Unraid shows *update ready* on the container. Click it. Your data is kept.
 - **Tally PC:** updates itself after the server updates.
-- **Android app:** offers each new version when you open it.
+- **Android app:** checks every time you open it and twice a day in the background, then asks you to update (a notification, and a bar at the top until you do).
 
 See the **[changelog](CHANGELOG.md)** for what changed in each version.
 

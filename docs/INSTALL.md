@@ -196,7 +196,7 @@ Install Tailscale on your phone and open `http://UNRAID-TAILSCALE-IP:8780`. You 
 2. Tap the download and **Install**. The first time, Android asks to allow installing from Chrome: tap **Settings → Allow from this source**, go back and tap **Install**.
 3. Open **Bahi**, type your server address (`https://books.yourdomain.com`) and tap **Connect**. Pass the Cloudflare email code if asked, then enter your **app password**.
 
-The app keeps an **offline copy** of everything (see Settings → Offline copy), opens PDFs and Excel files in your phone's apps, and shares invoices and ledgers straight to WhatsApp. When a new version is out, it offers to download it; install it over the old one and your login and saved data stay.
+The app keeps an **offline copy** of everything (see Settings → Offline copy), opens PDFs and Excel files in your phone's apps, and shares invoices and ledgers straight to WhatsApp. It checks for a new version every time you open it and twice a day in the background (with a notification). When one is ready it asks you to update, and an orange bar with **Update** stays at the top until you do. Tap **Update now**, then **Install**: your login and saved data stay. The first time, Android asks you to allow Bahi to install apps.
 
 Use the `https://` address: the offline copy needs it.
 
@@ -222,7 +222,7 @@ Continue with the **[user guide](USING.md)**.
 | Part | How |
 |---|---|
 | **Server** | Unraid Docker tab → **update ready** → click it. On Compose: **Compose Pull**, then **Compose Up**. |
-| **Phone app** | The web app updates itself the next time you open it while online. The Android app offers new versions when you open it: tap **Download**, then install. Check **Reports → Sync** for the version number. |
+| **Phone app** | The web app updates itself the next time you open it while online. The Android app asks to update whenever a new version is ready (on opening, by notification, and with a bar at the top): tap **Update now**, then **Install**. Check **Reports → Sync** for the version number. |
 | **Tally PC** | Nothing to do: the sync files update themselves from your server after it's updated (in Settings: *Update the Tally PC files automatically*, on by default). Bahi Sync offers its own new versions in its window: click the "new version is ready" line. |
 
 When an update changes how data is stored, the server clears its copy and the next sync refills it automatically.

@@ -539,6 +539,24 @@ async function payDialog(party, amount, phone) {
   };
 }
 
+/* Android app out of date: a bar under the header until it's updated */
+window.bahiUpdateReady = (v) => {
+  if (!v) return;
+  let bar = $("#appupdate");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "appupdate"; bar.className = "appupdate";
+    $("#cover").appendChild(bar);
+  }
+  bar.innerHTML = `<span><b>New Bahi app ready</b> (1.${+v}). Update for better speed and fixes.</span><button class="btn primary" id="appupd">Update</button>`;
+  $("#appupd").onclick = () => BahiAndroid.checkUpdate();
+};
+function checkAppUpdate() {
+  try { if (window.BahiAndroid && typeof BahiAndroid.updateReady === "function") window.bahiUpdateReady(BahiAndroid.updateReady()); } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkAppUpdate(); });
+setTimeout(checkAppUpdate, 1500);
+
 /* Print a PDF: the Android app hands it to the phone's printing; a computer prints it straight from the page */
 function printPdf(url, name) {
   const abs = new URL(url, location.origin).href;

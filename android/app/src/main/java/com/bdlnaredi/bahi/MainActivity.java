@@ -72,7 +72,6 @@ import java.util.regex.Pattern;
  */
 public class MainActivity extends Activity {
     private static final int REQ_FILE = 7;
-    private static final String RELEASE_API = "https://api.github.com/repos/bdlnaredi/bahi/releases/tags/android";
     private static final String APK_URL = "https://github.com/bdlnaredi/bahi/releases/download/android/Bahi.apk";
 
     private SharedPreferences prefs;
@@ -88,7 +87,22 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("bahi", MODE_PRIVATE);
         if (server().isEmpty()) showSetup(null);
         else showWeb();
-        checkForUpdate();
+        try { Updates.schedule(this); } catch (Exception ignored) { }
+        // Android 13 and later: ask once to allow notifications (for "a new version is ready")
+        if (Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("asked_notify", false)
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            prefs.edit().putBoolean("asked_notify", true).apply();
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 7);
+        }
+        if (getIntent() != null && getIntent().getBooleanExtra("update", false)) checkForUpdate(true);
+        // (onResume, which runs next, checks for a new version)
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent.getBooleanExtra("update", false)) checkForUpdate(true);   // tapped the notification
     }
 
     private String server() {
@@ -494,6 +508,12 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** The newer version waiting on GitHub (0 when this one is the newest) */
+        @JavascriptInterface
+        public int updateReady() {
+            return Updates.known(MainActivity.this);
+        }
+
         @JavascriptInterface
         public void checkUpdate() {
             ui.post(() -> MainActivity.this.checkForUpdate(true));
@@ -504,29 +524,23 @@ public class MainActivity extends Activity {
     /** Looks for a newer app on GitHub (at most every 12 hours, or now when asked) and offers to update. */
     private void checkForUpdate() { checkForUpdate(false); }
 
+    private long updateAsked;     // when the "please update" box was last shown
+
+    /** Every time the app is opened or comes back: is there a newer version? If so, ask to update (firmly). */
     private void checkForUpdate(boolean asked) {
+        int known = Updates.known(this);
+        if (!asked && known > 0) { showUpdateReady(known); pleaseUpdate(known, false); }
         long last = prefs.getLong("update_checked", 0);
-        if (!asked && System.currentTimeMillis() - last < 12 * 3600 * 1000L) return;
+        if (!asked && System.currentTimeMillis() - last < 15 * 60 * 1000L) return;
         if (!online()) { if (asked) toast("No internet connection."); return; }
         prefs.edit().putLong("update_checked", System.currentTimeMillis()).apply();
         if (asked) toast("Checking for a new version ...");
         new Thread(() -> {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(RELEASE_API).openConnection();
-                c.setRequestProperty("Accept", "application/vnd.github+json");
-                c.setConnectTimeout(10000);
-                c.setReadTimeout(10000);
-                if (c.getResponseCode() != 200) throw new Exception("GitHub said " + c.getResponseCode());
-                String body = new String(readAll(c.getInputStream(), 200000), "UTF-8");
-                Matcher m = Pattern.compile("versionCode:\\s*(\\d+)").matcher(body);
-                int latest = m.find() ? Integer.parseInt(m.group(1)) : 0;
+                int latest = Updates.latest();
+                Updates.remember(this, latest);
                 if (latest > BuildConfig.VERSION_CODE) {
-                    ui.post(() -> new AlertDialog.Builder(this)
-                            .setTitle("New version of the Bahi app")
-                            .setMessage("Version 1." + latest + " is ready (you have " + BuildConfig.VERSION_NAME + "). Update now? Your login and saved data stay.")
-                            .setPositiveButton("Update now", (d, w) -> downloadUpdate())
-                            .setNegativeButton("Later", null)
-                            .show());
+                    ui.post(() -> { showUpdateReady(latest); pleaseUpdate(latest, asked); });
                 } else if (asked) {
                     ui.post(() -> toast("You have the latest version (" + BuildConfig.VERSION_NAME + ")."));
                 }
@@ -534,6 +548,29 @@ public class MainActivity extends Activity {
                 if (asked) ui.post(() -> toast("Couldn't check for updates: " + e.getMessage()));
             }
         }).start();
+    }
+
+    private void pleaseUpdate(int latest, boolean asked) {
+        if (isFinishing()) return;
+        // again each time the app is opened, but not over and over within a few minutes
+        if (!asked && System.currentTimeMillis() - updateAsked < 10 * 60 * 1000L) return;
+        updateAsked = System.currentTimeMillis();
+        new AlertDialog.Builder(this)
+                .setTitle("Please update the Bahi app")
+                .setMessage("Version 1." + latest + " is ready (you have " + BuildConfig.VERSION_NAME + ").
+
+"
+                        + "Newer versions are faster, fix problems and keep working with your Bahi server. "
+                        + "It takes under a minute, and your login and saved data stay.")
+                .setPositiveButton("Update now", (d, w) -> downloadUpdate())
+                .setNegativeButton("Later", (d, w) -> toast("Bahi will remind you again. The bar at the top updates it any time."))
+                .setCancelable(false)
+                .show();
+    }
+
+    /** The web app shows a "new version" bar until the app is updated */
+    private void showUpdateReady(int latest) {
+        if (web != null) web.evaluateJavascript("window.bahiUpdateReady && window.bahiUpdateReady(" + latest + ")", null);
     }
 
     /** Downloads the new app with a progress bar, then hands it to Android's installer. */
@@ -628,6 +665,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingApk == null) checkForUpdate(false);
         // back from the "Install unknown apps" screen: carry on with the update
         if (pendingApk != null && askedInstallPermission) installUpdate();
     }

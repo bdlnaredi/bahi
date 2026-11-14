@@ -591,3 +591,8 @@ dialog h3 { font-size: 18px; font-weight: 800; padding: 18px 18px 10px; }
 .pselect.small::before { display: none; }
 @media (max-width: 480px) { .actions.top .btn.ic { flex: 0 0 48px; padding: 0; } .actions.top .btn.ic .bl { display: none; } }
 .btn svg { flex: none; }
+.appupdate { max-width: 680px; margin: 8px auto 0; display: flex; align-items: center; gap: 10px; background: #fff4e0; color: #6b4200;
+  border-radius: 14px; padding: 8px 8px 8px 14px; font-size: 13.5px; line-height: 1.3; }
+.appupdate span { flex: 1; }
+.appupdate .btn { min-height: 38px; padding: 6px 14px; flex: none; }
+:root[data-theme="dark"] .appupdate { background: #3a2a10; color: #ffd28a; }
