@@ -157,12 +157,15 @@ def sync_running():
     return None
 
 
-def heartbeat(names):
+def heartbeat(names, current=()):
     _running.clear()       # sent at the end of every sync, and on every check that doesn't sync
+    now = time.time()
     with _lock, conn() as c:
         for n in names:
             cid = company_id(c, n)
-            c.execute("UPDATE company SET last_seen=? WHERE id=?", (time.time(), cid))
+            c.execute("UPDATE company SET last_seen=? WHERE id=?", (now, cid))
+        for n in current or ():     # the Tally PC checked these against Tally in this sync: the copy is as of now
+            c.execute("UPDATE company SET data_at=? WHERE name=? AND last_sync IS NOT NULL", (now, n))
 
 
 def _migrate(c):
@@ -185,6 +188,9 @@ def _migrate(c):
     cols = [r[1] for r in c.execute("PRAGMA table_info(company)")]
     if "keep_from" not in cols:
         c.execute("ALTER TABLE company ADD COLUMN keep_from TEXT DEFAULT ''")
+    if "data_at" not in cols:
+        # when the copy here was last confirmed to match Tally (a sync that found nothing new counts too)
+        c.execute("ALTER TABLE company ADD COLUMN data_at REAL")
     if "gst" not in [r[1] for r in c.execute("PRAGMA table_info(stock)")]:
         c.execute("ALTER TABLE stock ADD COLUMN gst REAL")         # item's GST rate from Tally (added in 3.4)
     gcols = [r[1] for r in c.execute("PRAGMA table_info(grp)")]
@@ -752,8 +758,8 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                            for r in rows])
         unbalanced = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=? AND balanced=0", (cid,)).fetchone()["n"]
         now = time.time()
-        c.execute("UPDATE company SET last_sync=?, last_seen=?, from_date=?, to_date=?, alt_vch=?, alt_mst=?,"
-                  " unbalanced=? WHERE id=?", (now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, cid))
+        c.execute("UPDATE company SET last_sync=?, last_seen=?, data_at=?, from_date=?, to_date=?, alt_vch=?, alt_mst=?,"
+                  " unbalanced=? WHERE id=?", (now, now, now, d_from, d_to, alt_vch, alt_mst, unbalanced, cid))
         n_v = c.execute("SELECT COUNT(*) n FROM voucher WHERE company_id=?", (cid,)).fetchone()["n"]
     return {"ledgers": len(ledgers), "stock": len(stock), "vouchers": n_v, "unbalanced": unbalanced,
             "changed": inserted, "months": ("vouchers" if guids is not None else len(ranges)) if partial else "all"}
@@ -767,7 +773,7 @@ def _rows(c, sql, args=()):
 
 def companies():
     with conn() as c:
-        rows = _rows(c, """SELECT id, name, last_sync, last_seen, from_date, to_date, unbalanced, keep_from,
+        rows = _rows(c, """SELECT id, name, last_sync, last_seen, COALESCE(data_at, last_sync) data_at, from_date, to_date, unbalanced, keep_from,
             (SELECT MIN(date) FROM voucher v WHERE v.company_id=company.id) first_vch,
             (SELECT MAX(date) FROM voucher v WHERE v.company_id=company.id) last_vch,
             (SELECT COUNT(*) FROM ledger l WHERE l.company_id=company.id) ledgers,

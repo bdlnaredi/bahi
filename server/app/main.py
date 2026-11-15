@@ -45,7 +45,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.14.0"
+APP_VERSION = "3.15.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -380,7 +380,7 @@ class Handler(BaseHTTPRequestHandler):
                 "company": company, "party": party, "upi": bool(upi.get(company)),
                 "company_info": {k: ci.get(k) for k in ("address", "gstin", "state", "pincode", "email", "phone") if ci.get(k)},
                 "from": d["from"], "to": d["to"], "first": co.get("first_vch") or d["from"], "last": co.get("last_vch") or d["to"],
-                "synced": co.get("last_sync"),
+                "synced": co.get("data_at") or co.get("last_sync"),
                 "opening": d["opening"], "closing": d["closing"], "debit": d.get("debit"), "credit": d.get("credit"),
                 "entries": [{k: e.get(k) for k in ("id", "date", "vtype", "number", "against", "amount", "balance")} for e in d["entries"]],
                 "bills": [{k: b.get(k) for k in ("ref", "date", "due", "amount", "overdue", "interest")} for b in (d.get("bills") or [])
@@ -513,7 +513,7 @@ document.getElementById("a").addEventListener("change", function () {{
             return self.send_json({"ok": True})
         if path == "/agent/heartbeat" and method == "POST":
             hb = json.loads(self.body(1 << 20) or b"{}")
-            store.heartbeat(hb.get("companies", []))
+            store.heartbeat(hb.get("companies", []), hb.get("current") or [])
             if hb.get("agent"):
                 store.update_sync(agent_version=str(hb["agent"])[:20])
             return self.send_json({"ok": True})

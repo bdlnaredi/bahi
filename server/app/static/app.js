@@ -239,26 +239,32 @@ async function loadCompanies() {
   watchSync();
 }
 
+/* "15 Nov 2026, 11:42 am": the moment the figures on screen were last confirmed against Tally */
+const asOf = (t) => new Date(t * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).replace(/\b(am|pm)\b/i, (m) => m.toLowerCase());
 function renderCover() {
   const c = S.companies.find((x) => x.id === S.cid);
   $("#company").textContent = c ? c.name : "Bahi";
   if (c && S.companies.length > 1) $("#company").insertAdjacentHTML("beforeend", ' <span class="caret" aria-hidden="true">▾</span>');
   const st = $("#status");
   if (!c) { st.innerHTML = S.sync && S.sync.running ? '<span class="dot busy"></span>Syncing from Tally now, for the first time' : ""; return; }
+  const at = c.data_at || c.last_sync;
   const online = c.last_seen && Date.now() / 1000 - c.last_seen < 30 * 60;
-  if (c.paused || S.sync.mode === "manual") {
-    st.innerHTML = `<span class="dot off"></span>${c.paused ? "Sync paused" : "Manual sync"}. Figures as of ${new Date(c.last_sync * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`;
-    return;
-  }
+  const age = Date.now() / 1000 - at;
+  const old = age > Math.max(3 * 3600, (S.sync.every || 10) * 180);    // older than 3 hours (or 3 sync rounds): say so
   const run = S.sync.running;
+  let dot = "", line;
   if (run) {
-    const which = run.company && S.companies.length > 1 ? (run.company === c.name ? "this company" : run.company) : "";
-    st.innerHTML = `<span class="dot busy"></span>Syncing from Tally now${which ? ` (${h(which)})` : ""}, started ${ago(run.since)}. Last change synced ${ago(c.last_sync)}`;
-    return;
-  }
-  st.innerHTML = `<span class="dot ${online ? "" : "off"}"></span>` +
-    (online ? `Tally connected. Last change synced ${ago(c.last_sync)}` :
-      `Tally offline since ${ago(c.last_seen)}. Figures as of ${new Date(c.last_sync * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`);
+    const which = run.company && S.companies.length > 1 ? (run.company === c.name ? "" : run.company) : "";
+    dot = "busy"; line = `Syncing from Tally now${which ? ` (${h(which)})` : ""}, started ${ago(run.since)}`;
+  } else if (c.paused) { dot = "off"; line = "Sync paused for this company"; }
+  else if (S.sync.mode === "paused") { dot = "off"; line = "Sync paused"; }
+  else if (S.sync.mode === "manual") { dot = "off"; line = "Manual sync: tap ⟳ for fresh figures"; }
+  else if (online) line = `Tally connected, checked ${ago(c.last_seen)}`;
+  else { dot = "off"; line = `Tally PC not reachable since ${ago(c.last_seen)}`; }
+  st.innerHTML = `<div class="asof${old ? " old" : ""}" role="status">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      <div><div class="asof-t">Data as of <b>${asOf(at)}</b>${old ? ` <span class="asof-age">(${ago(at)})</span>` : ""}</div>
+      <div class="asof-s"><span class="dot ${dot}"></span>${line}</div></div></div>`;
 }
 
 // While the Tally PC is syncing, check every 15 seconds; when it finishes, show the new figures
@@ -1214,7 +1220,7 @@ function vReports() {
   ${R.length ? "</section>" : "</div>"}
   ${c && S.me.owner ? `<section class="page"><div class="block-title">Sync</div><div class="info">
     <div>Data from ${fdate(c.from_date)} to ${fdate(c.to_date)}</div><div>${c.ledgers} ledgers, ${c.vouchers} vouchers</div>
-    <div>${S.sync.running ? `<b>Syncing from Tally now</b>${S.sync.running.company ? ` (${h(S.sync.running.company)})` : ""}, started ${ago(S.sync.running.since)}. ` : ""}Last change synced ${ago(c.last_sync)}. Tally last checked ${ago(c.last_seen)}.</div>
+    <div>${S.sync.running ? `<b>Syncing from Tally now</b>${S.sync.running.company ? ` (${h(S.sync.running.company)})` : ""}, started ${ago(S.sync.running.since)}. ` : ""}Data as of ${asOf(c.data_at || c.last_sync)}. Last change from Tally ${ago(c.last_sync)}. Tally PC last checked in ${ago(c.last_seen)}.</div>
     <div>App version ${h(S.me.version || APP_VERSION)}</div></div>
     <a class="row" href="#/check"><div class="main"><div class="name">Sync check</div><div class="meta">${c.unbalanced ? `<span class="od">${c.unbalanced} vouchers didn't add up</span>` : "Every voucher added up"}. Vouchers by type.</div></div><span class="chev"></span></a></section>` : ""}
   <section class="page">

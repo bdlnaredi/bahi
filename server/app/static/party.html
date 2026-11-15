@@ -51,6 +51,10 @@ a.item:active { background: var(--chip); }
 .empty { padding: 18px 14px; color: var(--ink-3); }
 footer { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 18px; }
 .err { padding: 24px; text-align: center; color: var(--ink-2); }
+.asof { display: flex; gap: 10px; align-items: center; background: var(--chip); border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; color: var(--ink-2); }
+.asof svg { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+.asof b { color: var(--ink); }
+.asof .sub { font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
 </style>
 </head>
 <body>
@@ -67,6 +71,7 @@ footer { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 1
   const rs = (n) => "₹" + nf.format(Math.abs(n || 0));
   // the books are the company's: a debit balance is what this party owes the company
   const drcr = (n) => n > 0.004 ? `${rs(n)} Dr` : n < -0.004 ? `<span class="cr">${rs(n)} Cr</span>` : rs(0);
+  const stamp = (t) => new Date(t * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).replace(/\b(am|pm)\b/i, (m) => m.toLowerCase());
   const fyOf = (d) => { const y = +d.slice(0, 4), m = +d.slice(5, 7); return m >= 4 ? y : y - 1; };
 
   let period = null;
@@ -91,7 +96,8 @@ footer { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 1
     const coMeta = [(C.address || []).join(", "), C.gstin ? "GSTIN " + C.gstin : "", C.phone || "", C.email || ""].filter(Boolean).join(" · ");
     const cl = d.closing || 0;
     const today = new Date().toISOString().slice(0, 10);
-    const asOf = d.to > today ? today : d.to;          // the year isn't over yet: the balance is as on today
+    const dataDay = d.synced ? new Date(d.synced * 1000 + 19800000).toISOString().slice(0, 10) : today;   // that day, in India
+    const asOf = d.to > dataDay ? dataDay : d.to;      // the year isn't over yet: the balance is as on the day of the figures
     const balTxt = cl > 0.5 ? `${rs(cl)}` : cl < -0.5 ? `${rs(cl)}` : "₹0.00";
     const balNote = cl > 0.5 ? `due from you as on ${fdate(asOf)}` : cl < -0.5 ? `in your favour as on ${fdate(asOf)}` : `nothing due as on ${fdate(asOf)}`;
     // financial years the books cover, newest first
@@ -103,6 +109,8 @@ footer { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 1
     const entries = (d.entries || []).slice().reverse();
     app.innerHTML = `
       <header class="co"><h1>${h(d.company)}</h1>${coMeta ? `<div class="meta">${h(coMeta)}</div>` : ""}</header>
+      ${d.synced ? `<div class="asof" role="note"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+        <div><div>Figures as on <b>${stamp(d.synced)}</b></div><div class="sub">Taken from ${h(d.company)}'s books at that time. Anything entered after it will show at the next update.</div></div></div>` : ""}
       <section class="card">
         <div class="who">Your account</div>
         <div class="party">${h(d.party)}</div>
@@ -131,7 +139,7 @@ footer { color: var(--ink-3); font-size: 12px; text-align: center; margin-top: 1
           || '<div class="empty">No entries in this period.</div>'}
         <div class="carry"><span>Opening balance</span><span>${drcr(d.opening)}</span></div>
       </div>
-      <footer>Tap an entry to open its bill or voucher. Figures as in ${h(d.company)}'s books${d.synced ? `, updated ${new Date(d.synced * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : ""}.</footer>`;
+      <footer>Tap an entry to open its bill or voucher. Figures as in ${h(d.company)}'s books${d.synced ? ` on ${stamp(d.synced)}` : ""}.</footer>`;
     document.getElementById("fy").onchange = (ev) => {
       const y = +ev.target.value;
       period = [`${y}-04-01`, `${y + 1}-03-31`];

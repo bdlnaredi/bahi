@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.17"
+$AgentVersion = "3.18"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -517,8 +517,9 @@ $companies = @($companies | Where-Object { Company-Wanted $_ })
 if ($off.Count -and ($Force -or $Verbose -or $Now)) { Log ("Not syncing (switched off in Bahi Sync, Companies): " + (($off | ForEach-Object { $_.Name }) -join ", ")) }
 if ($companies.Count -eq 0) { Log "None of the companies open in Tally is set to sync (Bahi Sync, Companies)." "Yellow"; End-Run 0 }
 
+$script:UpToDate = @()     # companies whose copy on the server matched Tally in this run
 function Send-Heartbeat {
-    try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }); agent = $AgentVersion }) } catch {}
+    try { [void](Server-Json "POST" "/agent/heartbeat" @{ companies = @($companies | ForEach-Object { $_.Name }); agent = $AgentVersion; current = @($script:UpToDate) }) } catch {}
 }
 
 # The scheduled task runs every 2 minutes; the app decides whether it is time to sync
@@ -626,7 +627,7 @@ foreach ($co in $companies) {
         if ($unchanged -and -not $Force) {
             $last = 0; try { $last = [double]$deep[$deepKey] } catch {}
             $nowSec = [double](Get-Date -UFormat %s)
-            if ($nowSec - $last -lt 1800) { continue }
+            if ($nowSec - $last -lt 1800) { $script:UpToDate += $co.Name; continue }   # Tally's counters: nothing changed
             $deepCheck = $true
             $deep[$deepKey] = $nowSec
             try { $deep | ConvertTo-Json | Set-Content $deepFile } catch {}
@@ -690,7 +691,7 @@ foreach ($co in $companies) {
                 continue
             }
         }
-        if ($deepCheck -and -not $full -and $months.Count -eq 0) { continue }   # the 30-minute check found nothing new
+        if ($deepCheck -and -not $full -and $months.Count -eq 0) { $script:UpToDate += $co.Name; continue }   # the 30-minute check found nothing new
         if ($deepCheck) { Log ("Found changes in " + $co.Name + " that Tally's change counter didn't show.") }
         $mastersChanged = $full -or ($state.alt_mst -ne $co.AltMst) -or [bool]$state.need_groups
         if ($full) { Log ("Syncing " + $co.Name + " (" + $fromIso + " to " + $toIso + ") - full ...") "Cyan" }
@@ -887,6 +888,7 @@ foreach ($co in $companies) {
         elseif (-not $full) { $meta.months = @($sentMonths) }
         if ($short.Count -gt 0) { $meta.alt_vch = "" }      # not complete: the next run looks again
         $res = Server-Json "POST" "/agent/commit" $meta
+        if ($short.Count -eq 0) { $script:UpToDate += $co.Name }
         if ($res.details) { Log ("Company details for invoices: " + $res.details) }
         if ($res.held) { Log ("The server kept its own copy of " + $res.held + " (vouchers it has were missing) - tried again at the next sync.") "Yellow" }
         $secs = [math]::Round(((Get-Date) - $t0).TotalSeconds, 1)
