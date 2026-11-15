@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.18"
+$AgentVersion = "3.19"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -428,6 +428,11 @@ function Error-Detail($err) {
         }
         $e = $e.InnerException
     }
+    # "Exception calling DownloadString ..." says nothing: the innermost reason does ("Unable to connect", "timed out")
+    $e = $err.Exception
+    while ($e.InnerException) { $e = $e.InnerException }
+    if ($e -and $e.Message) { $detail = $e.Message }
+    if ($err.Exception.ToString() -match 'WebException' -and $detail -notmatch 'server says') { $detail = "couldn't reach the Bahi server: " + $detail }
     return $detail
 }
 
@@ -446,11 +451,29 @@ function Server-Client {
 }
 
 function Server-Json([string]$method, [string]$path, $obj) {
-    $wc = Server-Client
-    $wc.Headers.Add("Content-Type", "application/json")
-    if ($method -eq "GET") { $res = $wc.DownloadString($Server + $path) }
-    else { $res = $wc.UploadString($Server + $path, "POST", ($obj | ConvertTo-Json -Compress -Depth 5)) }
-    return $res | ConvertFrom-Json
+    # The server restarting (an update) or a short network hiccup shouldn't fail the sync: try again twice,
+    # after 5 and then 20 seconds. A POST is only sent again when it never reached the server.
+    for ($try = 1; ; $try++) {
+        try {
+            $wc = Server-Client
+            $wc.Headers.Add("Content-Type", "application/json")
+            if ($method -eq "GET") { $res = $wc.DownloadString($Server + $path) }
+            else { $res = $wc.UploadString($Server + $path, "POST", ($obj | ConvertTo-Json -Compress -Depth 5)) }
+            return $res | ConvertFrom-Json
+        } catch {
+            $we = $_.Exception; while ($we -and -not ($we -is [System.Net.WebException])) { $we = $we.InnerException }
+            $code = 0; try { if ($we.Response) { $code = [int]$we.Response.StatusCode } } catch {}
+            $inner = $_.Exception; while ($inner.InnerException) { $inner = $inner.InnerException }
+            $never = $we -and ($we.Status -eq [System.Net.WebExceptionStatus]::ConnectFailure -or $we.Status -eq [System.Net.WebExceptionStatus]::NameResolutionFailure -or
+                     ("" + $inner.Message) -match 'refused|Unable to connect|No connection could be made|No such host|name.*resol')
+            # a GET can always be asked again: no answer at all, or a gateway saying the server is down (Cloudflare 502/503/504)
+            $again = $never -or ($method -eq "GET" -and $we -and (-not $we.Response -or $code -eq 502 -or $code -eq 503 -or $code -eq 504))
+            if (-not $again -or $try -ge 3) { throw }
+            $wait = 5 * $try * $try - $try + 1      # 5 s, then 19 s
+            Log ("The Bahi server didn't answer (" + $inner.Message + "); trying again in $wait s ...") "Yellow"
+            Start-Sleep -Seconds $wait
+        }
+    }
 }
 
 function Send-Part([string]$run, [string]$kind, [byte[]]$data) {
