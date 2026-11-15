@@ -18,3 +18,5 @@ android/local.properties
 agent/TallySync.running
 agent/TallySync.skipped
 agent/.update-*/
+agent/TallySync.companies.json
+agent/TallySync.tbk*
