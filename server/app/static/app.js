@@ -1231,13 +1231,13 @@ function vReports() {
     <div class="actions" style="padding-top:12px">
     <button class="btn" id="theme">Switch light/dark</button><button class="btn" id="logout">Log out</button></div></section>`;
   if ($("#syncrow")) $("#syncrow").onclick = () => syncNow();
-  $("#logout").onclick = async () => { await fetch("/api/logout"); location.hash = "#/"; showLogin(); };
-  $("#theme").onclick = () => {
-    const cur = document.documentElement.dataset.theme || "light";
-    const next = cur === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("theme", next); } catch (e) {}
-  };
+  $("#logout").onclick = logOut;
+  $("#theme").onclick = toggleTheme;
+}
+function toggleTheme() {
+  const next = (document.documentElement.dataset.theme || "light") === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("theme", next); } catch (e) {}
 }
 
 async function vGST() {
@@ -2507,7 +2507,7 @@ async function vCollect() {
 
 /* ---------------------------------------------------------------- login, errors, router */
 function showLogin(msg = "") {
-  $("#tabs").hidden = true; $("#status").innerHTML = ""; $("#company").textContent = "Bahi"; $("#back").hidden = true;
+  $("#tabs").hidden = true; $("#status").innerHTML = ""; $("#company").textContent = "Bahi"; $("#back").hidden = true; $("#account").hidden = true;
   view.innerHTML = `<div class="login"><form id="lf"><h1>Open your books</h1><p>Enter the app password you set on the server.</p>
     <input type="text" id="lname" autocomplete="username" aria-label="Your name" placeholder="Your name (staff only)">
     <input type="password" id="pw" autocomplete="current-password" aria-label="Password" placeholder="Password" required>
@@ -2600,7 +2600,7 @@ function pickCompany() {
 }
 
 async function start() {
-  try { S.me = await api("/api/me"); await loadCompanies(); } catch (e) { return fail(e); }
+  try { S.me = await api("/api/me"); renderAccount(); await loadCompanies(); } catch (e) { return fail(e); }
   applyTabs();
   $("#tabs").hidden = false;
   route();
@@ -2610,6 +2610,29 @@ async function start() {
 try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
 window.addEventListener("hashchange", route);
 $("#back").onclick = () => history.length > 1 ? history.back() : (location.hash = "#/");
+/* the round button with your initial, top right: who is logged in, and Log out */
+async function logOut() {
+  try { await fetch("/api/logout"); } catch (e) {}
+  location.hash = "#/"; showLogin();
+}
+function renderAccount() {
+  const b = $("#account");
+  if (!S.me) { b.hidden = true; return; }
+  b.hidden = false;
+  b.textContent = ((S.me.name || "").trim()[0] || (S.me.owner ? "O" : "?")).toUpperCase();   // the owner has no name: O
+}
+$("#account").onclick = () => {
+  const dark = (document.documentElement.dataset.theme || "light") === "dark";
+  moreSheet(S.me.name || "Owner", [
+    { label: `Settings${S.me.owner ? "" : " (your password)"}`, icon: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>', href: "#/settings" },
+    { label: "What's new", icon: '<svg viewBox="0 0 24 24"><path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z"/></svg>', href: "#/whatsnew" },
+    { label: dark ? "Light look" : "Dark look", icon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>', run: toggleTheme },
+    { label: '<span class="od">Log out</span>', icon: '<svg viewBox="0 0 24 24" style="stroke:var(--cr)"><path d="M9 21H5V3h4 M16 17l5-5-5-5 M21 12H9"/></svg>', run: logOut },
+  ]);
+  const h3 = $("#sheet h3");
+  if (h3) h3.insertAdjacentHTML("beforeend", `<div class="hint" style="font-weight:500;margin-top:2px">${S.me.owner ? "Owner" : "Staff login"} · Bahi ${h(S.me.version || "")}</div>`);
+};
+
 $("#refresh").onclick = async () => { try { await loadCompanies(); } catch (e) {} route(); };
 $("#company").onclick = pickCompany;
 document.addEventListener("visibilitychange", () => { if (!document.hidden) loadCompanies().then(renderCover).catch(() => {}); });

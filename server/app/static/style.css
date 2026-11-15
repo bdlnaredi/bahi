@@ -642,3 +642,6 @@ dialog h3 { font-size: 18px; font-weight: 800; padding: 18px 18px 10px; }
 :root[data-theme="dark"] .asof.old { background: #3a2a10; }
 :root[data-theme="dark"] .asof.old .asof-age { color: #ffd28a; }
 #status.status { padding: 0 12px; margin-top: 2px; }
+/* your account, top right */
+.avatar { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--cover); color: #fff; font: 800 15px/1 var(--sans); cursor: pointer; flex: none; margin-left: 2px; }
+.avatar:active { transform: scale(.94); }
