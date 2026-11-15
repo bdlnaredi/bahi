@@ -407,17 +407,22 @@ def parse_vouchers(root):
                 if r:
                     items.append(r)
 
-        bills = []
-        for e in all_le + le:
-            ln = txt(e, "LEDGERNAME")
-            for b in e.findall("BILLALLOCATIONS.LIST"):
-                bname = txt(b, "NAME")
-                btype = txt(b, "BILLTYPE")
-                if not (bname or btype):
-                    continue
-                bills.append({"ledger": ln, "name": bname, "type": btype or "New Ref",
-                              "amount": -num(txt(b, "AMOUNT")),
-                              "days": int(num(txt(b, "BILLCREDITPERIOD")))})
+        # bill references: Tally repeats the ledger lines as ALLLEDGERENTRIES and LEDGERENTRIES, each with the
+        # same bill allocations: read them from one list only, or every bill shows (and counts) twice
+        def bills_of(entries):
+            got = []
+            for e in entries:
+                ln = txt(e, "LEDGERNAME")
+                for b in e.findall("BILLALLOCATIONS.LIST"):
+                    bname = txt(b, "NAME")
+                    btype = txt(b, "BILLTYPE")
+                    if not (bname or btype):
+                        continue
+                    got.append({"ledger": ln, "name": bname, "type": btype or "New Ref",
+                                "amount": -num(txt(b, "AMOUNT")),
+                                "days": int(num(txt(b, "BILLCREDITPERIOD")))})
+            return got
+        bills = bills_of(all_le) or bills_of(le)
 
         out.append({
             "extra": voucher_extra(v),

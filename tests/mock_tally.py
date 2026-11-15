@@ -325,6 +325,11 @@ def xml_voucher(v):
         for ln, a in v["ledgers"]:
             body += (f"<LEDGERENTRIES.LIST><LEDGERNAME>{escape(ln)}</LEDGERNAME>"
                      f"<AMOUNT>{amt(a)}</AMOUNT>{ba(ln)}</LEDGERENTRIES.LIST>")
+            # DOUBLE_LEDGERS=1: the same lines again as ALLLEDGERENTRIES, bill allocations and all (as TallyPrime's
+            # voucher collection can send them)
+            if os.environ.get("DOUBLE_LEDGERS"):
+                body += (f"<ALLLEDGERENTRIES.LIST><LEDGERNAME>{escape(ln)}</LEDGERNAME>"
+                         f"<AMOUNT>{amt(a)}</AMOUNT>{ba(ln)}</ALLLEDGERENTRIES.LIST>")
     if v["no"] == "S/9001":     # an e-invoiced sale with an e-way bill, as TallyPrime exports it
         body += ("<IRN>2d46b1e7bd54fbcd324bf6b675d1d3cc3eedb31212b5bafaa301a8a1ce2fe048</IRN><IRNACKNO>172621382927422</IRNACKNO>"
                  "<IRNACKDATE>20260906</IRNACKDATE><IRNQRCODE>eyJhbGciOiJSUzI1NiJ9.eyJkYXRhIjoidGVzdCJ9.c2lnbmF0dXJl</IRNQRCODE>"

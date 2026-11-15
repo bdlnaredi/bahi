@@ -135,6 +135,9 @@ def company_id(c, name):
     return c.execute("INSERT INTO company(name) VALUES(?)", (name,)).lastrowid
 
 
+ONCE = ("items_once", "bills_once")      # see plan(): one full re-read of the vouchers after each such fix
+
+
 # A sync in progress on the Tally PC (kept in memory: only for showing "syncing now" in the app)
 _running = {}
 RUN_IDLE = 20 * 60        # nothing heard from the Tally PC this long: it isn't syncing any more
@@ -504,11 +507,12 @@ def plan(company, d_from, d_to, tally_list):
                       (company,)).fetchone()
         if not r or r["from_date"] != max(d_from, r["keep_from"] or "") or r["to_date"] != d_to:
             return {"full": True, "months": []}
-        # 3.6.1: stock lines Tally sends twice (ALLINVENTORYENTRIES and INVENTORYENTRIES) were both kept;
-        # every company's vouchers are read again once so the stored copies are right
-        key = f"items_once:{r['id']}"
-        if not c.execute("SELECT 1 FROM meta WHERE key=?", (key,)).fetchone():
-            c.execute("INSERT OR REPLACE INTO meta VALUES(?, '1')", (key,))
+        # Fixes in reading Tally's vouchers that need every voucher read again once, so the stored copies are right:
+        # 3.6.1 stock lines and 3.17.2 bill references, both sent twice by Tally (ALL... and plain lists)
+        missing = [k for k in ONCE if not c.execute("SELECT 1 FROM meta WHERE key=?", (f"{k}:{r['id']}",)).fetchone()]
+        if missing:
+            for k in ONCE:
+                c.execute("INSERT OR REPLACE INTO meta VALUES(?, '1')", (f"{k}:{r['id']}",))
             c.commit()
             return {"full": True, "months": []}
         stored = {g: (a, d) for g, a, d in c.execute(
@@ -626,7 +630,8 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
         cid = company_id(c, company)
         kf = keep_from(c, cid)
         if months is None and guids is None:          # a full sync: nothing stored before it needs reading again
-            c.execute("INSERT OR REPLACE INTO meta VALUES(?, '1')", (f"items_once:{cid}",))
+            for k in ONCE:
+                c.execute("INSERT OR REPLACE INTO meta VALUES(?, '1')", (f"{k}:{cid}",))
         if kf and d_from < kf:
             d_from = kf
             vouchers = [v for v in vouchers if v["date"] >= kf]
