@@ -545,6 +545,90 @@ async function payDialog(party, amount, phone) {
   };
 }
 
+/* ---------------------------------------------------------------- type-ahead picker
+   Any input with list="..." (customers, items, ledgers, charges) gets Bahi's own suggestion list. The browser's
+   built-in <datalist> often shows nothing inside the Android app, and is slow with thousands of names. */
+const PICK = { el: null, input: null, items: [], at: -1 };
+function pickOptions(inp) {
+  if (!inp._opts) {
+    const dl = document.getElementById(inp.dataset.list || "");
+    inp._opts = dl ? Array.from(dl.options, (o) => o.value).filter(Boolean) : [];
+  }
+  return inp._opts;
+}
+function pickMatches(all, q) {
+  q = q.trim().toLowerCase();
+  if (!q) return all.slice(0, 80);
+  const words = q.split(/\s+/);
+  const out = [];
+  for (const name of all) {
+    const n = name.toLowerCase();
+    if (!words.every((w) => n.includes(w))) continue;
+    out.push([n.startsWith(q) ? 0 : (" " + n).includes(" " + words[0]) ? 1 : 2, name]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  return out.slice(0, 80).map((x) => x[1]);
+}
+function pickClose() {
+  if (PICK.el) PICK.el.remove();
+  PICK.el = null; PICK.input = null; PICK.at = -1;
+}
+function pickPlace() {
+  const r = PICK.input.getBoundingClientRect(), vh = window.visualViewport ? window.visualViewport.height : innerHeight;
+  const below = vh - r.bottom - 8, above = r.top - 8, up = below < 170 && above > below;
+  Object.assign(PICK.el.style, { left: r.left + "px", width: r.width + "px", maxHeight: Math.max(120, Math.min(320, up ? above : below)) + "px",
+    top: up ? "" : r.bottom + 4 + "px", bottom: up ? vh - r.top + 4 + "px" : "" });
+}
+function pickShow(inp) {
+  const list = pickMatches(pickOptions(inp), inp.value);
+  if (!PICK.el || PICK.input !== inp) {
+    pickClose();
+    PICK.el = document.createElement("div");
+    PICK.el.className = "pick"; PICK.el.setAttribute("role", "listbox");
+    (inp.closest("dialog") || document.body).appendChild(PICK.el);
+    PICK.input = inp;
+    PICK.el.addEventListener("pointerdown", (e) => e.preventDefault());     // keep the keyboard up
+    PICK.el.addEventListener("click", (e) => { const o = e.target.closest("[data-v]"); if (o) pickChoose(o.dataset.v); });
+  }
+  PICK.items = list; PICK.at = -1;
+  PICK.el.innerHTML = list.length ? list.map((v, i) => `<div class="po" role="option" data-v="${h(v)}" data-i="${i}">${h(v)}</div>`).join("")
+    : `<div class="pnone">${inp.value.trim() ? "No match. Check the spelling; it must be as in Tally." : "Nothing to choose from."}</div>`;
+  pickPlace();
+}
+function pickChoose(v) {
+  const inp = PICK.input;
+  pickClose();
+  if (!inp) return;
+  inp.value = v;
+  inp.dispatchEvent(new Event("input", { bubbles: true }));
+  inp.dispatchEvent(new Event("change", { bubbles: true }));
+}
+document.addEventListener("focusin", (e) => {
+  const inp = e.target;
+  if (!(inp instanceof HTMLInputElement)) return;
+  if (inp.hasAttribute("list")) {                 // take over from the browser's own list
+    inp.dataset.list = inp.getAttribute("list"); inp.removeAttribute("list"); inp.setAttribute("autocomplete", "off");
+  }
+  if (inp.dataset.list) pickShow(inp);
+});
+document.addEventListener("input", (e) => { if (e.target.dataset && e.target.dataset.list && e.isTrusted) pickShow(e.target); });
+document.addEventListener("focusout", (e) => { if (PICK.input === e.target) setTimeout(() => { if (PICK.input === e.target && document.activeElement !== e.target) pickClose(); }, 150); });
+document.addEventListener("keydown", (e) => {
+  if (!PICK.el || e.target !== PICK.input) return;
+  const n = PICK.items.length;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    PICK.at = n ? (PICK.at + (e.key === "ArrowDown" ? 1 : -1) + n) % n : -1;
+    PICK.el.querySelectorAll(".po").forEach((o, i) => o.classList.toggle("on", i === PICK.at));
+    const on = PICK.el.querySelector(".po.on"); if (on) on.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter" && PICK.at >= 0) { e.preventDefault(); pickChoose(PICK.items[PICK.at]); }
+  else if (e.key === "Escape" || e.key === "Tab") pickClose();
+});
+window.addEventListener("scroll", () => { if (PICK.el) pickPlace(); }, true);
+window.addEventListener("resize", () => { if (PICK.el) pickPlace(); });
+if (window.visualViewport) visualViewport.addEventListener("resize", () => { if (PICK.el) pickPlace(); });
+window.addEventListener("hashchange", pickClose);
+
 /* ---------------------------------------------------------------- what's new */
 function seenVersion() { try { return localStorage.getItem("seenVersion") || ""; } catch (e) { return ""; } }
 function markSeen() { try { localStorage.setItem("seenVersion", S.me.version || ""); } catch (e) {} }

@@ -649,3 +649,11 @@ dialog h3 { font-size: 18px; font-weight: 800; padding: 18px 18px 10px; }
 .steps li { margin: 6px 0; }
 .steps code, .hint code { font-size: 12.5px; background: var(--sheet); padding: 1px 5px; border-radius: 5px; }
 details.hint summary { cursor: pointer; font-weight: 600; color: var(--cover); padding: 4px 0; }
+/* type-ahead picker (customers, items, ledgers) */
+.pick { position: fixed; z-index: 1000; background: var(--paper); border-radius: 12px; overflow-y: auto; overscroll-behavior: contain;
+  box-shadow: 0 0 0 1px var(--rule), 0 10px 28px rgba(15, 23, 42, .18); padding: 4px 0; }
+.pick .po { padding: 11px 14px; font-size: 15px; cursor: pointer; overflow-wrap: anywhere; }
+.pick .po + .po { border-top: 1px solid var(--rule); }
+.pick .po:hover, .pick .po.on { background: var(--accent-soft); }
+.pick .pnone { padding: 12px 14px; font-size: 14px; color: var(--ink-3); }
+dialog .pick { position: fixed; }

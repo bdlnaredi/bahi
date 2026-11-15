@@ -2,6 +2,12 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.17.1 (15 November 2026)
+
+- **Customer, item and ledger lists work in the Android app again.**
+  - When making an invoice or any other entry, tapping Customer, Item, Charge or Ledger opens a list, and typing narrows it (any part of the name, e.g. "gup" finds Gupta Hardware). Tap a name to choose it.
+  - Before, these used the browser's own suggestion list, which often shows nothing inside the Android app.
+
 ## 3.17.0 (15 November 2026)
 
 - **Copies of TallyPrime's own backups.**
