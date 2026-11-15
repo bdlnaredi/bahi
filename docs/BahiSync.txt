@@ -20,6 +20,13 @@ Backups in Google Drive or OneDrive
   Tools, Back up to Google Drive (or OneDrive): sign in once in the browser, and the Bahi server copies
   every night's backup to a "Bahi Backups" folder there.
 
+Copies of Tally's own backups
+  In TallyPrime 7.0 or later: Alt+Y (Data), Backup & Restore, Schedule Backup. Set the Backup Data Path to a
+  folder of its own (for example C:\TallyBackups), choose the companies, Daily, and save (Ctrl+A).
+  Then Bahi Sync, Settings, Tally backup folder: pick the same folder and Save. Every new backup file is copied
+  to the Bahi server (and Google Drive or OneDrive, when connected). Download them in the app: Settings, Backups.
+  Restore in TallyPrime with Alt+Y, Backup & Restore, Restore. Bahi Sync only reads that folder.
+
 Files in this folder
   BahiSync.exe               the app
   TallySync.ps1 and others   the sync itself (kept up to date from your Bahi server)

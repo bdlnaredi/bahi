@@ -1585,6 +1585,36 @@ async function vCheck() {
     </section>`;
 }
 
+/* TallyPrime's own backup files, copied from the Tally PC's backup folder: download them, restore in Tally */
+async function tallyBackupSection() {
+  const el = $("#tbsec");
+  if (!el) return;
+  const t = await api("/api/tallybackups");
+  const live = t.files.filter((f) => !f.gone), gone = t.files.filter((f) => f.gone);
+  const mb = (n) => n >= 1073741824 ? (n / 1073741824).toFixed(2) + " GB" : (n / 1048576).toFixed(1) + " MB";
+  const when = (x) => new Date(x * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  const steps = `<ol class="steps">
+      <li>In <b>TallyPrime</b> (7.0 or later): <b>Alt+Y</b> (Data) &gt; <b>Backup &amp; Restore</b> &gt; <b>Schedule Backup</b>. Set <b>Backup Data Path</b> to a folder of its own, for example <code>C:\TallyBackups</code>, choose your companies (or All Items), <b>Daily</b>, a time when the PC is on, and save with <b>Ctrl+A</b>.</li>
+      <li>On the Tally PC: <b>Bahi Sync</b> &gt; <b>Settings</b> &gt; <b>Tally backup folder</b>: pick the same folder, then <b>Save</b>.</li></ol>`;
+  if (!t.pc.folder) {
+    el.innerHTML = `<div class="block-title">Tally's own backups <span>off</span></div>
+      <div class="info"><div>Keep copies of TallyPrime's own backup files here (and in Google Drive or OneDrive, when connected). They restore in Tally exactly as they were, with <b>Data &gt; Restore</b>. Bahi only copies the files; it never changes anything in Tally.</div></div>${steps}`;
+    return;
+  }
+  el.innerHTML = `<div class="block-title">Tally's own backups <span>${live.length} file${live.length === 1 ? "" : "s"}, ${mb(t.total)}</span></div>
+    <div class="info"><div>Copied from <b>${h(t.pc.folder)}</b> on the Tally PC, checked ${ago(t.pc.checked)}.${t.pc.note ? ` <span class="od">${h(t.pc.note)}</span>` : ""}</div>
+      ${t.cloud && t.cloud.time ? `<div class="${t.cloud.ok ? "" : "od"}">${h(t.cloud.msg)} to Google Drive or OneDrive, ${ago(t.cloud.time)}.</div>` : ""}</div>
+    ${live.slice(0, 20).map((f) => `<div class="row"><div class="main"><div class="name">${h(f.path)}</div><div class="meta">${mb(f.size)} · made ${when(f.mtime)}</div></div>
+      <div class="end"><a class="chip" href="/api/tallybackups/file?path=${enc(f.path)}" download>Download</a></div></div>`).join("") || '<div class="empty">No backup files in that folder yet. Tally makes them at the scheduled time.</div>'}
+    ${gone.length ? `<p class="hint" style="padding:0 14px">${gone.length} older file${gone.length === 1 ? "" : "s"} no longer on the Tally PC ${gone.length === 1 ? "is" : "are"} kept here ${t.keep_gone} days more.</p>` : ""}
+    <div class="actions">${live.length ? '<a class="btn primary" href="/api/tallybackups/zip" download>Download all (.zip)</a>' : ""}</div>
+    <details class="hint" style="padding:0 14px 14px"><summary>How to restore in Tally</summary>
+      <ol class="steps"><li>Download the backup file (for several, the .zip, and unzip it) into a folder on the Tally PC, for example <code>C:\TallyRestore</code>.</li>
+      <li>In TallyPrime: <b>Alt+Y</b> (Data) &gt; <b>Backup &amp; Restore</b> &gt; <b>Restore</b>. Set the source (backup) path to that folder, pick the company and a <b>Restore Destination Path</b> that is <i>not</i> your working data folder, so nothing current is overwritten.</li>
+      <li>Open the restored company from there and check it before using it.</li></ol>
+      <div style="margin-top:6px"><b>To set this up on another PC</b>:${steps}</div></details>`;
+}
+
 async function cloudSection() {
   const el = $("#cbsec");
   if (!el) return;
@@ -1775,6 +1805,7 @@ async function vSettings(part) {
     <section class="page" id="upisec"></section>
     <section class="page" id="lnsec"></section>
     <section class="page" id="stsec"></section>
+    <section class="page" id="tbsec"></section>
     <section class="page" id="bksec"></section>
     <section class="page" id="cbsec"></section>
     <section class="page" id="offsec"></section>
@@ -1803,7 +1834,7 @@ async function vSettings(part) {
       <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
     </section>`).join("")}`;
   const PART = { sync: "#syncsec", offline: "#offsec", android: "[data-sec=android]", telegram: "#tgsec", interest: "#intsec", upi: "#upisec",
-    links: "#lnsec", staff: "#stsec", password: "[data-sec=password]", backups: "#bksec, #cbsec", companies: "[data-cid]" };
+    links: "#lnsec", staff: "#stsec", password: "[data-sec=password]", backups: "#tbsec, #bksec, #cbsec", companies: "[data-cid]" };
   const keep = PART[part] || "#syncsec";
   view.querySelectorAll(":scope > section.page").forEach((sec) => { sec.hidden = !sec.matches(keep); });
   view.classList.toggle("onepart", !["backups", "companies"].includes(part));
@@ -1833,7 +1864,7 @@ async function vSettings(part) {
     b = b || await api("/api/backups").catch(() => null);
     if (!b) return;
     const last = b.backups[0];
-    $("#bksec").innerHTML = `<div class="block-title">Backups <span>${b.backups.length} kept</span></div>
+    $("#bksec").innerHTML = `<div class="block-title">Bahi's backups (app data) <span>${b.backups.length} kept</span></div>
       <div class="info"><div>${last ? `Last backup ${ago(last.time)}.` : "No backup yet."} A copy is made every night at ${h(b.at)}, and the last ${b.keep} are kept in the <code>backups</code> folder next to your data on the server.</div>
       <div>Your books are always safe in Tally. The backup saves the synced copy, phone entries, follow-up notes, staff logins and settings, so nothing is lost if the server's disk fails. Download one now and then to keep a copy off the server.</div></div>
       ${b.backups.map((x) => `<div class="row"><div class="main"><div class="name">${new Date(x.time * 1000).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</div><div class="meta">${x.name.includes("before-restore") ? "Saved just before a restore" : "Backup"}, ${(x.size / 1048576).toFixed(1)} MB</div></div>
@@ -1864,6 +1895,7 @@ async function vSettings(part) {
   };
   showBackups();
   cloudSection().catch(() => {});
+  tallyBackupSection().catch(() => {});
   offlineSection();
   showStaff().catch(() => {});
   linksSection().catch(() => {});

@@ -645,3 +645,7 @@ dialog h3 { font-size: 18px; font-weight: 800; padding: 18px 18px 10px; }
 /* your account, top right */
 .avatar { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--cover); color: #fff; font: 800 15px/1 var(--sans); cursor: pointer; flex: none; margin-left: 2px; }
 .avatar:active { transform: scale(.94); }
+.steps { margin: 4px 16px 12px; padding-left: 20px; font-size: 14px; color: var(--ink-2); }
+.steps li { margin: 6px 0; }
+.steps code, .hint code { font-size: 12.5px; background: var(--sheet); padding: 1px 5px; border-radius: 5px; }
+details.hint summary { cursor: pointer; font-weight: 600; color: var(--cover); padding: 4px 0; }

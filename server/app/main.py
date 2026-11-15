@@ -34,6 +34,7 @@ import entries  # noqa: E402
 import bankrec  # noqa: E402
 import links  # noqa: E402
 import cloud  # noqa: E402
+import tallybk  # noqa: E402
 import upi  # noqa: E402
 import barcodes  # noqa: E402
 import threading  # noqa: E402
@@ -45,7 +46,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.16.0"
+APP_VERSION = "3.17.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -511,6 +512,23 @@ document.getElementById("a").addEventListener("change", function () {{
             r = json.loads(self.body(65536) or b"{}")
             entries.result(int(r.get("id", 0)), bool(r.get("ok")), str(r.get("error") or ""), bool(r.get("retry")))
             return self.send_json({"ok": True})
+        # TallyPrime's own backup files, copied from the Tally PC's backup folder (read there, never changed)
+        if path == "/agent/tallybackup" and method == "GET":
+            return self.send_json(tallybk.index())
+        if path == "/agent/tallybackup" and method == "POST":
+            try:
+                n = int(self.headers.get("Content-Length") or -1)
+                r = tallybk.receive(q.get("path", ""), int(q.get("size", -1)), float(q.get("mtime", 0)), int(q.get("offset", 0)),
+                                    self.rfile.read, n)
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            return self.send_json(r)
+        if path == "/agent/tallybackup/present" and method == "POST":
+            d = json.loads(self.body(4 << 20) or b"{}")
+            tallybk.present(d.get("files") or [], d.get("folder", ""), d.get("note", ""))
+            if d.get("new"):
+                cloud.mirror_tally_later(tallybk.DIR)
+            return self.send_json({"ok": True})
         if path == "/agent/heartbeat" and method == "POST":
             hb = json.loads(self.body(1 << 20) or b"{}")
             store.heartbeat(hb.get("companies", []), hb.get("current") or [])
@@ -833,6 +851,30 @@ document.getElementById("a").addEventListener("change", function () {{
                 st["files"], st["error"] = [], str(e)
             return self.send_json(st)
 
+        if path == "/api/tallybackups":
+            st = tallybk.status()
+            st["cloud"] = (cloud.status().get("tally") or {})
+            return self.send_json(st)
+        if path in ("/api/tallybackups/zip", "/api/tallybackups/file"):
+            try:
+                if path.endswith("/file"):
+                    p, name = tallybk.full(q.get("path", "")), os.path.basename(tallybk.clean(q.get("path", "")))
+                    if not os.path.isfile(p):
+                        return self.send_json({"error": "That file isn't on the server any more."}, 404)
+                else:
+                    tmp = os.path.join(tallybk.DATA_DIR, ".tally-backups-download.zip")
+                    p, name = tallybk.zip_to(tmp), "Tally backups " + time.strftime("%Y-%m-%d") + ".zip"
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream" if path.endswith("/file") else "application/zip")
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(os.path.getsize(p)))
+            self.end_headers()
+            with open(p, "rb") as fh:
+                shutil.copyfileobj(fh, self.wfile, 1 << 20)
+            return
         if path == "/api/backups":
             if method == "POST":
                 self.body(4096)

@@ -77,6 +77,11 @@ def run():
         for old in daily[KEEP:]:
             os.remove(os.path.join(DIR, old["name"]))
     cloud.upload_later(out)          # and a copy in Google Drive / OneDrive, when connected
+    try:
+        import tallybk
+        cloud.mirror_tally_later(tallybk.DIR)     # Tally's own backups too (only what's new goes up)
+    except Exception as e:
+        print("Tally backups not copied:", e, flush=True)
     return out
 
 

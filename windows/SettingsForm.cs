@@ -11,7 +11,7 @@ namespace BahiSync
     class SettingsForm : Form
     {
         readonly Dictionary<string, object> cfg;
-        readonly TextBox server = new TextBox(), token = new TextBox(), tally = new TextBox(), server2 = new TextBox(), token2 = new TextBox();
+        readonly TextBox server = new TextBox(), token = new TextBox(), tally = new TextBox(), server2 = new TextBox(), token2 = new TextBox(), tbk = new TextBox();
         readonly DateTimePicker from = new DateTimePicker();
         readonly CheckBox showToken = new CheckBox(), startup = new CheckBox();
         readonly Label result = new Label();
@@ -26,7 +26,7 @@ namespace BahiSync
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(580, 680);
+            ClientSize = new Size(580, 720);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             var t = new FlowLayoutPanel();
@@ -43,6 +43,23 @@ namespace BahiSync
             t.Controls.Add(showToken);
             AddField(t, "Tally address", "Leave as it is unless Tally uses another port (F1 > Settings > Connectivity in TallyPrime)", tally);
             tally.Text = Engine.Get(cfg, "TallyUrl", "http://localhost:9000");
+
+            AddField(t, "Tally backup folder (optional)", "The folder TallyPrime's Schedule Backup saves to (Alt+Y > Backup & Restore > Schedule Backup > Backup Data Path). Bahi copies each new backup file from it to the Bahi server, so you can download it and restore it in Tally. It only reads the folder.", tbk);
+            tbk.Width = 420;
+            tbk.Text = Engine.Get(cfg, "TallyBackupDir", "");
+            var browse = new Button(); browse.Text = "Browse ..."; browse.AutoSize = true;
+            browse.Click += delegate
+            {
+                using (var fb = new FolderBrowserDialog())
+                {
+                    fb.Description = "The folder TallyPrime saves its backups to";
+                    if (tbk.Text.Trim() != "" && System.IO.Directory.Exists(tbk.Text.Trim())) fb.SelectedPath = tbk.Text.Trim();
+                    if (fb.ShowDialog(this) == DialogResult.OK) tbk.Text = fb.SelectedPath;
+                }
+            };
+            var row = new FlowLayoutPanel(); row.AutoSize = true; row.WrapContents = false; row.Margin = new Padding(0);
+            t.Controls.Remove(tbk); row.Controls.Add(tbk); row.Controls.Add(browse);
+            t.Controls.Add(row);
 
             var lf = new Label(); lf.Text = "Sync vouchers from"; lf.AutoSize = true; lf.Font = new Font(Font, FontStyle.Bold); lf.Margin = new Padding(0, 10, 0, 2);
             t.Controls.Add(lf);
@@ -135,6 +152,13 @@ namespace BahiSync
             cfg["SyncToken"] = token.Text.Trim();
             cfg["TallyUrl"] = tally.Text.Trim() == "" ? "http://localhost:9000" : tally.Text.Trim();
             cfg["FromDate"] = from.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            string tb = tbk.Text.Trim();
+            if (tb != "" && !System.IO.Directory.Exists(tb))
+            {
+                result.ForeColor = Color.Firebrick; result.Text = "The Tally backup folder isn't there: " + tb;
+                return;
+            }
+            if (tb == "") cfg.Remove("TallyBackupDir"); else cfg["TallyBackupDir"] = tb;
             string s2 = Server2();
             if (s2 != "" && token2.Text.Trim() == "")
             {

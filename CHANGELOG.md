@@ -2,6 +2,16 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.17.0 (15 November 2026)
+
+- **Copies of TallyPrime's own backups.**
+  - Set TallyPrime 7.0's Schedule Backup to save into a folder (Alt+Y, Backup & Restore, Schedule Backup), and pick the same folder in Bahi Sync, Settings, *Tally backup folder*.
+  - Bahi Sync then copies each new backup file (like `TSDBK1800_100000.001`) to the Bahi server, exactly as Tally made it. When Google Drive or OneDrive is connected, it goes there too.
+  - Download a file, or all of them as a .zip, from Settings, Backups, *Tally's own backups*, and restore it in Tally with Data, Restore.
+  - Bahi Sync only reads that folder: it never writes, renames or deletes anything there, and never touches Tally's company data. A file Tally is still writing waits for the next round.
+  - Files go up in 16 MB pieces, so big backups also work through Cloudflare. Files Tally has since removed are kept on the server 30 more days.
+- Tally PC 3.20.
+
 ## 3.16.0 (15 November 2026)
 
 - **Log out from any screen:** a round button with your initial sits at the top right, next to refresh. It opens a menu with who is logged in (owner or staff), Settings, What's new, light or dark look, and **Log out**.

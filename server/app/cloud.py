@@ -57,7 +57,7 @@ def status():
     s = _state()
     on = bool(s.get("kind")) and os.path.exists(CONF)
     return {"on": on, "kind": s.get("kind", ""), "service": KINDS.get(s.get("kind", ""), ""), "folder": folder(),
-            "keep": KEEP, "last": s.get("last"), "connected": s.get("connected"), "rclone": available()}
+            "keep": KEEP, "last": s.get("last"), "connected": s.get("connected"), "rclone": available(), "tally": s.get("tally")}
 
 
 def token_from(text):
@@ -147,6 +147,29 @@ def upload(path):
             _note(False, f"{name} not copied: {e}")
             print("cloud backup failed:", e, flush=True)
             return False
+
+
+_mirroring = threading.Lock()
+
+
+def mirror_tally(src):
+    """Tally's own backup files, copied to "<folder>/Tally backups" (only new or changed files go up)."""
+    if not status()["on"] or not os.path.isdir(src) or not _mirroring.acquire(blocking=False):
+        return False
+    try:
+        _rclone("copy", src, f"cloud:{folder()}/Tally backups", "--exclude", ".part-*", timeout=6 * 3600)
+        s = _state(); s["tally"] = {"time": time.time(), "ok": True, "msg": "Tally backups copied"}; _save(s)
+        return True
+    except Exception as e:
+        s = _state(); s["tally"] = {"time": time.time(), "ok": False, "msg": f"Tally backups not copied: {e}"}; _save(s)
+        print("cloud copy of Tally backups failed:", e, flush=True)
+        return False
+    finally:
+        _mirroring.release()
+
+
+def mirror_tally_later(src):
+    threading.Thread(target=mirror_tally, args=(src,), daemon=True).start()
 
 
 def upload_later(path):

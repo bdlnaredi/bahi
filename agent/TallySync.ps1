@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.19"
+$AgentVersion = "3.20"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -476,6 +476,73 @@ function Server-Json([string]$method, [string]$path, $obj) {
     }
 }
 
+# ---------------------------------------------------------------------------------------------------------------
+# TallyPrime's own backups (Data > Backup & Restore > Schedule Backup, e.g. TSDBK1800_100000.001): copies of the
+# files in the backup folder go to the Bahi server, so they can be downloaded and restored in Tally with Data > Restore.
+# Only READS the backup folder (never writes, renames or deletes there) and never touches Tally's company data.
+function Mirror-TallyBackups {
+    $dir = if ($Cfg.PSObject.Properties["TallyBackupDir"]) { [string]$Cfg.TallyBackupDir } else { "" }
+    if (-not $dir) { return }
+    $stamp = Join-Path $PSScriptRoot ("TallySync.tbk" + $(if ($Target -eq 2) { "2" } else { "" }))
+    try { if (-not $script:Asked -and (Test-Path $stamp) -and ((Get-Date) - (Get-Item $stamp).LastWriteTime).TotalMinutes -lt 30) { return } } catch {}
+    try {
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+            [void](Server-Json "POST" "/agent/tallybackup/present" @{ files = @(); folder = $dir; note = "The folder isn't there" })
+            Log ("Tally backup folder not found: " + $dir) "Yellow"
+            return
+        }
+        $root = (Get-Item -LiteralPath $dir).FullName.TrimEnd("\", "/")
+        $have = (Server-Json "GET" "/agent/tallybackup" $null).files
+        $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction SilentlyContinue |
+                   Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::Hidden) -and $_.Name -notlike ".part-*" -and $_.Name -notlike "~*" } |
+                   Select-Object -First 3000)
+        $names = @(); $sent = 0; $bytes = 0L; $busy = 0
+        foreach ($f in $files) {
+            $rel = $f.FullName.Substring($root.Length).Replace("\", "/").TrimStart("/")
+            $names += $rel
+            $mt = [math]::Floor(($f.LastWriteTimeUtc - [datetime]'1970-01-01').TotalSeconds)
+            $h = $null; try { $h = $have.PSObject.Properties[$rel].Value } catch {}
+            if ($h -and [int64]$h.size -eq $f.Length -and [math]::Abs([double]$h.mtime - $mt) -lt 2) { continue }
+            if (((Get-Date).ToUniversalTime() - $f.LastWriteTimeUtc).TotalMinutes -lt 3) { $busy++; continue }   # Tally may still be writing it
+            if (Send-BackupFile $f $rel $mt) { $sent++; $bytes += $f.Length } else { $busy++ }
+        }
+        [void](Server-Json "POST" "/agent/tallybackup/present" @{ files = $names; folder = $root; new = ($sent -gt 0); note = $(if ($busy) { "$busy file(s) still being written by Tally: next time" } else { "" }) })
+        if ($sent) { Log ("Tally backups: copied $sent file(s), " + [math]::Round($bytes / 1MB, 1) + " MB, to the Bahi server") "Green" }
+        Set-Content -LiteralPath $stamp -Value (Get-Date -Format s)
+    } catch {
+        Log ("Tally backups not copied this time: " + (Error-Detail $_)) "Yellow"
+    }
+}
+
+function Send-BackupFile($f, [string]$rel, [double]$mt) {
+    $piece = 16MB      # Cloudflare refuses a request over 100 MB (and waits 100 s at most): the file goes in pieces
+    $fs = $null
+    try {
+        # read-only, and only if Tally isn't writing to it (FileShare Read: opening fails while it's open for writing)
+        $fs = [System.IO.File]::Open($f.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    } catch { return $false }
+    try {
+        $size = $fs.Length; $off = 0L; $buf = New-Object byte[] $piece
+        do {
+            $n = 0
+            while ($n -lt $piece) { $r = $fs.Read($buf, $n, $piece - $n); if ($r -le 0) { break }; $n += $r }
+            $url = "$Server/agent/tallybackup?path=" + [uri]::EscapeDataString($rel) + "&size=$size&mtime=$mt&offset=$off"
+            $res = $null
+            for ($try = 1; $try -le 3 -and -not $res; $try++) {
+                try {
+                    $wc = Server-Client
+                    $wc.Headers.Add("Content-Type", "application/octet-stream")
+                    if ($n -eq $piece) { $chunk = $buf } else { $chunk = New-Object byte[] $n; [Array]::Copy($buf, $chunk, $n) }
+                    $res = [System.Text.Encoding]::UTF8.GetString($wc.UploadData($url, "POST", $chunk)) | ConvertFrom-Json
+                } catch { if ($try -ge 3) { throw }; Start-Sleep -Seconds (5 * $try) }
+            }
+            if ($res.restart) { $fs.Position = 0; $off = 0L; continue }
+            $off += $n
+        } while ($off -lt $size)
+        return $true
+    } finally { $fs.Close() }
+}
+
 function Send-Part([string]$run, [string]$kind, [byte[]]$data) {
     $wc = Server-Client
     $wc.Headers.Add("Content-Type", "application/octet-stream")
@@ -562,6 +629,7 @@ Update-Task
 try {
     $sched = Server-Json "GET" ("/agent/schedule?force=" + $(if ($Force -or $Now) { "1" } else { "0" })) $null
     if (-not $sched.run) {
+        Mirror-TallyBackups
         Send-Heartbeat
         if ($sched.why -eq "paused" -and ($Force -or $Verbose)) { Log "Syncing is paused in the app (Reports, Settings). Nothing was sent." "Yellow" }
         elseif ($Verbose) { Log ("Not syncing now (" + $sched.why + ")") }
@@ -924,6 +992,7 @@ foreach ($co in $companies) {
     }
 }
 
+Mirror-TallyBackups
 Send-Heartbeat
 if ($script:Asked) { Log ("Sync finished for " + $companies.Count + " compan" + $(if ($companies.Count -eq 1) { "y" } else { "ies" }) + " open in Tally.") }
 End-Run $exitCode

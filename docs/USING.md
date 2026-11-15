@@ -382,6 +382,19 @@ Each backup is a `.zip` file in the `backups` folder next to your data on Unraid
 
 Before restoring, Bahi saves a copy of everything as it is right now (listed as *Saved just before a restore*), so if you picked the wrong one you can restore that copy and be back where you were. Restoring never touches Tally. Anything entered in Tally after the backup comes in at the next sync, and phone entries that already went into Tally aren't sent again. If the backup had a different app password, log in with that one afterwards. A backup from an older version of Bahi brings back your settings and notes; the books themselves are filled in again by the next sync.
 
+### Copies of TallyPrime's own backups
+
+Bahi can also keep copies of the backup files **TallyPrime itself** makes, so you can restore your Tally data in Tally exactly as it was.
+
+1. In TallyPrime (7.0 or later): **Alt+Y** (Data) → **Backup & Restore** → **Schedule Backup**. Set **Backup Data Path** to a folder of its own (for example `C:\TallyBackups`), choose your companies (or All Items), **Daily** at a time the PC is on, and save with **Ctrl+A**.
+2. On the Tally PC: **Bahi Sync** → **Settings** → **Tally backup folder** → **Browse** to the same folder → **Save**.
+
+From then on, every new backup file Tally makes (for example `TSDBK1800_100000.001`) is copied to the Bahi server within about 30 minutes, and to Google Drive or OneDrive when connected. **Settings → Backups → Tally's own backups** lists them; download one, or all as a .zip.
+
+To restore: put the file(s) in a folder on the Tally PC, then in TallyPrime **Alt+Y** → **Backup & Restore** → **Restore**, with that folder as the backup path. Choose a restore destination that isn't your working data folder, so nothing current is overwritten, and check the restored company before using it.
+
+Bahi Sync only reads that folder. It never writes, renames or deletes anything in it, and never touches Tally's company data.
+
 ## Ledger statement PDF
 
 <img src="images/pdf-ledger.png" width="420" alt="Ledger Account PDF">
