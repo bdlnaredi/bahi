@@ -717,3 +717,11 @@ table.gt.cmp td.dn { color: var(--cr); font-weight: 700; }
 .form .three { display: grid; grid-template-columns: 1fr 1fr 0.8fr; gap: 10px; }
 .form .three label, .form .three input { min-width: 0; width: 100%; box-sizing: border-box; }
 .qtotal { font-size: 14.5px; color: var(--ink-2); padding: 10px 0; line-height: 1.6; }
+/* GSTR-3B: one card per table, every head on its own line (no side-scrolling on phones) */
+.g3 { padding: 4px 16px 8px; margin-bottom: 12px; }
+.g3h { padding: 12px 0 8px; border-bottom: 1px solid var(--rule); }
+.g3h b { display: block; font-size: 1rem; }
+.g3h span { font-size: .82rem; color: var(--ink-3); }
+.g3r { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+.g3r:last-child { border-bottom: 0; }
+.g3t { font-weight: 700; }

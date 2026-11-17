@@ -725,17 +725,19 @@ async function vGstr(which, month) {
       <section class="page"><div class="tscroll"><table class="gt"><tr><th>HSN</th><th>Rate</th><th>Qty</th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
         ${d.hsn.map((r) => `<tr><td>${h(r.hsn)}</td><td>${r.rate ?? "?"}%</td><td>${nf2.format(r.qty)} ${h(r.unit)}</td><td>${n2(r.taxable)}</td>${taxCells({ ...r, Cess: 0 })}</tr>`).join("") || '<tr><td colspan="7">No stock lines this month.</td></tr>'}</table></div></section>`;
   } else {
-    const row = (label, r, extra = "") => `<tr><th>${label}</th><td>${extra}</td>${taxCells(r)}</tr>`;
+    const heads = (r) => [["IGST", r.IGST], ["CGST", r.CGST], ["SGST / UTGST", r.SGST], ...(r.Cess ? [["Cess", r.Cess]] : [])];
+    const card = (title, sub, rows, total, tlabel) => `<section class="page g3"><div class="g3h"><b>${title}</b><span>${sub}</span></div>
+      ${rows.map(([k, v]) => `<div class="g3r"><span>${k}</span><span>${rupees(v || 0)}</span></div>`).join("")}
+      ${total !== undefined ? `<div class="g3r g3t"><span>${tlabel}</span><span>${rupees(total || 0)}</span></div>` : ""}</section>`;
     body = `<section class="herocards">
         <div class="bold out"><div class="label">Tax on sales</div><div class="big">${short(d.out_total)}</div><div class="go">on ${short(d.out.taxable)} taxable</div></div>
         <div class="bold in"><div class="label">Input credit</div><div class="big">${short(d.itc_total)}</div><div class="go">on purchases of ${short(d.purchases)}</div></div></section>
       <section class="bold ${d.net_total > 0 ? "nil" : "in"}" style="margin-bottom:14px"><div class="label">${d.net_total > 0 ? "Left to pay after input credit" : "Input credit left over"}</div><div class="big">${rupees(Math.abs(d.net_total))}</div>
         <div class="go" style="opacity:.85">IGST ${n2(d.net.IGST)} · CGST ${n2(d.net.CGST)} · SGST ${n2(d.net.SGST)}</div></section>
-      <section class="page"><div class="tscroll"><table class="gt"><tr><th></th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th>${d.out.Cess || d.itc.Cess ? "<th>Cess</th>" : ""}</tr>
-        ${row("3.1(a) Outward taxable supplies", d.out, n2(d.out.taxable))}
-        <tr><th>3.1(c) Nil-rated, exempt</th><td>${n2(d.nil)}</td><td></td><td></td><td></td></tr>
-        ${row("4. Input tax credit", d.itc)}
-        ${row("Net (3.1 less 4)", d.net)}</table></div></section>`;
+      ${card("3.1(a) Outward taxable supplies", "Sales with tax, less credit notes", [["Taxable value", d.out.taxable], ...heads(d.out)], d.out_total, "Total tax")}
+      ${card("3.1(c) Nil-rated and exempt", "Sales with no GST", [["Value", d.nil]])}
+      ${card("4. Input tax credit (ITC)", "GST on purchases and expenses", heads(d.itc), d.itc_total, "Total credit")}
+      ${card("Left to pay (3.1 less 4)", "Head by head; a minus figure is credit carried forward", heads(d.net), d.net_total, "Total")}`;
   }
   view.innerHTML = head + body + `<p class="hint" style="margin:0 4px 14px">Put together from the vouchers synced from Tally: tax as posted on Tally's GST ledgers, rates as Tally gave each line. Use it to check, then file from Tally's own GSTR reports or with your CA. Reverse charge, amendments and the portal's set-off order aren't covered.</p>`;
   view.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { location.hash = `#/gstr/${b.dataset.w}/${month}`; });

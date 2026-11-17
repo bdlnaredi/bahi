@@ -2,6 +2,10 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.21.1 (17 November 2026)
+
+- **GSTR-3B on phones:** the table was wider than the screen, so the CGST and SGST columns were hidden off to the right and the figures looked out of place. Each part (3.1(a), 3.1(c), 4 and what's left to pay) is now its own card with IGST, CGST, SGST and the total each on its own line.
+
 ## 3.21.0 (17 November 2026)
 
 - **App lock** (Android app, Settings, Android app): Bahi asks for your fingerprint, face or phone PIN when it opens, and when you come back to it after more than a minute.
