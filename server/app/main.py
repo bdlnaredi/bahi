@@ -35,6 +35,8 @@ import bankrec  # noqa: E402
 import links  # noqa: E402
 import cloud  # noqa: E402
 import tallybk  # noqa: E402
+import activity
+import gstr2b
 import insights  # noqa: E402
 import gstr  # noqa: E402
 import quotes  # noqa: E402
@@ -50,7 +52,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.23.0"
+APP_VERSION = "3.24.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -185,6 +187,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ helpers
     def send_json(self, obj, status=200, headers=None):
+        self._status = status
         body = json.dumps(obj, default=str).encode()
         gz = "gzip" in (self.headers.get("Accept-Encoding") or "") and len(body) > 1024
         if gz:
@@ -257,6 +260,7 @@ class Handler(BaseHTTPRequestHandler):
         data = self.rfile.read(n) if n else b""
         if self.headers.get("X-Gzip") == "1":
             data = gzip.decompress(data)
+        self._raw = data
         return data
 
     def cookie(self, name):
@@ -289,7 +293,8 @@ class Handler(BaseHTTPRequestHandler):
                 "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
                 "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts",
                 "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
-                "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock"}
+                "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts", "gstr_twob": "accounts",
+                "einvoice": "accounts"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -351,7 +356,17 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/agent/"):
                 return self.agent(method, path, q)
             if path.startswith("/api/"):
-                return self.api(method, path, q)
+                self._status, self._raw = 0, b""
+                r = self.api(method, path, q)
+                if method == "POST" and self._status and self._status < 400 and not re.search(r"/(bulk|logout|find|test)$", path):
+                    try:                        # the owner's activity log: who changed what
+                        who = (getattr(self, "user", None) or {}).get("name") if path != "/api/login" else \
+                            (json.loads(self._raw or b"{}").get("name") or "Owner")
+                        activity.log(who or "Owner", path, self._raw, {c["id"]: c["name"] for c in store.companies()},
+                                     self.headers.get("X-Forwarded-For") or self.client_address[0])
+                    except Exception as e:
+                        print("activity log:", e, flush=True)
+                return r
             if path.startswith("/p/") and method == "GET":
                 return self.party_page(path, q)
             if method == "GET":
@@ -720,6 +735,10 @@ document.getElementById("a").addEventListener("change", function () {{
             return self.send_json({"error": "login required"}, 401)
 
         u = self.user
+        if path == "/api/activity":
+            if not u["owner"]:
+                return self.send_json({"error": "Only the owner sees this."}, 403)
+            return self.send_json(activity.listing(unquote(q.get("user", ""))))
         if path == "/api/whatsnew":
             here = os.path.dirname(os.path.abspath(__file__))
             text = ""
@@ -1115,6 +1134,19 @@ document.getElementById("a").addEventListener("change", function () {{
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
 
+        mp = re.match(r"^/api/c/(\d+)/gstr_twob(?:/(\d{4}-\d{2})/delete)?$", path)
+        if mp and method == "POST":             # GSTR-2B file from the GST portal (kept beside Tally, never in it)
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "gstr_twob", q, None):
+                return self.send_json({"error": "You don't have access to this."}, 403)
+            if mp.group(2):
+                return self.send_json(gstr2b.remove(cid, mp.group(2)))
+            try:
+                period = gstr2b.upload(cid, self.body(40 * 1024 * 1024), unquote(self.headers.get("X-Filename") or ""))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+            return self.send_json(gstr2b.match(cid, period))
+
         mp = re.match(r"^/api/c/(\d+)/quotes(?:/(\d+)(?:/(status|delete))?)?$", path)
         if mp and method == "POST":
             cid = int(mp.group(1))
@@ -1265,6 +1297,19 @@ document.getElementById("a").addEventListener("change", function () {{
             return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m)
         if what == "reorder":
             return insights.reorder(cid)
+        if what == "yearend":
+            return insights.yearend(cid)
+        if what == "gstr_twob":
+            p = q.get("period", "")
+            if not re.match(r"^\d{4}-\d{2}$", p):
+                ps = gstr2b.periods(cid)
+                p = ps[0]["period"] if ps else time.strftime("%Y-%m")
+            return gstr2b.match(cid, p)
+        if what == "einvoice":
+            m = q.get("month", "") or time.strftime("%Y-%m")
+            if not re.match(r"^\d{4}-\d{2}$", m):
+                return ({"error": "Choose a month."}, 400)
+            return gstr.einvoice_status(cid, m)
         if what == "cashflow":
             return insights.cashflow(cid, 30)
         if what == "lostcust":

@@ -813,6 +813,116 @@ async function vReorder() {
   view.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied."); } catch (e) { toast("Couldn't copy here."); } });
 }
 
+/* ---------------------------------------------------------------- GSTR-2B matching */
+async function vTwoB(period) {
+  setTitle(true);
+  const d = await api(cpath("gstr_twob", period ? { period } : {}));
+  const tax = (x) => (x.IGST || 0) + (x.CGST || 0) + (x.SGST || 0) + (x.Cess || 0);
+  const head = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-2B matching</h1>
+    ${d.periods.length ? `<div class="seg" role="tablist" style="overflow-x:auto">${d.periods.slice(0, 6).map((p) => `<button data-p="${p.period}" aria-selected="${p.period === d.period}">${monthName(p.period).replace(/ (\d{4})$/, " ’$1").replace("’20", "’")}</button>`).join("")}</div>` : ""}`;
+  const upload = `<section class="page g3"><div class="g3h"><b>${d.have ? "Upload another month" : "Upload your GSTR-2B"}</b><span>On the GST portal: Returns, GSTR-2B, choose the month, Download JSON. Upload that file (or the zip) here.</span></div>
+    <form class="form" id="tbf" style="padding:8px 0 4px"><input type="file" id="tbfile" accept=".json,.zip,application/json,application/zip" required>
+    <button class="btn primary" type="submit">Upload and match</button><p class="hint" id="tbmsg"></p></form></section>`;
+  if (!d.have) {
+    view.innerHTML = head + upload + `<p class="hint" style="margin:0 4px 14px">Bahi matches each supplier bill in GSTR-2B with your purchase bills in Tally by the supplier's GSTIN and bill number, and compares the tax. The file stays with Bahi; nothing goes into Tally.</p>`;
+  } else {
+    const T = d.totals;
+    const row = (x, extra = "") => `<div class="row"><div class="main"><div class="name">${h(x.supplier || x.party || x.gstin)}</div>
+      <div class="meta">${h(x.kind || x.vtype || "")} ${h(x.number || x.ref)}${x.date ? ", " + fdate(x.date) : ""}${x.gstin ? " · " + h(x.gstin) : ""}</div>${extra}</div>
+      <div class="end"><b>${rupees(Math.abs(x.tax ?? tax(x)))}</b><div class="meta">tax</div></div></div>`;
+    const sec = (k, title, sub, rows, cls = "") => `<section class="page gsec"><button class="row" data-open="${k}" aria-expanded="false"><div class="main"><div class="name ${cls}">${title} <span class="cnt2">${rows.length}</span></div><div class="meta">${sub}</div></div><span class="chev"></span></button>
+      <div id="tb_${k}" hidden>${rows.join("") || '<div class="empty">None.</div>'}</div></section>`;
+    view.innerHTML = head + `<p class="subtitle">${d.count} supplier documents in GSTR-2B for ${monthName(d.period)}</p>
+      <section class="herocards">
+        <div class="bold in"><div class="label">Matched with Tally</div><div class="big">${short(T.matched)}</div><div class="go">${d.matched.length} bills, tax agrees</div></div>
+        <div class="bold ${d.not_in.length ? "out" : "nil"}"><div class="label">Credit at risk</div><div class="big">${short(T.at_risk)}</div><div class="go">${d.not_in.length} bill${d.not_in.length === 1 ? "" : "s"} in Tally, not in 2B</div></div></section>
+      ${sec("differ", "Tax differs", "In both, but the tax in Tally isn't what the supplier filed", d.differ.map((r) => row({ ...r.doc, tax: r.tax_2b },
+        `<div class="meta od">Tally ${rupees(Math.abs(r.tax_tally))} (${h(r.tally.vtype)} ${h(r.tally.ref || r.tally.number)}, ${fdate(r.tally.date)}), difference ${rupees(Math.abs(r.diff))}</div>`)), d.differ.length ? "od" : "")}
+      ${sec("missing", "In 2B, not in Tally", "The supplier filed it: enter the bill in Tally, or check the bill number", d.missing.map((x) => row(x, x.itc ? "" : '<div class="meta od">ITC not available</div>')))}
+      ${sec("not_in", "In Tally, not in 2B", "The supplier hasn't filed it yet: ask them, or the credit can't be taken", d.not_in.map((v) => row(v, `<a class="meta" href="#/voucher/${v.id}">Open the bill</a>`)), d.not_in.length ? "od" : "")}
+      ${d.no_gstin.length ? sec("nogstin", "Bills with GST but no supplier GSTIN", "Add the GSTIN on the supplier's ledger in Tally to match them", d.no_gstin.map((v) => row(v, `<a class="meta" href="#/voucher/${v.id}">Open the bill</a>`))) : ""}
+      ${sec("matched", "Matched", "Same bill, same tax", d.matched.map((r) => row({ ...r.doc, tax: r.tax_2b })))}
+      <p class="hint" style="margin:0 4px 10px">Uploaded ${new Date(d.uploaded * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}${d.file ? ` from ${h(d.file)}` : ""}. <button class="linkbtn" id="tbdel">Remove this month's file</button></p>
+      ${upload}<p class="hint" style="margin:0 4px 14px">Matched on the supplier's GSTIN and their bill number (the Supplier Invoice No. in Tally; the voucher number when that's empty), looking at Tally bills from six months before to a month after. Tax agrees within ₹1.</p>`;
+    view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#tb_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+    $("#tbdel").onclick = async () => {
+      if (!confirm(`Remove the GSTR-2B file for ${monthName(d.period)}?`)) return;
+      await api(cpath(`gstr_twob/${d.period}/delete`), { method: "POST", body: "{}" }); location.hash = "#/twob";
+    };
+  }
+  view.querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { location.hash = "#/twob/" + b.dataset.p; });
+  $("#tbf").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = $("#tbfile").files[0]; if (!file) return;
+    $("#tbmsg").textContent = "Reading the file…";
+    try {
+      const r = await fetch(cpath("gstr_twob"), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
+      location.hash = "#/twob/" + j.period; if (period === j.period) route();
+    } catch (err) { $("#tbmsg").textContent = err.message; }
+  };
+}
+
+/* ---------------------------------------------------------------- e-invoice and e-way bill status */
+async function vEinvoice(month) {
+  setTitle(true);
+  if (!month) month = new Date().toISOString().slice(0, 7);
+  const d = await api(cpath("einvoice", { month }));
+  const row = (r, note) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.party || r.vtype)}</div>
+    <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}${r.gstin ? " · " + h(r.gstin) : ""}</div>${note ? `<div class="meta od">${note}</div>` : ""}</div>
+    <div class="end"><b>${rupees(r.value)}</b></div></a>`;
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">E-invoice and e-way bills</h1>
+    <div class="monthnav"><button class="btn ic" id="mprev" aria-label="Previous month">‹</button><b>${monthName(month)}</b><button class="btn ic" id="mnext" aria-label="Next month">›</button></div>
+    <section class="herocards">
+      <div class="bold ${d.need_irn.length ? "out" : "in"}"><div class="label">Need an e-invoice</div><div class="big">${d.need_irn.length}</div><div class="go">${d.uses_einvoice ? `${d.with_irn} of ${d.b2b} B2B have one` : "you don't issue e-invoices"}</div></div>
+      <div class="bold ${d.need_ewb.length ? "out" : "in"}"><div class="label">Need an e-way bill</div><div class="big">${d.need_ewb.length}</div><div class="go">${d.with_ewb} have one</div></div></section>
+    ${d.uses_einvoice ? `<div class="setgroup">Sales to registered buyers without an e-invoice (IRN)</div>
+      <section class="page">${d.need_irn.map((r) => row(r, r.age > 25 ? `${r.age} days old: e-invoices must be made within 30 days of the invoice date (for turnover over ₹10 crore)` : "")).join("") || '<div class="empty">Every B2B sale has an e-invoice. 👍</div>'}</section>` : ""}
+    <div class="setgroup">Goods over ${rupees(d.ewb_limit)} without an e-way bill</div>
+    <section class="page">${d.need_ewb.map((r) => row(r, "")).join("") || '<div class="empty">None. 👍</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">From the e-invoice and e-way bill details Tally keeps on each voucher. ${d.uses_einvoice ? "E-invoice is checked because your company already has e-invoices in Tally." : "E-invoice isn't checked: no voucher in Tally has one, so your company may not need them (needed above ₹5 crore turnover)."} An e-way bill is listed for goods worth more than ${rupees(d.ewb_limit)}; some goods and short distances within a state don't need one. Check with your CA if unsure.</p>`;
+  $("#mprev").onclick = () => { location.hash = `#/einvoice/${monthShift(month, -1)}`; };
+  $("#mnext").onclick = () => { location.hash = `#/einvoice/${monthShift(month, 1)}`; };
+}
+
+/* ---------------------------------------------------------------- year-end checklist */
+async function vYearEnd() {
+  setTitle(true);
+  const d = await api(cpath("yearend"));
+  const icon = { ok: "✅", warn: "⚠️", info: "🔎" };
+  const val = (v) => typeof v === "number" ? rupees(v) : h(v || "");
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Year-end checklist</h1>
+    <p class="subtitle">The year closes on ${fdate(d.fy_end)}${d.days_left >= 0 ? `, in ${d.days_left} day${d.days_left === 1 ? "" : "s"}` : ""}. ${d.warn ? `${d.warn} to fix` : "Nothing to fix"}${d.info ? `, ${d.info} to look at` : ""}.</p>
+    ${d.checks.map((c, i) => `<section class="page gsec ye ye-${c.status}"><button class="row" data-open="${i}" aria-expanded="false" ${c.rows.length ? "" : "disabled"}>
+      <span class="ye-i">${icon[c.status]}</span><div class="main"><div class="name">${h(c.title)}${c.count ? ` <span class="cnt2">${c.count}</span>` : ""}</div><div class="meta">${h(c.detail)}</div></div>${c.rows.length ? '<span class="chev"></span>' : ""}</button>
+      <div id="ye_${i}" hidden>${c.rows.map((r) => `<div class="row"><div class="main"><div class="name">${h(r.name)}</div>${r.note ? `<div class="meta">${h(r.note)}</div>` : ""}</div><div class="end">${val(r.value)}</div></div>`).join("")}
+        ${c.count > c.rows.length ? `<div class="meta" style="padding:6px 16px">and ${c.count - c.rows.length} more</div>` : ""}
+        ${c.link ? `<div class="actions" style="padding:6px 14px 12px"><a class="btn" href="${c.link}">Open</a></div>` : ""}</div></section>`).join("")}
+    <p class="hint" style="margin:0 4px 14px">Bahi only reads your Tally data: make any corrections in Tally, then sync. Go through this with your CA before closing the books.</p>`;
+  view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#ye_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+}
+
+/* ---------------------------------------------------------------- staff activity (owner) */
+async function vActivity(who) {
+  setTitle(true);
+  who = who ? decodeURIComponent(who) : "";
+  const d = await api("/api/activity" + (who ? "?user=" + enc(who) : ""));
+  let last = "";
+  const rows = d.items.map((r) => {
+    const t = new Date(r.t * 1000), day = t.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    const hd = day !== last ? `</section><div class="setgroup">${day}</div><section class="page">` : "";
+    last = day;
+    return hd + `<div class="row"><div class="main"><div class="name">${h(r.text)}</div><div class="meta">${h(r.user)}${r.company ? " · " + h(r.company) : ""}</div></div>
+      <div class="end meta">${t.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</div></div>`;
+  }).join("");
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Staff activity</h1>
+    <form class="form"><label>Person<select id="actwho"><option value="">Everyone</option>${d.people.map((p) => `<option ${p === who ? "selected" : ""}>${h(p)}</option>`).join("")}</select></label></form>
+    <section class="page">${rows || '<div class="empty">Nothing yet. Every entry, reminder, quotation and change made in the app shows here.</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">Only you, the owner, see this. Viewing reports isn't listed, only changes and logins. The newest 5,000 are kept.</p>`;
+  $("#actwho").onchange = (e) => { location.hash = "#/activity" + (e.target.value ? "/" + enc(e.target.value) : ""); };
+}
+
 /* ---------------------------------------------------------------- sales target (Home card) */
 function targetCard(t) {
   const set = S.me.owner ? `<button class="linkbtn" onclick="setTarget()">${t.target ? "Change" : "Set a monthly sales target"}</button>` : "";
@@ -1778,6 +1888,10 @@ function vReports() {
     ["#/lost", "Customers who stopped buying", "Regular buyers who haven't bought for a while, to call back", can("dues")],
     ["#/statements", "Month-end statements", "Send every customer their statement on WhatsApp, one tap each", can("dues")],
     ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
+    ["#/twob", "GSTR-2B matching", "Upload the GSTR-2B from the GST portal and match it with your purchase bills", can("accounts")],
+    ["#/einvoice", "E-invoice and e-way bills", "Sales that seem to need an e-invoice or e-way bill but have none", can("accounts")],
+    ["#/yearend", "Year-end checklist", "What to tidy in Tally before closing the year", can("accounts")],
+    ["#/activity", "Staff activity", "Who made which entry, reminder or change in the app, and when", S.me.owner],
     ["#/quotes", "Quotations", "Make and share quotations; turn one into a sales order", can("e_sales") || can("e_order")],
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
@@ -3230,6 +3344,10 @@ async function route() {
       case "gstr": await vGstr(parts[1], parts[2]); break;
       case "reorder": await vReorder(); break;
       case "cashflow": await vCashflow(); break;
+      case "twob": await vTwoB(parts[1]); break;
+      case "einvoice": await vEinvoice(parts[1]); break;
+      case "yearend": await vYearEnd(); break;
+      case "activity": await vActivity(parts[1]); break;
       case "lost": await vLost(); break;
       case "statements": await vStatements(); break;
       case "pricelist": await vPriceList(); break;

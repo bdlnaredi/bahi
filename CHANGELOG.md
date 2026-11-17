@@ -2,6 +2,18 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.24.0 (17 November 2026)
+
+- **GSTR-2B matching** (Reports): upload the GSTR-2B JSON (or zip) from the GST portal. Bahi matches each supplier bill with your purchase bills in Tally by GSTIN and bill number, and sorts them into:
+  - **Matched:** same bill, same tax.
+  - **Tax differs:** the bill is in both, but the tax doesn't agree.
+  - **In 2B, not in Tally:** enter the bill in Tally, or check its number.
+  - **In Tally, not in 2B:** the supplier hasn't filed it, so that credit is at risk.
+- **E-invoice and e-way bills** (Reports): sales for the month that seem to need an e-invoice (sales to registered buyers, once your company issues e-invoices) or an e-way bill (goods over ₹50,000) but have none in Tally.
+- **Year-end checklist** (Reports): vouchers that don't balance, stock below zero, cash below zero, suspense balances, bank accounts not reconciled, bills unpaid for over a year, advances, GST ledger balances, items without HSN or GST, and customers without a phone number. Each has the list and a link.
+- **Staff activity** (Reports, owner only): who made which entry, reminder, quotation or change in the app, and when, with a filter by person. Logins are listed too.
+- Backups now include GSTR-2B files, statement marks, sales targets and the activity log.
+
 ## 3.23.0 (17 November 2026)
 
 - **Cash flow forecast** (Reports): cash and bank over the next 30 days, as a chart and day by day.

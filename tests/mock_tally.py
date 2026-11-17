@@ -26,6 +26,7 @@ VTYPES = [("Sales", ""), ("Purchase", ""), ("Receipt", ""), ("Payment", ""), ("J
 DEBTORS = [("Sharma & Sons", "Sundry Debtors", 45000), ("Gupta Hardware", "Sundry Debtors", 0),
            ("Patel Enterprises", "Mumbai Debtors", 120000), ("Shree Ganesh Traders", "Sundry Debtors", 0),
            ("Krishna Agencies", "Mumbai Debtors", 18000), ("Verma Electricals", "Sundry Debtors", 0)]
+SUP_GSTIN = {"Asian Paints Distributor": "27AAACA3333M1Z4", "Supreme Pipes Ltd": "27AAACS1111K1Z2", "Jindal Steel Depot": "27AAACJ2222L1Z3"}
 CREDITORS = [("Asian Paints Distributor", 80000), ("Supreme Pipes Ltd", 0), ("Jindal Steel Depot", 25000)]
 LEDGERS = {  # name: (parent, opening dr-positive)
     "Cash": ("Cash-in-Hand", 50000), "HDFC Bank": ("Bank Accounts", 300000), "SBI OD": ("Bank OD A/c", -150000),
@@ -285,8 +286,8 @@ def xml_voucher(v):
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
             + ("<ISREVERSECHARGEAPPLICABLE>Yes</ISREVERSECHARGEAPPLICABLE>" if v.get("rcm") else "<ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>")
             + ("<STATADJUSTMENTTYPE>Increase of Tax Liability &amp; Input Tax Credit</STATADJUSTMENTTYPE><ADDITIONALNATURE>Purchase from Unregistered Dealer</ADDITIONALNATURE>" if v.get("rcm_journal") else "")
-            + f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ""}</REFERENCE>'
-            f'<PARTYGSTIN>{"27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else ""}</PARTYGSTIN>'
+            + f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ("INV/26-27/" + v["no"].split("/")[-1].zfill(4)) if v["kind"] == "purchase" else ""}</REFERENCE>'
+            f'<PARTYGSTIN>{SUP_GSTIN.get(v["party"], "27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else "")}</PARTYGSTIN>'
             + (f'<BASICBUYERNAME>{escape(COMPANY if v["kind"] == "purchase" else v["party"])}</BASICBUYERNAME><STATENAME>Maharashtra</STATENAME><PLACEOFSUPPLY>Maharashtra</PLACEOFSUPPLY>'
                f'<BASICBUYERADDRESS.LIST>{"".join(f"<BASICBUYERADDRESS>{escape(a)}</BASICBUYERADDRESS>" for a in ADDR.get(v["party"], []))}</BASICBUYERADDRESS.LIST>'
                f'<BASICDUEDATEOFPYMT>30 Days</BASICDUEDATEOFPYMT><BASICSHIPDOCUMENTNO>LR-{v["no"][2:]}</BASICSHIPDOCUMENTNO>'

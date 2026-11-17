@@ -526,3 +526,86 @@ def price_list(cid, group="", with_gst=False, in_stock=False):
     all_groups = sorted({g for g in parent.values() if g})
     return {"groups": [{"name": g, "items": sorted(v, key=lambda x: x["name"].lower())} for g, v in sorted(groups.items())],
             "all_groups": all_groups, "count": sum(len(v) for v in groups.values()), "gst": bool(with_gst)}
+
+
+# ------------------------------------------------------------------ year-end checklist
+def yearend(cid):
+    """Things to tidy in Tally before closing the year. Read-only: each check says where to look, nothing is
+    changed. Statuses: ok, warn (worth fixing), info (worth a look)."""
+    import bankrec
+    today = date.today()
+    fy_end = date(today.year + (today.month > 3), 3, 31)
+    out = []
+
+    def add(key, title, status, detail, link="", rows=None):
+        out.append({"key": key, "title": title, "status": status, "detail": detail, "link": link, "rows": (rows or [])[:30],
+                    "count": len(rows or [])})
+    with store.conn() as c:
+        co = dict(c.execute("SELECT name, unbalanced FROM company WHERE id=?", (cid,)).fetchone())
+        led = [dict(r) for r in c.execute("SELECT name, chain, closing, mobile, phone, gstin, taxtype, gst_head FROM ledger WHERE company_id=?", (cid,))]
+        n_unbal = c.execute("SELECT COUNT(*) FROM voucher WHERE company_id=? AND balanced=0", (cid,)).fetchone()[0]
+        neg = [dict(r) for r in c.execute("""SELECT name, closing_qty, unit FROM stock WHERE company_id=? AND closing_qty < -0.0005
+            ORDER BY closing_qty""", (cid,))]
+        nohsn = [r["name"] for r in c.execute("""SELECT name FROM stock WHERE company_id=? AND (COALESCE(hsn,'')='' OR gst IS NULL)
+            ORDER BY name""", (cid,))]
+        src = _source(c, cid)
+        old = []
+        for kind in ("receivable", "payable"):
+            for p in store._party_bills(c, cid, kind, src):
+                for b in p["bills"]:
+                    if b["amount"] > 0.5 and b.get("date") and b["date"] < (today - timedelta(days=365)).isoformat():
+                        old.append({"party": p["name"], "ref": b["ref"], "date": b["date"], "amount": round(b["amount"], 2), "kind": kind})
+    ch = lambda l, g: g in (l["chain"] or "")
+    add("unbalanced", "Vouchers that don't balance", "warn" if n_unbal else "ok",
+        f"{n_unbal} voucher{'s' if n_unbal != 1 else ''} in Tally {'have' if n_unbal != 1 else 'has'} debit and credit unequal." if n_unbal else "Every voucher balances.", "#/check")
+    add("negstock", "Items with stock below zero", "warn" if neg else "ok",
+        "Usually a purchase not entered yet, or a sale entered twice. The closing stock value will be wrong." if neg else "No item is below zero.",
+        "#/stock", [{"name": r["name"], "value": f"{r['closing_qty']:g} {r['unit'] or ''}"} for r in neg])
+    cash_neg = [l for l in led if ch(l, "|Cash-in-Hand|") and l["closing"] < -0.5]
+    add("cash", "Cash in hand below zero", "warn" if cash_neg else "ok",
+        "Cash can't go below zero: a receipt is missing, or a payment was entered in cash instead of bank." if cash_neg else "Cash balances are fine.",
+        "#/cashbook", [{"name": l["name"], "value": l["closing"]} for l in cash_neg])
+    susp = [l for l in led if ch(l, "|Suspense A/c|") and abs(l["closing"]) > 0.5]
+    add("suspense", "Suspense account", "warn" if susp else "ok",
+        "Move these to the right ledgers before closing." if susp else "Nothing left in suspense.", "#/parties",
+        [{"name": l["name"], "value": l["closing"]} for l in susp])
+    # bank reconciliation: is there a statement up to the year end (or today), and does it agree?
+    brs_rows = []
+    for name in bankrec.bank_ledgers(cid):
+        saved = bankrec.load(co["name"], name)
+        if not saved or not saved.get("txns"):
+            brs_rows.append({"name": name, "value": "no statement uploaded"})
+            continue
+        r = bankrec.check(cid, name, saved)
+        left = len(r["bank_only"]) + len(r["tally_only"])
+        if r["last"] < min(today, fy_end).isoformat() or left:
+            brs_rows.append({"name": name, "value": f"statement to {r['last']}" + (f", {left} not matched" if left else "")})
+    add("brs", "Bank reconciliation", "info" if brs_rows else "ok",
+        "Upload the bank statement up to the year end and match it." if brs_rows else "Every bank account is matched.", "#/brs", brs_rows)
+    add("oldbills", "Bills unpaid for over a year", "info" if old else "ok",
+        "Collect, settle, or write these off with your CA." if old else "No bill is older than a year.", "#/dues/receivable",
+        [{"name": f"{b['party']} ({b['ref']})", "value": b["amount"], "note": "to receive" if b["kind"] == "receivable" else "to pay"}
+         for b in sorted(old, key=lambda b: b["date"])])
+    adv = [l for l in led if (ch(l, "|Sundry Debtors|") and l["closing"] < -0.5) or (ch(l, "|Sundry Creditors|") and l["closing"] > 0.5)]
+    add("advances", "Advances and wrong-side balances", "info" if adv else "ok",
+        "Customers in credit or suppliers in debit: advances, or a bill not entered." if adv else "No customer or supplier is on the wrong side.",
+        "#/parties", [{"name": l["name"], "value": l["closing"], "note": "customer in credit" if ch(l, "|Sundry Debtors|") else "supplier in debit"} for l in adv])
+    tax = {}
+    for l in led:
+        if store._is_tax(l):
+            h = store._gst_head(l)
+            tax[h] = tax.get(h, 0) + l["closing"]
+    tax_rows = [{"name": h, "value": round(v, 2), "note": "credit not used" if v > 0 else "payable"} for h, v in sorted(tax.items()) if abs(v) > 0.5]
+    add("gst", "GST ledger balances", "info" if tax_rows else "ok",
+        "Check these against the GST portal's credit and cash ledgers." if tax_rows else "GST ledgers are at zero.", "#/gstr", tax_rows)
+    add("hsn", "Items without HSN or GST rate", "info" if nohsn else "ok",
+        "Set them on the item in Tally: GSTR-1's HSN table needs them." if nohsn else "Every item has HSN and GST.", "#/stock",
+        [{"name": n, "value": ""} for n in nohsn])
+    nophone = [l["name"] for l in led if (ch(l, "|Sundry Debtors|")) and not (l["mobile"] or l["phone"]) and abs(l["closing"]) > 0.5]
+    add("phones", "Customers without a phone number", "info" if nophone else "ok",
+        "Add a mobile number on the ledger in Tally so reminders and statements reach them." if nophone else "Every customer with a balance has a number.",
+        "#/parties", [{"name": n, "value": ""} for n in nophone])
+    order = {"warn": 0, "info": 1, "ok": 2}
+    out.sort(key=lambda x: order[x["status"]])
+    return {"company": co["name"], "fy_end": fy_end.isoformat(), "days_left": (fy_end - today).days, "checks": out,
+            "warn": sum(1 for x in out if x["status"] == "warn"), "info": sum(1 for x in out if x["status"] == "info")}

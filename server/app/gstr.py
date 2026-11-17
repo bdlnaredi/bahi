@@ -255,3 +255,41 @@ def gstr3b(cid, month):
             "used": so["used"], "cash": cash, "cash_total": round(sum(cash.values()), 2),
             "left": so["left"], "left_total": round(sum(so["left"].values()), 2),
             "purchases": round(abs(pur), 2), "no_tax_ledgers": g1["no_tax_ledgers"]}
+
+
+def einvoice_status(cid, month, ewb_limit=50000):
+    """Sales of the month that look like they need an e-invoice (IRN) or an e-way bill but have none in Tally.
+    E-invoice: only once the company issues e-invoices at all (an IRN on any voucher), for sales to registered
+    buyers. E-way bill: goods worth more than the limit (₹50,000 in most states). A guide to check, not a ruling."""
+    f, t = _month_range(month)
+    today = date.today()
+    with store.conn() as c:
+        led = {r["name"]: dict(r) for r in c.execute("SELECT name, chain, gstin FROM ledger WHERE company_id=?", (cid,))}
+        uses = c.execute("""SELECT COUNT(*) FROM voucher WHERE company_id=? AND extra LIKE '%"irn"%'""", (cid,)).fetchone()[0] > 0
+        vs = store._rows(c, """SELECT v.id, v.date, v.vtype, v.base, v.number, v.party, v.party_gstin, v.amount, v.extra,
+            (SELECT COUNT(*) FROM vitem WHERE voucher_id=v.id) items FROM voucher v
+            WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND v.posting=1 AND v.status=''
+            AND v.base IN ('Sales','Credit Note','Debit Note') ORDER BY v.date, v.id""", (cid, f, t))
+    rows = []
+    for v in vs:
+        pl = led.get(v["party"]) or {}
+        if v["base"] != "Sales" and "|Sundry Debtors|" not in (pl.get("chain") or ""):
+            continue
+        try:
+            x = json.loads(v["extra"] or "{}")
+        except ValueError:
+            x = {}
+        gstin = (v["party_gstin"] or pl.get("gstin") or "").strip()
+        has_irn = bool(x.get("irn")) and str(x.get("irn_cancelled", "")).lower() not in ("yes", "true", "1")
+        value = abs(v["amount"] or 0)
+        need_irn = uses and bool(gstin) and not has_irn
+        need_ewb = v["base"] == "Sales" and v["items"] > 0 and value > ewb_limit and not x.get("ewb_no")
+        rows.append({"id": v["id"], "date": v["date"], "vtype": v["vtype"], "number": v["number"], "party": v["party"] or "",
+                     "gstin": gstin, "value": round(value, 2), "irn": has_irn, "ewb": bool(x.get("ewb_no")), "ewb_no": x.get("ewb_no", ""),
+                     "need_irn": need_irn, "need_ewb": need_ewb,
+                     "age": today.toordinal() - date.fromisoformat(v["date"]).toordinal()})
+    b2b = [r for r in rows if r["gstin"]]
+    return {"month": month, "from": f, "to": t, "uses_einvoice": uses, "ewb_limit": ewb_limit,
+            "count": len(rows), "b2b": len(b2b), "with_irn": sum(1 for r in rows if r["irn"]),
+            "with_ewb": sum(1 for r in rows if r["ewb"]),
+            "need_irn": [r for r in rows if r["need_irn"]], "need_ewb": [r for r in rows if r["need_ewb"]]}

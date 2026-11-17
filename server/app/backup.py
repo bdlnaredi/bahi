@@ -17,10 +17,11 @@ DIR = os.path.join(DATA_DIR, "backups")
 KEEP = 7
 AT = os.environ.get("BACKUP_TIME", "02:30")
 EXTRA = ["telegram.json", "followups.json", "app_password.json", "users.json", "sync.json", "interest.json",
-         "stock_min.json", "links.json", "upi.json", "barcodes.json", "credit.json", "reminders.json", "quotes.json", "statements.json", "targets.json"]
+         "stock_min.json", "links.json", "upi.json", "barcodes.json", "credit.json", "reminders.json", "quotes.json", "statements.json", "targets.json", "activity.log"]
 DBS = ["tally.db", "entries.db"]          # copied with sqlite's own backup, safe while the app is running
 NAME = re.compile(r"^bahi-\d{4}-\d{2}-\d{2}(-before-restore-\d{6})?\.zip$")
 BANKREC = re.compile(r"^bankrec/[0-9a-f]{16}\.json$")
+FOLDERS = {"bankrec": BANKREC, "gstr2b": re.compile(r"^gstr2b/\d+\.json$")}      # bank statements, GSTR-2B files
 _lock = threading.Lock()
 
 
@@ -61,11 +62,12 @@ def _make(out):
             p = os.path.join(DATA_DIR, n)
             if os.path.exists(p):
                 z.write(p, n)
-        bdir = os.path.join(DATA_DIR, "bankrec")
-        if os.path.isdir(bdir):
-            for n in os.listdir(bdir):
-                if BANKREC.match("bankrec/" + n):
-                    z.write(os.path.join(bdir, n), "bankrec/" + n)
+        for folder, pat in FOLDERS.items():
+            bdir = os.path.join(DATA_DIR, folder)
+            if os.path.isdir(bdir):
+                for n in os.listdir(bdir):
+                    if pat.match(f"{folder}/{n}"):
+                        z.write(os.path.join(bdir, n), f"{folder}/{n}")
     os.replace(out + ".tmp", out)
     return out
 
@@ -102,7 +104,7 @@ def check(raw):
     names = list(m)
     if "tally.db" not in names:
         raise ValueError("That isn't a Bahi backup: there's no tally.db inside.")
-    bad = [n for n in names if n not in DBS + EXTRA and not BANKREC.match(n)]
+    bad = [n for n in names if n not in DBS + EXTRA and not any(p.match(n) for p in FOLDERS.values())]
     if bad:
         raise ValueError("That zip has files a Bahi backup never has: " + ", ".join(bad[:3]))
     read = lambda n: z.read(m[n])
@@ -155,14 +157,15 @@ def restore(raw):
                 with open(tmp, "wb") as f:
                     f.write(read(n))
                 os.replace(tmp, os.path.join(DATA_DIR, n))
-        bdir = os.path.join(DATA_DIR, "bankrec")
-        if any(BANKREC.match(n) for n in names):
-            shutil.rmtree(bdir, ignore_errors=True)
-            os.makedirs(bdir, exist_ok=True)
-            for n in names:
-                if BANKREC.match(n):
-                    with open(os.path.join(DATA_DIR, n), "wb") as f:
-                        f.write(read(n))
+        for folder, pat in FOLDERS.items():
+            bdir = os.path.join(DATA_DIR, folder)
+            if any(pat.match(n) for n in names):
+                shutil.rmtree(bdir, ignore_errors=True)
+                os.makedirs(bdir, exist_ok=True)
+                for n in names:
+                    if pat.match(n):
+                        with open(os.path.join(DATA_DIR, n), "wb") as f:
+                            f.write(read(n))
     store.init()              # an older layout is set up again (the next sync refills it)
     return {"safety": os.path.basename(safety), "files": names}
 

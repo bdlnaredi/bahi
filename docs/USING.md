@@ -541,3 +541,36 @@ On Home, the owner taps **Set a monthly sales target**. The card then shows this
 ## Payment notifications (Android app)
 
 In **Settings, Android app**, turn on **Payment notifications**. When a receipt comes in from Tally, your phone shows "₹… received from …". Tap it to open the receipt, which has a **Say thank you** WhatsApp button. The phone checks about every 15 minutes; Android may check less often to save battery.
+
+## GSTR-2B matching
+
+1. On the GST portal, open **Returns, GSTR-2B**, choose the month and tap **Download JSON**.
+2. In Bahi, open **Reports, GSTR-2B matching** and upload that file (the zip works too).
+
+Bahi matches each supplier bill with your purchase bills in Tally using the supplier's GSTIN and bill number (the Supplier Invoice No. in Tally). It shows:
+- **Matched:** the bill and its tax agree.
+- **Tax differs:** the tax in Tally isn't what the supplier filed.
+- **In 2B, not in Tally:** enter the bill in Tally, or check its number.
+- **In Tally, not in 2B:** the supplier hasn't filed it yet. Ask them, because that credit is at risk.
+
+The files are kept by Bahi month by month and included in backups. Nothing goes into Tally.
+
+## E-invoice and e-way bills
+
+**Reports, E-invoice and e-way bills** lists the month's sales that seem to need one but have none in Tally.
+- **E-invoice:** checked only once your company issues e-invoices at all. It lists sales to registered buyers without an IRN.
+- **E-way bill:** lists goods worth more than ₹50,000. Some goods and short trips within a state don't need one; check with your CA.
+
+## Year-end checklist
+
+**Reports, Year-end checklist** lists what to tidy in Tally before closing the year:
+- vouchers that don't balance, and items or cash below zero
+- suspense balances, and bank accounts not reconciled
+- bills unpaid for over a year, and customers or suppliers on the wrong side
+- GST ledger balances, items without HSN or GST, and customers without a phone number
+
+Make the corrections in Tally, then sync.
+
+## Staff activity
+
+**Reports, Staff activity** (owner only) lists every change made in the app, with who did it and when: entries, reminders, statements, quotations, settings and logins. Pick a person to see only theirs.

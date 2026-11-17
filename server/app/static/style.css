@@ -746,3 +746,5 @@ span.in, .g3r .in { color: var(--good); font-weight: 600; }
 .cfchart .ln { stroke: var(--good); } .cfchart circle.lo { fill: var(--good); }
 .g3r > span:last-child { white-space: nowrap; text-align: right; }
 .row > a.main { color: inherit; text-decoration: none; min-width: 0; }
+.ye .row { gap: 12px; } .ye-i { font-size: 1.15rem; line-height: 1; }
+.ye button[disabled] { opacity: 1; cursor: default; color: inherit; }
