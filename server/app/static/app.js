@@ -725,21 +725,44 @@ async function vGstr(which, month) {
       <section class="page"><div class="tscroll"><table class="gt"><tr><th>HSN</th><th>Rate</th><th>Qty</th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
         ${d.hsn.map((r) => `<tr><td>${h(r.hsn)}</td><td>${r.rate ?? "?"}%</td><td>${nf2.format(r.qty)} ${h(r.unit)}</td><td>${n2(r.taxable)}</td>${taxCells({ ...r, Cess: 0 })}</tr>`).join("") || '<tr><td colspan="7">No stock lines this month.</td></tr>'}</table></div></section>`;
   } else {
-    const heads = (r) => [["IGST", r.IGST], ["CGST", r.CGST], ["SGST / UTGST", r.SGST], ...(r.Cess ? [["Cess", r.Cess]] : [])];
+    const H = ["IGST", "CGST", "SGST", "Cess"], HN = { IGST: "IGST", CGST: "CGST", SGST: "SGST / UTGST", Cess: "Cess" };
+    const sum = (r) => H.reduce((a, x) => a + (r[x] || 0), 0);
+    const heads = (r) => H.filter((x) => x !== "Cess" || r.Cess).map((x) => [HN[x], r[x]]);
+    const add = (a, b) => Object.fromEntries(H.map((x) => [x, (a[x] || 0) + (b[x] || 0)]));
+    const drcr = (v) => Math.abs(v) < 0.005 ? "₹0.00" : `${rupees(v)} ${v > 0 ? "Dr" : "Cr"}`;
+    const line = (k, v, cls = "") => `<div class="g3r ${cls}"><span>${k}</span><span>${v}</span></div>`;
     const card = (title, sub, rows, total, tlabel) => `<section class="page g3"><div class="g3h"><b>${title}</b><span>${sub}</span></div>
-      ${rows.map(([k, v]) => `<div class="g3r"><span>${k}</span><span>${rupees(v || 0)}</span></div>`).join("")}
-      ${total !== undefined ? `<div class="g3r g3t"><span>${tlabel}</span><span>${rupees(total || 0)}</span></div>` : ""}</section>`;
+      ${rows.map(([k, v]) => line(k, rupees(v || 0))).join("")}
+      ${total !== undefined ? line(tlabel, rupees(total || 0), "g3t") : ""}</section>`;
+    // set-off, one block per tax head: the liability, what each credit paid, the cash left to pay
+    const liab = add(d.out, {}), shown = H.filter((x) => x !== "Cess" || liab.Cess || d.rcm.Cess || d.cash.Cess);
+    const setoff = shown.map((x) => {
+      const by = H.filter((c) => d.used[c][x] > 0.005).map((c) => line(`Paid with ${HN[c]} credit`, "− " + rupees(d.used[c][x])));
+      return `<div class="g3head">${HN[x]}</div>${line("Tax on sales (3.1a)", rupees(liab[x]))}${by.join("")}
+        ${d.rcm[x] > 0.005 ? line("Reverse charge (3.1d), cash only", "+ " + rupees(d.rcm[x])) : ""}
+        ${line("Cash to pay", rupees(d.cash[x]), "g3t")}`;
+    }).join("");
+    const unpaid = d.start ? H.filter((x) => d.start[x] < -0.005) : [];
     body = `<section class="herocards">
-        <div class="bold out"><div class="label">Tax on sales</div><div class="big">${short(d.out_total)}</div><div class="go">on ${short(d.out.taxable)} taxable</div></div>
-        <div class="bold in"><div class="label">Input credit</div><div class="big">${short(d.itc_total)}</div><div class="go">on purchases of ${short(d.purchases)}</div></div></section>
-      <section class="bold ${d.net_total > 0 ? "nil" : "in"}" style="margin-bottom:14px"><div class="label">${d.net_total > 0 ? "Left to pay after input credit" : "Input credit left over"}</div><div class="big">${rupees(Math.abs(d.net_total))}</div>
-        <div class="go" style="opacity:.85">IGST ${n2(d.net.IGST)} · CGST ${n2(d.net.CGST)} · SGST ${n2(d.net.SGST)}</div></section>
+        <div class="bold ${d.cash_total > 0.005 ? "out" : "in"}"><div class="label">Cash to pay</div><div class="big">${short(d.cash_total)}</div><div class="go">after using your input credit</div></div>
+        <div class="bold in"><div class="label">Credit carried forward</div><div class="big">${short(d.left_total)}</div><div class="go">unused input credit, for next month</div></div></section>
       ${card("3.1(a) Outward taxable supplies", "Sales with tax, less credit notes", [["Taxable value", d.out.taxable], ...heads(d.out)], d.out_total, "Total tax")}
       ${card("3.1(c) Nil-rated and exempt", "Sales with no GST", [["Value", d.nil]])}
-      ${card("4. Input tax credit (ITC)", "GST on purchases and expenses", heads(d.itc), d.itc_total, "Total credit")}
-      ${card("Left to pay (3.1 less 4)", "Head by head; a minus figure is credit carried forward", heads(d.net), d.net_total, "Total")}`;
+      ${card("3.1(d) Reverse charge (incl. URD purchases)", "Tax you pay yourself on purchases under reverse charge, paid in cash", heads(d.rcm), d.rcm_total, "Total")}
+      ${d.rcm_untaxed.count ? `<p class="hint" style="margin:-4px 4px 12px">${d.rcm_untaxed.count} reverse-charge purchase${d.rcm_untaxed.count > 1 ? "s" : ""} worth ${rupees(d.rcm_untaxed.value)} have no GST posted in Tally yet, so their tax isn't counted. Tally adds it when you record the reverse-charge journal (Journal, Stat Adjustment).</p>` : ""}
+      <section class="page g3"><div class="g3h"><b>4. Input tax credit (ITC)</b><span>GST on purchases and expenses this month</span></div>
+        <div class="g3head">4(A)(3) Reverse charge</div>${heads(d.itc_rcm).map(([k, v]) => line(k, rupees(v))).join("")}
+        <div class="g3head">4(A)(5) All other ITC</div>${heads(d.itc).map(([k, v]) => line(k, rupees(v))).join("")}
+        ${line("Total credit this month", rupees(d.itc_total), "g3t")}</section>
+      ${d.bf_total > 0.005 ? card("Credit brought forward", "Unused credit from earlier months: the debit balance of your GST ledgers in Tally at the start of the month", heads(d.bf), d.bf_total, "Total") : ""}
+      <section class="page g3"><div class="g3h"><b>Set-off and cash to pay</b><span>As the GST portal does it: IGST credit first (on IGST, then CGST and SGST), then CGST credit (on CGST, then IGST) and SGST credit (on SGST, then IGST). CGST and SGST credit never cross.</span></div>
+        ${setoff}${line("Total cash to pay", rupees(d.cash_total), "g3t")}</section>
+      ${card("Credit carried forward", "Input credit left after the set-off, for next month", heads(d.left), d.left_total, "Total")}
+      <section class="page g3"><div class="g3h"><b>Your GST ledgers in Tally</b><span>Net balance of each head, as it is in Tally. Dr is credit in your favour, Cr is tax payable.</span></div>
+        ${shown.map((x) => `<div class="g3head">${HN[x]}</div>${d.start ? line("Start of the month", drcr(d.start[x])) : ""}${line("End of the month", drcr(d.end[x]))}`).join("")}
+        <p class="hint" style="margin:6px 0 4px">${unpaid.length ? ` ${unpaid.map((x) => HN[x]).join(", ")} had tax payable (Cr) at the start of the month, from earlier months; it isn't part of this month's figures.` : ""}</p></section>`;
   }
-  view.innerHTML = head + body + `<p class="hint" style="margin:0 4px 14px">Put together from the vouchers synced from Tally: tax as posted on Tally's GST ledgers, rates as Tally gave each line. Use it to check, then file from Tally's own GSTR reports or with your CA. Reverse charge, amendments and the portal's set-off order aren't covered.</p>`;
+  view.innerHTML = head + body + `<p class="hint" style="margin:0 4px 14px">Put together from the vouchers synced from Tally: tax as posted on Tally's GST ledgers, rates as Tally gave each line. Use it to check, then file from Tally's own GSTR reports or with your CA.${which === "1" ? "" : " Interest, late fee, amendments and blocked credit aren't covered."}</p>`;
   view.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { location.hash = `#/gstr/${b.dataset.w}/${month}`; });
   $("#mprev").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, -1)}`; };
   $("#mnext").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, 1)}`; };

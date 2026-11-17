@@ -487,7 +487,24 @@ def voucher_extra(v):
         "vehicle_no": txt(v, "BASICSHIPVESSELNO"),
     }
     x.update(einvoice_fields(v))
+    if is_rcm(v):
+        x["rcm"] = True
     return {k: val for k, val in x.items() if val}
+
+
+_RCM_TEXT = re.compile(r"reverse\s*charge|unregistered|\bRCM\b", re.I)
+
+
+def is_rcm(v):
+    """Tally marks reverse-charge vouchers: the purchase itself (reverse charge applicable, or an unregistered
+    dealer under RCM), or a GST adjustment journal whose nature names reverse charge or an unregistered dealer."""
+    if yes(v, "ISREVERSECHARGEAPPLICABLE") or yes(v, "VCHSTATUSISUNREGISTEREDRCM"):
+        return True
+    for el in v.iter():
+        t = el.tag if isinstance(el.tag, str) else ""
+        if el.text and ("NATURE" in t or "ADJUSTMENT" in t) and _RCM_TEXT.search(el.text):
+            return True
+    return False
 
 
 # e-invoice (IRN) and e-way bill details. TallyPrime releases name these slightly differently, so every

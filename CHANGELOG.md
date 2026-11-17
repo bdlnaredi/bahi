@@ -2,6 +2,18 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.22.0 (17 November 2026)
+
+- **GSTR-3B reworked:**
+  - **Clear signs:** a minus figure used to show as plus. The screen now says *Cash to pay* and *Credit carried forward* instead of one "left to pay" figure.
+  - **Reverse charge (URD purchases):** shown in its own place. Tax payable is in 3.1(d) and the matching credit in 4(A)(3); the rest of the credit is in 4(A)(5). Reverse-charge tax is paid in cash, never from credit.
+  - Bahi reads reverse charge from Tally's own marks: the voucher's *reverse charge applicable* or *unregistered dealer (RCM)* flag, or a GST adjustment journal whose nature names reverse charge or an unregistered dealer. A tax line credited on a purchase is also counted as reverse charge.
+  - **Set-off as on the GST portal:** IGST credit is used first, on IGST, then on CGST and SGST. Then CGST credit is used on CGST and then IGST, and SGST credit on SGST and then IGST. CGST and SGST credit never cross. Each head shows what each credit paid and the cash left to pay.
+  - **Credit brought forward:** a debit balance on your GST ledgers in Tally at the start of the month counts as earlier credit and is used in the set-off.
+  - **Your GST ledgers in Tally:** a new card shows each head's balance at the start and end of the month, as it is in Tally, marked Dr or Cr.
+  - **One ledger for both sides:** tax is now sorted by the voucher it's on (sale, purchase, journal), not by the ledger's name. So a single CGST ledger used for both sales and purchases is counted correctly.
+- **Re-read once:** the Tally PC reads all vouchers again once, to pick up the reverse-charge marks.
+
 ## 3.21.1 (17 November 2026)
 
 - **GSTR-3B on phones:** the table was wider than the screen, so the CGST and SGST columns were hidden off to the right and the figures looked out of place. Each part (3.1(a), 3.1(c), 4 and what's left to pay) is now its own card with IGST, CGST, SGST and the total each on its own line.

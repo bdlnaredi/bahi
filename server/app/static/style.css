@@ -725,3 +725,5 @@ table.gt.cmp td.dn { color: var(--cr); font-weight: 700; }
 .g3r { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
 .g3r:last-child { border-bottom: 0; }
 .g3t { font-weight: 700; }
+.g3head { padding: 12px 0 2px; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.g3h + .g3head { padding-top: 8px; }

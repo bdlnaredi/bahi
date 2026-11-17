@@ -476,6 +476,12 @@ When you make a sales invoice or order and choose a customer who is over the cre
 
 The tax figures are the amounts posted on Tally's GST ledgers. Bahi doesn't file anything.
 
+How GSTR-3B is worked out:
+- **Reverse charge:** purchases under reverse charge, including those from unregistered dealers (URD), go in 3.1(d) for the tax payable and 4(A)(3) for the matching credit. Bahi goes by Tally's own reverse-charge marks on the voucher or on the GST adjustment journal. If a reverse-charge purchase has no GST posted yet, the screen says so. Tally adds that tax when you record the reverse-charge journal (Journal, Stat Adjustment).
+- **Set-off:** done the way the GST portal does it. IGST credit is used first, on IGST, then on CGST and SGST. Then CGST credit is used on CGST and then IGST, and SGST credit on SGST and then IGST. Reverse-charge tax is always paid in cash.
+- **Credit brought forward:** a debit balance on your GST ledgers in Tally at the start of the month counts as earlier unused credit.
+- **Results:** the screen shows the **Cash to pay** and the **Credit carried forward** for each head. It also shows your GST ledger balances in Tally (Dr or Cr) at the start and end of the month, so you can match them.
+
 ## Compare periods
 
 **Reports, Compare periods** puts this month, quarter or financial year beside the one before and the same one a year ago. It covers sales, purchases, expenses, money received and paid, bills and customers, with the change in %. It also lists the customers and items that moved the most.

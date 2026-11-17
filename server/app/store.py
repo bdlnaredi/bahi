@@ -135,7 +135,7 @@ def company_id(c, name):
     return c.execute("INSERT INTO company(name) VALUES(?)", (name,)).lastrowid
 
 
-ONCE = ("items_once", "bills_once")      # see plan(): one full re-read of the vouchers after each such fix
+ONCE = ("items_once", "bills_once", "rcm_once")      # see plan(): one full re-read of the vouchers after each such fix
 
 
 # A sync in progress on the Tally PC (kept in memory: only for showing "syncing now" in the app)
@@ -512,7 +512,7 @@ def plan(company, d_from, d_to, tally_list):
         if not r or r["from_date"] != max(d_from, r["keep_from"] or "") or r["to_date"] != d_to:
             return {"full": True, "months": []}
         # Fixes in reading Tally's vouchers that need every voucher read again once, so the stored copies are right:
-        # 3.6.1 stock lines and 3.17.2 bill references, both sent twice by Tally (ALL... and plain lists)
+        # 3.6.1 stock lines and 3.17.2 bill references, both sent twice by Tally (ALL... and plain lists); 3.22.0 reverse charge marks
         missing = [k for k in ONCE if not c.execute("SELECT 1 FROM meta WHERE key=?", (f"{k}:{r['id']}",)).fetchone()]
         if missing:
             for k in ONCE:

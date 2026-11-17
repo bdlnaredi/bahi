@@ -2,6 +2,7 @@
 filing. Tax amounts are the ones on Tally's tax ledgers in each voucher; the rate of each line is the one Tally
 gave it. Nothing is worked out afresh except splitting a voucher's tax across its lines by value, for the HSN table.
 Bahi doesn't file anything."""
+import json
 import re
 from collections import defaultdict
 from datetime import date
@@ -132,22 +133,125 @@ def gstr1(cid, month):
                 "no_tax_ledgers": not tax}
 
 
+HEADS = ("IGST", "CGST", "SGST", "Cess")
+CASHBANK = ("|Bank Accounts|", "|Cash-in-Hand|", "|Bank OD A/c|")
+
+
+def _z():
+    return {h: 0.0 for h in HEADS}
+
+
+def _r(d):
+    return {h: round(d[h], 2) for h in HEADS}
+
+
+def _tax_3b(c, cid, f, t, led, tax):
+    """Every tax line of the month, sorted by what the voucher is, not by the ledger's name, so one GST ledger used
+    for both sales and purchases works too. Amounts are Tally's own (debit +, credit -)."""
+    out, out_rcm, itc, itc_rcm = _z(), _z(), _z(), _z()
+    rcm_untaxed = {"count": 0, "value": 0.0}
+    vs = store._rows(c, """SELECT id, base, party, extra, amount FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        AND posting=1 AND status=''""", (cid, f, t))
+    for v in vs:
+        lines = c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],)).fetchall()
+        tl = [(tax[x["ledger"]][0], x["amount"]) for x in lines if x["ledger"] in tax]
+        try:
+            rcm = bool(json.loads(v["extra"] or "{}").get("rcm"))
+        except ValueError:
+            rcm = False
+        base = v["base"]
+        if not tl:
+            if rcm and base == "Purchase":       # Tally adds this tax with its reverse-charge journal
+                rcm_untaxed["count"] += 1
+                rcm_untaxed["value"] += abs(v["amount"] or 0)
+            continue
+        pchain = (led.get(v["party"]) or {"chain": ""})["chain"] or ""
+        if base in ("Credit Note", "Debit Note"):
+            outward = "|Sundry Debtors|" in pchain or ("|Sundry Creditors|" not in pchain and base == "Credit Note")
+        else:
+            outward = base == "Sales"
+        others = [x["ledger"] for x in lines if x["ledger"] not in tax]
+        only_tax = all(any(g in ((led.get(o) or {"chain": ""})["chain"] or "") for g in CASHBANK) for o in others)
+        for h, a in tl:
+            if outward:                                   # sales (and notes to customers): tax on what you sold
+                out[h] += -a
+            elif base in ("Purchase", "Credit Note", "Debit Note"):
+                if a > 0 or base != "Purchase":           # tax paid on purchases (a purchase return takes it back)
+                    (itc_rcm if rcm else itc)[h] += a
+                else:                                     # tax credited on a purchase: payable under reverse charge
+                    out_rcm[h] += -a
+            elif only_tax and not rcm:
+                continue                                  # set-off or tax paid to the government: not a supply
+            elif a > 0:                                   # journals, payments: tax debited is credit taken
+                (itc_rcm if rcm else itc)[h] += a
+            else:                                         # tax credited is tax payable
+                (out_rcm if rcm else out)[h] += -a
+    rcm_untaxed["value"] = round(rcm_untaxed["value"], 2)
+    return _r(out), _r(out_rcm), _r(itc), _r(itc_rcm), rcm_untaxed
+
+
+def _setoff(liab, credit):
+    """Use the input credit the way the GST portal does (rule 88A): IGST credit first, on IGST, then on CGST and
+    SGST; then CGST credit on CGST, then IGST; SGST credit on SGST, then IGST. CGST and SGST never cross.
+    Returns what each credit paid and what's left: cash to pay and credit carried forward."""
+    L = {h: max(0.0, liab[h]) for h in HEADS}
+    A = {h: max(0.0, credit[h]) for h in HEADS}
+    used = {k: _z() for k in ("IGST", "CGST", "SGST", "Cess")}       # used[credit head][liability head]
+
+    def take(ch, lh, amt):
+        amt = max(0.0, min(amt, A[ch], L[lh]))
+        A[ch] -= amt
+        L[lh] -= amt
+        used[ch][lh] += amt
+    take("IGST", "IGST", L["IGST"])
+    # what's left of IGST credit goes to CGST and SGST: first where their own credit falls short, then the rest
+    need = {h: max(0.0, L[h] - A[h]) for h in ("CGST", "SGST")}
+    tot = need["CGST"] + need["SGST"]
+    if tot > 0 and A["IGST"] > 0:
+        part = min(A["IGST"], tot)
+        for h in ("CGST", "SGST"):
+            take("IGST", h, part * need[h] / tot)
+    for h in ("CGST", "SGST"):
+        take("IGST", h, A["IGST"] / 2 if h == "CGST" else A["IGST"])
+    take("IGST", "CGST", A["IGST"])
+    take("CGST", "CGST", L["CGST"])
+    take("SGST", "SGST", L["SGST"])
+    take("CGST", "IGST", L["IGST"])
+    take("SGST", "IGST", L["IGST"])
+    take("Cess", "Cess", L["Cess"])
+    return {"used": {k: _r(v) for k, v in used.items()}, "cash": _r(L), "left": _r(A)}
+
+
 def gstr3b(cid, month):
     f, t = _month_range(month)
     g1 = gstr1(cid, month)
-    s = store.gst(cid, f, t)        # tax on the tax ledgers, output and input, for the month (as the GST summary)
-    m = s["months"][0] if s["months"] else {"output": {h: 0 for h in store.GST_HEADS}, "input": {h: 0 for h in store.GST_HEADS}}
-    out_tax = {h: round(m["output"][h], 2) for h in store.GST_HEADS}
-    itc = {h: round(m["input"][h], 2) for h in store.GST_HEADS}
-    taxable_out = round(g1["total"]["taxable"] - g1["nil"], 2)
     with store.conn() as c:
+        tax, led = _tax_side(c, cid)
+        out, out_rcm, itc, itc_rcm, rcm_untaxed = _tax_3b(c, cid, f, t, led, tax)
         pur = c.execute("""SELECT COALESCE(SUM(amount),0) FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
             AND posting=1 AND status='' AND base='Purchase'""", (cid, f, t)).fetchone()[0]
-    # what's left to pay after using the input credit (simply head by head; the portal's set-off order can move
-    # IGST credit across heads, so the final figures there may differ)
-    net = {h: round(out_tax[h] - itc[h], 2) for h in store.GST_HEADS}
+        comp = c.execute("SELECT from_date FROM company WHERE id=?", (cid,)).fetchone()
+        sync_from = (comp and comp["from_date"]) or "2000-01-01"
+        # your GST ledgers in Tally, as they are: net per head at the start and end of the month (debit +)
+        start, end = _z(), _z()
+        nxt = date.fromordinal(date.fromisoformat(t).toordinal() + 1).isoformat()
+        known = f >= sync_from
+        for n, l in ((n, led[n]) for n in tax):
+            h = tax[n][0]
+            if known:
+                start[h] += store._opening_at(c, cid, n, l["closing"], sync_from, f)
+            end[h] += store._opening_at(c, cid, n, l["closing"], sync_from, nxt)
+    start, end = _r(start), _r(end)
+    bf = {h: max(0.0, start[h]) for h in HEADS}          # a debit balance at the start is credit not used yet
+    credit = {h: itc[h] + itc_rcm[h] + bf[h] for h in HEADS}
+    so = _setoff(out, credit)
+    cash = {h: round(so["cash"][h] + max(0.0, out_rcm[h]), 2) for h in HEADS}   # reverse charge is paid in cash only
     return {"month": month, "from": f, "to": t, "company": g1["company"],
-            "out": {"taxable": taxable_out, **out_tax}, "nil": g1["nil"],
-            "itc": itc, "itc_total": round(sum(itc.values()), 2), "out_total": round(sum(out_tax.values()), 2),
-            "net": net, "net_total": round(sum(net.values()), 2), "purchases": round(abs(pur), 2),
-            "no_tax_ledgers": g1["no_tax_ledgers"]}
+            "out": {"taxable": round(g1["total"]["taxable"] - g1["nil"], 2), **out}, "out_total": round(sum(out.values()), 2),
+            "rcm": out_rcm, "rcm_total": round(sum(out_rcm.values()), 2), "rcm_untaxed": rcm_untaxed,
+            "nil": g1["nil"],
+            "itc": itc, "itc_rcm": itc_rcm, "itc_total": round(sum(itc.values()) + sum(itc_rcm.values()), 2),
+            "bf": _r(bf), "bf_total": round(sum(bf.values()), 2), "start": start if known else None, "end": end,
+            "used": so["used"], "cash": cash, "cash_total": round(sum(cash.values()), 2),
+            "left": so["left"], "left_total": round(sum(so["left"].values()), 2),
+            "purchases": round(abs(pur), 2), "no_tax_ledgers": g1["no_tax_ledgers"]}

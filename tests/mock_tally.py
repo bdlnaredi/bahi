@@ -109,6 +109,12 @@ def make_vouchers():
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"E{d.month}", "party": "Freight Inward",
                        "ledgers": [("Freight Inward", 1000.0), ("Input CGST", 90.0), ("Input SGST", 90.0), ("Cash", -1180.0)],
                        "narration": "Freight with GST"})
+        if d.day == 15:      # freight from an unregistered transporter, with the reverse-charge journal
+            vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"R{d.month}", "party": "Freight Inward",
+                       "ledgers": [("Freight Inward", 5000.0), ("Cash", -5000.0)], "narration": "Freight, unregistered transporter", "rcm": True})
+            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RJ{d.month}", "party": "Input CGST",
+                       "ledgers": [("Input CGST", 125.0), ("Input SGST", 125.0), ("Output CGST", -125.0), ("Output SGST", -125.0)],
+                       "narration": "GST on freight under reverse charge", "rcm_journal": True})
         if d.day == 20 and d.month > 4:
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"T{d.month}", "party": "Output CGST",
                        "ledgers": [("Output CGST", 5000.0), ("HDFC Bank", -5000.0)], "narration": "GST challan"})
@@ -277,7 +283,9 @@ def xml_voucher(v):
             f'<DATE>{dt}</DATE><GUID>{v["guid"]}</GUID><ALTERID> {v["alterid"]}</ALTERID><NARRATION>{nar}</NARRATION>'
             f'<VOUCHERTYPENAME>{escape(v["type"])}</VOUCHERTYPENAME><VOUCHERNUMBER>{v["no"]}</VOUCHERNUMBER>'
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
-            f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ""}</REFERENCE>'
+            + ("<ISREVERSECHARGEAPPLICABLE>Yes</ISREVERSECHARGEAPPLICABLE>" if v.get("rcm") else "<ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>")
+            + ("<STATADJUSTMENTTYPE>Increase of Tax Liability &amp; Input Tax Credit</STATADJUSTMENTTYPE><ADDITIONALNATURE>Purchase from Unregistered Dealer</ADDITIONALNATURE>" if v.get("rcm_journal") else "")
+            + f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ""}</REFERENCE>'
             f'<PARTYGSTIN>{"27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else ""}</PARTYGSTIN>'
             + (f'<BASICBUYERNAME>{escape(COMPANY if v["kind"] == "purchase" else v["party"])}</BASICBUYERNAME><STATENAME>Maharashtra</STATENAME><PLACEOFSUPPLY>Maharashtra</PLACEOFSUPPLY>'
                f'<BASICBUYERADDRESS.LIST>{"".join(f"<BASICBUYERADDRESS>{escape(a)}</BASICBUYERADDRESS>" for a in ADDR.get(v["party"], []))}</BASICBUYERADDRESS.LIST>'
