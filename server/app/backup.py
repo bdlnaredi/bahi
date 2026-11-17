@@ -21,7 +21,7 @@ EXTRA = ["telegram.json", "followups.json", "app_password.json", "users.json", "
 DBS = ["tally.db", "entries.db"]          # copied with sqlite's own backup, safe while the app is running
 NAME = re.compile(r"^bahi-\d{4}-\d{2}-\d{2}(-before-restore-\d{6})?\.zip$")
 BANKREC = re.compile(r"^bankrec/[0-9a-f]{16}\.json$")
-FOLDERS = {"bankrec": BANKREC, "gstr2b": re.compile(r"^gstr2b/\d+\.json$")}      # bank statements, GSTR-2B files
+FOLDERS = {"bankrec": BANKREC, "gstr2b": re.compile(r"^gstr2b/\d+\.json$"), "photos": re.compile(r"^photos/[0-9a-f]{32}\.jpg$")}      # bank statements, GSTR-2B files
 _lock = threading.Lock()
 
 

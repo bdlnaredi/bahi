@@ -54,7 +54,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.25.0"
+APP_VERSION = "3.26.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -1002,6 +1002,29 @@ document.getElementById("a").addEventListener("change", function () {{
             self.send_header("Content-Type", "application/zip")
             self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(p)}"')
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+
+        mp = re.match(r"^/api/c/(\d+)/entry_photo$", path)
+        if mp and method == "POST":             # a bill photo for a phone entry
+            if not self.allowed(int(mp.group(1)), "entry", q, None):
+                return self.send_json({"error": "You can't make entries."}, 403)
+            try:
+                return self.send_json({"photo": entries.save_photo(self.body(6 * 1024 * 1024))})
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+        mp = re.match(r"^/api/photo/([0-9a-f]{32})$", path)
+        if mp:                                  # photos are named at random; anyone logged in to Bahi with the name may see one
+            pth = entries.photo_path(mp.group(1))
+            if not os.path.exists(pth):
+                return self.send_json({"error": "not found"}, 404)
+            with open(pth, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Cache-Control", "private, max-age=86400")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)

@@ -226,6 +226,9 @@ def create(cid, kind, data, user):
     if not co:
         raise ValueError("Company not found.")
     d = clean(cid, kind, data)
+    ph = str(data.get("photo") or "")
+    if re.match(r"^[0-9a-f]{32}$", ph) and os.path.exists(photo_path(ph)):
+        d["photo"] = ph                       # the bill's photo, kept in Bahi for whoever approves (not sent to Tally)
     direct = user["owner"] or "e_direct" in user["perms"]
     with conn() as c:
         cur = c.execute("""INSERT INTO entry(uid, company, kind, data, status, by, created, approved_by)
@@ -240,6 +243,26 @@ def create(cid, kind, data, user):
         except ValueError:
             pass
     return get(new_id)
+
+
+PHOTOS = os.path.join(os.environ.get("DATA_DIR", "/data"), "photos")
+
+
+def photo_path(pid):
+    return os.path.join(PHOTOS, f"{pid}.jpg")
+
+
+def save_photo(raw):
+    """A bill photo from the phone (already made small there): kept as a JPEG under a random name."""
+    if not raw or len(raw) > 6 * 1024 * 1024:
+        raise ValueError("The photo is too large.")
+    if raw[:3] != b"\xff\xd8\xff" and raw[:8] != b"\x89PNG\r\n\x1a\n" and raw[8:12] != b"WEBP":
+        raise ValueError("That isn't a photo.")
+    os.makedirs(PHOTOS, exist_ok=True)
+    pid = uuid.uuid4().hex
+    with open(photo_path(pid), "wb") as f:
+        f.write(raw)
+    return pid
 
 
 def get(eid):

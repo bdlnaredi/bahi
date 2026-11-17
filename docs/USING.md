@@ -599,3 +599,11 @@ Make the corrections in Tally, then sync.
 4. Tap **Finish count** when done, and share the differences.
 
 Tally's stock isn't changed. Correct it in Tally with a stock journal, then sync.
+
+## Bill photo on entries
+
+When making a payment, receipt, journal, contra, sales or purchase entry on the phone, tap **Bill photo** to take a photo of the bill. The photo appears on the entry under **Entries**, where the owner sees it before approving. Photos stay in Bahi and are included in backups; they aren't sent to Tally.
+
+## Hindi
+
+**Settings, Language** switches menus, headings, buttons and labels to Hindi on that phone. Names of parties, items and ledgers stay exactly as they are in Tally. Some longer explanations are still in English.

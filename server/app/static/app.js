@@ -189,6 +189,14 @@ async function downloadOffline(onProgress = () => {}) {
     return info;
   } finally { OFF.running = false; }
 }
+function langSection() {
+  const hi = hindiOn();
+  return `<section class="page" data-sec="language"><div class="block-title" data-notr>Language / भाषा</div>
+    <form class="form" style="padding-top:0" data-notr><label><span><input type="radio" name="lang" value="en" ${hi ? "" : "checked"} onchange="setLang('en')"> English</span></label>
+      <label><span><input type="radio" name="lang" value="hi" ${hi ? "checked" : ""} onchange="setLang('hi')"> हिन्दी (Hindi)</span></label>
+      <p class="hint">Menus, headings and buttons in Hindi. Names of parties, items and ledgers stay as they are in Tally. Set on each phone. / मेन्यू, शीर्षक और बटन हिन्दी में। पार्टी, आइटम और लेजर के नाम Tally जैसे ही रहेंगे।</p></form></section>`;
+}
+function setLang(l) { try { localStorage.setItem("lang", l); } catch (e) {} location.reload(); }
 function androidSection() {
   if (!window.BahiAndroid) return "";
   return `<section class="page" data-sec="android"><div class="block-title">Android app <span>version ${h(BahiAndroid.version())}</span></div>
@@ -2539,6 +2547,7 @@ const SETTINGS = [
     ["sync", "Syncing from Tally", "M4 12a8 8 0 0 1 14-5.3L20 5v5h-5 M20 12a8 8 0 0 1-14 5.3L4 19v-5h5"],
     ["offline", "Offline copy", "M12 3v12 M7 10l5 5 5-5 M5 21h14"],
     ["android", "Android app, lock and widget", "M7 3h10v18H7z M11 18h2"],
+    ["language", "Language", "M4 5h9 M8.5 3v2 M6 5c0 4 3 7 6 8 M11 5c0 4-3 7-6 8 M13 21l4-10 4 10 M14.5 17h5"],
   ]],
   ["Customers and money", [
     ["upi", "UPI payments", "M7 4h11 M7 9h11 M7 4c6 0 6 9 0 9h-1l8 8"],
@@ -2566,6 +2575,7 @@ async function vSettingsMenu() {
   const st = {
     sync: S.sync.mode === "auto" ? `Every ${S.sync.every} min` : S.sync.mode === "manual" ? "Manual" : '<span class="od">Paused</span>',
     offline: off ? `Saved ${ago(off.at / 1000)}` : "Not saved",
+    language: hindiOn() ? "हिन्दी" : "English",
     android: window.BahiAndroid ? "Version " + h(BahiAndroid.version()) + (typeof BahiAndroid.lockOn === "function" && BahiAndroid.lockOn() ? " · locked" : "") : "",
     upi: upiOn ? "On" : '<span class="off">Off</span>',
     links: ln ? `${ln.links.length} given out` : "",
@@ -2631,7 +2641,7 @@ async function vSettings(part) {
     <section class="page" id="bksec"></section>
     <section class="page" id="cbsec"></section>
     <section class="page" id="offsec"></section>
-    ${androidSection()}
+    ${langSection()}${androidSection()}
     <section class="page" data-sec="password"><div class="block-title">Change app password</div>
       <form id="pwf" class="form">
         <label>Current password<input type="password" id="pw0" autocomplete="current-password" required></label>
@@ -2655,7 +2665,7 @@ async function vSettings(part) {
       ${c.paused && S.sync.mode !== "paused" ? '<p class="hint" style="padding:0 14px"><span class="od">Syncing is paused for this company.</span></p>' : ""}
       <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
     </section>`).join("")}`;
-  const PART = { sync: "#syncsec", offline: "#offsec", android: "[data-sec=android]", telegram: "#tgsec", interest: "#intsec", credit: "#crsec", upi: "#upisec",
+  const PART = { sync: "#syncsec", offline: "#offsec", android: "[data-sec=android]", language: "[data-sec=language]", telegram: "#tgsec", interest: "#intsec", credit: "#crsec", upi: "#upisec",
     links: "#lnsec", staff: "#stsec", password: "[data-sec=password]", backups: "#tbsec, #bksec, #cbsec", companies: "[data-cid]" };
   const keep = PART[part] || "#syncsec";
   view.querySelectorAll(":scope > section.page").forEach((sec) => { sec.hidden = !sec.matches(keep); });
@@ -2805,7 +2815,7 @@ function vMySettings() {
         <label>New password again<input type="password" id="pw2" autocomplete="new-password" minlength="6" required></label>
         <button class="btn primary" type="submit">Change password</button><div class="msg" id="pwmsg" role="status"></div>
         <p class="hint">Forgot it? Ask the owner to set a new one.</p></form></section>
-    <section class="page" id="offsec"></section>${androidSection()}`;
+    <section class="page" id="offsec"></section>${langSection()}${androidSection()}`;
   offlineSection();
   $("#pwf").onsubmit = async (e) => {
     e.preventDefault();
@@ -2915,6 +2925,7 @@ async function vEntries() {
       return `<div class="entry"><div class="row" style="cursor:default"><div class="main"><div class="name">${e.kind === "stockitem" ? "New stock item" : h(x.vtype)}: ${h(x.party)}</div>
           <div class="meta">${fdate(x.date)}, by ${h(e.by)}${e.approved_by && e.approved_by !== e.by ? `, approved by ${h(e.approved_by)}` : ""}</div>
           <div class="meta">${detail}${x.narration ? `<br><i>${h(x.narration)}</i>` : ""}</div>
+          ${x.photo ? `<a href="/api/photo/${x.photo}" target="_blank" rel="noopener"><img class="ethumb" src="/api/photo/${x.photo}" alt="Bill photo" loading="lazy"></a>` : ""}
           <div class="meta"><span class="est ${cls}">${st}</span>${e.status === "done" && e.done ? ` ${ago(e.done)}` : ""}</div>
           ${e.error ? `<div class="meta od">${h(e.error)}</div>` : ""}</div>
         <div class="end">${e.kind === "stockitem" ? "" : money(x.amount)}</div></div>${btn.length ? `<div class="actions" style="padding:0 14px 12px">${btn.join("")}</div>` : ""}</div>`;
@@ -2928,6 +2939,23 @@ async function vEntries() {
     if (!r.ok) toast(j.error || "Couldn't do that.");
     await loadCompanies().catch(() => {}); vEntries().catch(fail);
   });
+}
+
+/* a bill photo: made smaller on the phone (longest side 1600 px, JPEG), then sent; returns its id */
+async function uploadPhoto(file) {
+  let blob = file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    blob = await new Promise((res) => c.toBlob(res, "image/jpeg", 0.78)) || file;
+  } catch (e) { /* send it as it is */ }
+  const r = await fetch(cpath("entry_photo"), { method: "POST", body: blob });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Couldn't send the photo.");
+  return j.photo;
 }
 
 async function vNewItem() {
@@ -3001,6 +3029,7 @@ async function vNewEntry(kind) {
         <div id="bills"></div>
         <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`}
       <label>Narration (optional)<input name="narration" maxlength="500" placeholder="${order ? "e.g. Deliver to shop" : inv ? "e.g. Sent with Ramesh, vehicle RJ23 GA 1234" : jv ? "e.g. Rent for October" : "e.g. Cheque no. 12345"}"></label>
+      ${order ? "" : `<label>Bill photo (optional)<input type="file" name="photo" accept="image/*" capture="environment"><span class="hint">Take a photo of the bill or receipt. It stays in Bahi for the owner to see when approving; it isn't sent to Tally.</span></label><img id="ephoto" class="ephoto" hidden alt="">`}
       <button class="btn primary" type="submit">Save</button><div class="msg" id="emsg" role="status"></div>
       <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs." : "The owner approves it first, then it goes into Tally at the next sync."}</p>
     </form></section>`;
@@ -3231,12 +3260,22 @@ async function vNewEntry(kind) {
       body.bills = [...$("#bills").querySelectorAll("[data-b]:checked")].map((c) => ({ ref: bl[c.dataset.b].ref, amount: $("#bills").querySelector(`[data-ba="${c.dataset.b}"]`).value }));
     }
     const btn = form.querySelector("button[type=submit]"); btn.disabled = true; $("#emsg").textContent = "Saving";
+    if (form.photo && form.photo.files[0]) {
+      $("#emsg").textContent = "Sending the photo";
+      try { body.photo = await uploadPhoto(form.photo.files[0]); }
+      catch (err) { btn.disabled = false; $("#emsg").textContent = err.message; return; }
+    }
     const r = await fetch(cpath("entry"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
     btn.disabled = false;
     if (!r.ok) { $("#emsg").textContent = j.error || "Couldn't save."; return; }
     toast(j.entry.status === "approval" ? "Saved. It goes to the owner for approval." : "Saved. It goes into Tally at the next sync.");
     location.hash = "#/entries";
+  };
+  if (form.photo) form.photo.onchange = () => {
+    const f = form.photo.files[0], img = $("#ephoto");
+    if (!f) { img.hidden = true; return; }
+    img.src = URL.createObjectURL(f); img.hidden = false;
   };
 }
 

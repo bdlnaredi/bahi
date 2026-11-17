@@ -2,6 +2,13 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.26.0 (17 November 2026)
+
+- **Bill photo on entries:** when you or your staff make a payment, receipt or other entry on the phone, you can take a photo of the bill. The photo shows on the entry under Entries, so the owner sees it before approving.
+  - Staff entries already wait for the owner's approval, unless the staff member is allowed to post directly.
+  - The photo stays in Bahi and is included in backups. It isn't sent to Tally.
+- **Hindi** (Settings, Language): menus, headings, buttons and labels in Hindi, chosen on each phone. Names of parties, items and ledgers stay exactly as they are in Tally. Some longer explanations are still in English.
+
 ## 3.25.0 (17 November 2026)
 
 - **TDS and TCS** (Reports): from Tally's TDS/TCS ledgers. It shows what you deducted or collected each month, what you paid to the government, the due date (7th of the next month, 30 April for March) and whether it was late. Totals are listed by section ledger and by party. TDS your customers deducted from you is listed apart, to check against Form 26AS.

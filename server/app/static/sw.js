@@ -1,12 +1,12 @@
 /* Bahi service worker: always try the server first, fall back to the saved copy when offline */
-const SHELL = "bahi-shell-v48", DATA = "bahi-data-v1";
+const SHELL = "bahi-shell-v50", DATA = "bahi-data-v1";
 // saved data is found whatever order a screen puts its settings in (the app's "download for offline" uses the same key)
 function dataKey(u) {
   const url = new URL(u);
   const p = [...url.searchParams.entries()].filter(([, v]) => v !== "").sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   return url.origin + url.pathname + (p.length ? "?" + new URLSearchParams(p).toString() : "");
 }
-const FILES = ["/", "/index.html", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
+const FILES = ["/", "/index.html", "/style.css", "/app.js", "/hindi.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

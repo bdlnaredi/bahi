@@ -47,6 +47,8 @@ def describe(path, data, companies):
         return "Saved a quotation" + (f" for {party}" if party else "") , co
     simple = {"followup": f"Noted a follow-up for {party}", "barcodes": "Changed item barcodes",
               "stock_min": "Changed minimum stock levels", "brs": "Worked on bank reconciliation", "gstr_twob": "Uploaded a GSTR-2B file"}
+    if rest == "entry_photo":
+        return None                              # the entry it belongs to is logged
     if rest == "cheques":
         return f"Wrote down a cheque {'from' if d.get('kind') != 'out' else 'to'} {party} #{d.get('number', '')}" + _money(d.get("amount")), co
     if rest.startswith("cheques/"):
