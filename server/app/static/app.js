@@ -192,7 +192,17 @@ function androidSection() {
   if (!window.BahiAndroid) return "";
   return `<section class="page" data-sec="android"><div class="block-title">Android app <span>version ${h(BahiAndroid.version())}</span></div>
     <div class="info"><div>Server: ${h(BahiAndroid.server())}</div><div>Update app checks for a newer version and installs it here, keeping your login and saved data. The app also checks by itself twice a day.</div></div>
-    <div class="actions"><button class="btn" onclick="BahiAndroid.changeServer()">Change server address</button><button class="btn primary" onclick="BahiAndroid.checkUpdate()">Update app</button></div></section>`;
+    <div class="actions"><button class="btn" onclick="BahiAndroid.changeServer()">Change server address</button><button class="btn primary" onclick="BahiAndroid.checkUpdate()">Update app</button></div>
+    ${typeof BahiAndroid.setLock === "function" ? `<div class="block-title" style="padding-top:6px">App lock</div>
+    <form class="form" style="padding-top:0"><label><span><input type="checkbox" id="applock" ${BahiAndroid.lockOn() ? "checked" : ""} onchange="appLock(this)"> Lock the app with your fingerprint, face or phone PIN</span></label>
+      <p class="hint">Asked when Bahi opens, and when you come back to it after more than a minute. It uses your phone's own screen lock.</p></form>
+    <div class="block-title" style="padding-top:0">Home-screen widget</div>
+    <div class="info"><div>Long-press an empty spot on your home screen, tap <b>Widgets</b>, find <b>Bahi</b> and drag it out. It shows today's sales, cash and money to receive for the company you last opened, and refreshes every 30 minutes and whenever you open Home.</div></div>` : ""}</section>`;
+}
+function appLock(box) {
+  const r = BahiAndroid.setLock(box.checked);
+  if (r === "nolock") { box.checked = false; toast("Set a screen lock on your phone first (Settings, Security), then turn this on."); return; }
+  toast(box.checked ? "Bahi will ask for your fingerprint or PIN." : "App lock is off.");
 }
 function offlineSection() {
   const el = $("#offsec");
@@ -385,6 +395,8 @@ async function vHome() {
   </section>
   ${d.company.unbalanced ? `<p class="note warn">${d.company.unbalanced} vouchers didn't add up during the last sync, so some figures may be off.</p>` : ""}`;
   drawSales($("#chart"), d.monthly_sales, thisMonth);
+  // the Android home-screen widget gets the latest figures
+  if (window.BahiAndroid && typeof BahiAndroid.widget === "function") api(`/api/widget?cid=${S.cid}`).then((w) => { try { BahiAndroid.widget(JSON.stringify(w), String(S.cid)); } catch (e) {} }).catch(() => {});
   if (can("dues")) api(cpath("reminders")).then((r) => {
     const el = $("#remhome");
     if (!el || !r.todo) return;
@@ -2109,7 +2121,7 @@ const SETTINGS = [
   ["Tally and this phone", [
     ["sync", "Syncing from Tally", "M4 12a8 8 0 0 1 14-5.3L20 5v5h-5 M20 12a8 8 0 0 1-14 5.3L4 19v-5h5"],
     ["offline", "Offline copy", "M12 3v12 M7 10l5 5 5-5 M5 21h14"],
-    ["android", "Android app", "M7 3h10v18H7z M11 18h2"],
+    ["android", "Android app, lock and widget", "M7 3h10v18H7z M11 18h2"],
   ]],
   ["Customers and money", [
     ["upi", "UPI payments", "M7 4h11 M7 9h11 M7 4c6 0 6 9 0 9h-1l8 8"],
@@ -2137,7 +2149,7 @@ async function vSettingsMenu() {
   const st = {
     sync: S.sync.mode === "auto" ? `Every ${S.sync.every} min` : S.sync.mode === "manual" ? "Manual" : '<span class="od">Paused</span>',
     offline: off ? `Saved ${ago(off.at / 1000)}` : "Not saved",
-    android: window.BahiAndroid ? "Version " + h(BahiAndroid.version()) : "",
+    android: window.BahiAndroid ? "Version " + h(BahiAndroid.version()) + (typeof BahiAndroid.lockOn === "function" && BahiAndroid.lockOn() ? " · locked" : "") : "",
     upi: upiOn ? "On" : '<span class="off">Off</span>',
     links: ln ? `${ln.links.length} given out` : "",
     interest: it ? (it.on ? `${it.rate}% a year` : '<span class="off">Off</span>') : "",

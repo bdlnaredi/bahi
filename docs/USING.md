@@ -456,3 +456,50 @@ The money goes straight from the customer's UPI app to your bank; Bahi never han
 
 Stock → **+ New item** (or **+ Stock item** among the entry buttons): name, stock group, unit (one Tally already has), and optionally HSN code, GST rate, an alias and a barcode (scan it). It goes into Tally at the next sync like any phone entry (staff need the "Add stock items" permission, and the owner's approval unless their entries go straight in), then shows under Stock. Scanning a barcode no item has also offers **Make a new stock item** with that barcode. Check the GST details in Tally once for a new item: older and newer TallyPrime releases keep them differently.
 
+
+## Credit warning
+
+When you make a sales invoice or order and choose a customer who is over the credit limit set on their ledger in Tally, or who has bills overdue for longer than the set number of days (30 to start with), an orange warning shows the balance and the oldest bills. It is only a warning: the entry can still be saved. **Settings, Credit warning** turns it off or changes the days.
+
+## Due dates and reminders
+
+- **Dues, Due dates** shows bills by the day they fall due (the bill date plus the credit period in Tally). You get a strip of the next 14 days with the amount on each day, everything due in the next month, and what is already overdue. It covers both money to receive and money to pay.
+- **Dues, Reminders** lists every customer with overdue bills, newest overdue first. *Send reminder* opens WhatsApp with the overdue bills, the customer's link and a UPI payment link, and marks that customer as reminded for 7 days. Staff see the mark too.
+- **Home** shows "N customers to remind today". The morning Telegram summary includes the bills falling due that day.
+
+## GSTR-1 and GSTR-3B
+
+**Reports, GSTR-1 / GSTR-3B** shows a month's returns in summary, put together from your Tally vouchers, so you can check them before filing.
+
+- **GSTR-1:** B2B (with GSTINs), B2C Large, B2C Small by rate, credit and debit notes, nil-rated sales and the HSN summary.
+- **GSTR-3B:** outward supplies and tax, input tax credit, and what is left to pay.
+
+The tax figures are the amounts posted on Tally's GST ledgers. Bahi doesn't file anything.
+
+## Compare periods
+
+**Reports, Compare periods** puts this month, quarter or financial year beside the one before and the same one a year ago. It covers sales, purchases, expenses, money received and paid, bills and customers, with the change in %. It also lists the customers and items that moved the most.
+
+## Reorder list
+
+**Reports, Reorder list** shows the items to buy now, grouped by the supplier you last bought each one from.
+
+- An item is listed when it is at or below its reorder level in Tally (or the minimum set in Bahi), or will run out within 15 days at its recent selling rate.
+- *Send to supplier* opens WhatsApp with the list ready to send.
+
+## Item profit
+
+**Reports, Item profit** shows profit and margin for each item and each customer for any period. Profit is the selling value less the cost of what was sold, using the item's average purchase rate in Tally.
+
+## Quotations
+
+**Reports, Quotations** lets you make a quotation, with items, GST and a validity date, for a Tally customer or anyone else.
+
+- Share or print it as a PDF laid out like your invoice, titled Quotation.
+- Mark it lost, or tap *Make sales order* to open the order form already filled in.
+- Quotations stay in Bahi. Nothing goes into Tally until the order is saved.
+
+## App lock and home-screen widget (Android app)
+
+- **App lock:** in **Settings, Android app**, turn on *Lock the app*. Bahi then asks for your fingerprint, face or phone PIN when it opens, and again when you come back after more than a minute. The phone needs a screen lock set for this to work.
+- **Widget:** long-press an empty spot on the home screen, tap **Widgets**, find **Bahi** and drag it out. It shows today's sales and bills, cash and bank, and money to receive for the company you last opened, with the time of the data. It refreshes every 30 minutes and whenever you open Home. Tap it to open Bahi.

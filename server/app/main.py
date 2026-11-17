@@ -50,7 +50,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.20.0"
+APP_VERSION = "3.21.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -766,6 +766,24 @@ document.getElementById("a").addEventListener("change", function () {{
                 except (TypeError, ValueError):
                     return self.send_json({"error": "Enter a number of days."}, 400)
             return self.send_json(insights.credit_settings())
+        if path == "/api/widget":
+            # the Android home-screen widget: a few figures for one company, already worded
+            try:
+                cid = int(q.get("cid", "0"))
+            except ValueError:
+                cid = 0
+            cos = [c for c in store.companies() if users.can_company(u, c["name"])]
+            co = next((c for c in cos if c["id"] == cid), cos[0] if cos else None)
+            if not co or not self.allowed(co["id"], "dashboard", {}, None):
+                return self.send_json({"error": "No company to show."}, 404)
+            dsh = store.dashboard(co["id"])
+            today = time.strftime("%Y-%m-%d")
+            with store.conn() as c:
+                st = c.execute("""SELECT COALESCE(SUM(ABS(amount)),0), COUNT(*) FROM voucher WHERE company_id=? AND base='Sales'
+                    AND posting=1 AND status='' AND date=?""", (co["id"], today)).fetchone()
+            return self.send_json({"cid": co["id"], "company": co["name"], "sales_today": round(st[0], 2), "bills_today": st[1],
+                                   "cash": dsh.get("cash", 0), "bank": dsh.get("bank_total", 0), "receivable": dsh.get("receivable", 0),
+                                   "payable": dsh.get("payable", 0), "data_at": co.get("data_at") or co.get("last_sync")})
         if path == "/api/reminded" and method == "POST":
             data = json.loads(self.body(4096) or b"{}")
             try:

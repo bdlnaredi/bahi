@@ -2,6 +2,7 @@ package com.bdlnaredi.bahi;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.KeyguardManager;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
@@ -508,6 +509,27 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** App lock: "ok", or "nolock" when the phone itself has no screen lock to use */
+        @JavascriptInterface
+        public String setLock(boolean on) {
+            if (on && !phoneHasLock()) return "nolock";
+            prefs.edit().putBoolean("app_lock", on).apply();
+            if (on) unlockedOnce = true;          // it's this person setting it: no need to ask straight away
+            return "ok";
+        }
+
+        @JavascriptInterface
+        public boolean lockOn() {
+            return MainActivity.this.lockOn();
+        }
+
+        /** Fresh figures for the home-screen widget (the server's /api/widget answer) */
+        @JavascriptInterface
+        public void widget(String json, String cid) {
+            prefs.edit().putString("widget_cid", cid == null ? "" : cid).apply();
+            BahiWidget.store(MainActivity.this, json);
+        }
+
         /** The newer version waiting on GitHub (0 when this one is the newest) */
         @JavascriptInterface
         public int updateReady() {
@@ -660,9 +682,46 @@ public class MainActivity extends Activity {
         web.evaluateJavascript(js, null);
     }
 
+    // ------------------------------------------------------------------ app lock
+    // With "Lock the app" on (Settings, Android app), Bahi asks for the phone's own fingerprint, face, PIN or
+    // pattern when it opens, and again when it comes back after more than a minute away.
+    private static final int REQ_UNLOCK = 4712;
+    private static final long LOCK_AFTER = 60 * 1000L;
+    private boolean unlocking, unlockedOnce;
+    private long pausedAt;
+
+    private boolean lockOn() {
+        return prefs.getBoolean("app_lock", false);
+    }
+
+    private boolean phoneHasLock() {
+        KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        return km != null && km.isKeyguardSecure();
+    }
+
+    private void cover(boolean hide) {
+        if (web != null) web.setVisibility(hide ? View.INVISIBLE : View.VISIBLE);
+    }
+
+    /** true when the lock screen was shown (the app stays hidden until it's passed) */
+    private boolean askUnlock() {
+        if (!lockOn() || unlocking) return unlocking;
+        if (unlockedOnce && System.currentTimeMillis() - pausedAt < LOCK_AFTER) return false;
+        KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        if (km == null || !km.isKeyguardSecure()) return false;      // the phone has no screen lock any more
+        Intent i = km.createConfirmDeviceCredentialIntent("Unlock Bahi", "Use your fingerprint, face or screen lock");
+        if (i == null) return false;
+        unlocking = true;
+        cover(true);
+        startActivityForResult(i, REQ_UNLOCK);
+        return true;
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        if (askUnlock()) return;
+        cover(false);
         if (pendingApk == null) checkForUpdate(false);
         // back from the "Install unknown apps" screen: carry on with the update
         if (pendingApk != null && askedInstallPermission) installUpdate();
@@ -691,6 +750,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
+        if (req == REQ_UNLOCK) {
+            unlocking = false;
+            if (result == RESULT_OK) { unlockedOnce = true; pausedAt = System.currentTimeMillis(); cover(false); }
+            else finish();                       // not unlocked: close rather than show the books
+            return;
+        }
         if (req == REQ_FILE && fileCallback != null) {
             Uri[] picked = null;
             if (result == RESULT_OK && data != null) {
@@ -715,6 +780,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        if (!unlocking) pausedAt = System.currentTimeMillis();
+        if (lockOn() && !unlocking) cover(true);     // keeps the books out of the recent-apps picture
         CookieManager.getInstance().flush();
     }
 }

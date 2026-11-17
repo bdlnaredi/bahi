@@ -2,6 +2,13 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.21.0 (17 November 2026)
+
+- **App lock** (Android app, Settings, Android app): Bahi asks for your fingerprint, face or phone PIN when it opens, and when you come back to it after more than a minute.
+- **Home-screen widget** (Android app): today's sales and bills, cash and bank, and money to receive for the company you last opened, with the time of the data. It refreshes every 30 minutes and whenever you open Home; tap it to open Bahi. To add it, long-press the home screen, then Widgets, then Bahi.
+- Backups now also include quotations, reminder marks and credit warning settings.
+- The user guide has sections for all the new features.
+
 ## 3.20.0 (17 November 2026)
 
 - **Reorder list** (Reports, or Stock): items to buy now, grouped by the supplier you last bought each from.
