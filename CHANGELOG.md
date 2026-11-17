@@ -2,6 +2,16 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.19.0 (17 November 2026)
+
+- **GSTR-1 and GSTR-3B** (Reports): the month's returns in summary, put together from your Tally vouchers, to check before filing.
+  - **GSTR-1:** B2B invoices (with each customer's GSTIN), B2C Large, B2C Small by rate, credit and debit notes, nil-rated sales, and the HSN summary.
+  - **GSTR-3B:** outward taxable supplies and tax, input tax credit, and what's left to pay after the credit.
+  - The tax is what's posted on Tally's GST ledgers, and each line's rate is the one Tally gave it. Bahi doesn't file anything: file from Tally's own GSTR reports or with your CA.
+- **Compare periods** (Reports): this month, quarter or financial year against the one before and the same one a year ago.
+  - Figures: sales, purchases, expenses, other income, money received and paid out, number of bills, average bill and customers billed, with the change in %.
+  - Also the customers and items that moved the most.
+
 ## 3.18.0 (17 November 2026)
 
 - **Credit warning:** when you make a sales invoice or order, choosing a customer who is over the credit limit set on their ledger in Tally, or who has bills overdue more than 30 days, shows an orange warning with the oldest bills. It's only a warning: the entry can still be saved. Settings, Credit warning turns it off or changes the days.

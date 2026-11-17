@@ -167,3 +167,82 @@ def due_today_text(cid):
     if r["todo"]:
         parts.append(f"{r['todo']} customer{'s' if r['todo'] > 1 else ''} to remind ({r['new']} newly overdue)")
     return parts
+
+
+# ------------------------------------------------------------------ compare periods
+def _periods(mode, anchor):
+    """The chosen period, the one before it, and the same one a year earlier: [(label, from, to), ...]"""
+    a = date.fromisoformat(anchor) if anchor else date.today()
+    def month(y, m):
+        y += (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        return date(y, m, 1), date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1)
+    if mode == "year":            # financial year, April to March
+        y = a.year if a.month >= 4 else a.year - 1
+        cur = (date(y, 4, 1), date(y + 1, 3, 31))
+        prev = (date(y - 1, 4, 1), date(y, 3, 31))
+        return [(f"FY {y}-{str(y + 1)[2:]}", *cur), (f"FY {y - 1}-{str(y)[2:]}", *prev)]
+    if mode == "quarter":
+        q0 = ((a.month - 4) % 12) // 3          # 0 = Apr-Jun
+        y = a.year if a.month >= 4 else a.year - 1
+        sm = 4 + q0 * 3
+        cur = (month(y, sm)[0], month(y, sm + 2)[1])
+        prev = (month(y, sm - 3)[0], month(y, sm - 1)[1])
+        last = (month(y - 1, sm)[0], month(y - 1, sm + 2)[1])
+        names = ["Apr-Jun", "Jul-Sep", "Oct-Dec", "Jan-Mar"]
+        lab = lambda d: f"{names[((d.month - 4) % 12) // 3]} {d.year}"
+        return [(lab(cur[0]), *cur), (lab(prev[0]), *prev), (lab(last[0]), *last)]
+    cur = month(a.year, a.month)
+    prev = month(a.year, a.month - 1)
+    last = month(a.year - 1, a.month)
+    lab = lambda d: d.strftime("%b %Y")
+    return [(lab(cur[0]), *cur), (lab(prev[0]), *prev), (lab(last[0]), *last)]
+
+
+def _figures(c, cid, f, t):
+    sg = lambda g, sign: round(sign * store._sum_group(c, cid, g, f, t), 2)
+    one = lambda sql: c.execute(sql, (cid, f, t)).fetchone()
+    sales_n, sales_amt = one("""SELECT COUNT(*), COALESCE(SUM(amount),0) FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        AND base='Sales' AND posting=1 AND status=''""")
+    rec = one("""SELECT COALESCE(SUM(amount),0) FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        AND base='Receipt' AND posting=1 AND status=''""")[0]
+    pay = one("""SELECT COALESCE(SUM(amount),0) FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        AND base='Payment' AND posting=1 AND status=''""")[0]
+    custs = one("""SELECT COUNT(DISTINCT party) FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        AND base='Sales' AND posting=1 AND status=''""")[0]
+    return {"sales": sg("Sales Accounts", -1), "purchases": sg("Purchase Accounts", 1),
+            "direct_exp": sg("Direct Expenses", 1), "indirect_exp": sg("Indirect Expenses", 1),
+            "income": round(sg("Direct Incomes", -1) + sg("Indirect Incomes", -1), 2),
+            "receipts": round(abs(rec), 2), "payments": round(abs(pay), 2), "bills": sales_n,
+            "avg_bill": round(abs(sales_amt) / sales_n, 2) if sales_n else 0, "customers": custs}
+
+
+def _top(c, cid, f, t, what):
+    if what == "customers":
+        sql = """SELECT party k, SUM(ABS(amount)) v FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+            AND base='Sales' AND posting=1 AND status='' GROUP BY party"""
+    else:
+        sql = """SELECT vi.item k, SUM(ABS(vi.amount)) v FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+            WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND v.base='Sales' AND v.posting=1 AND v.status='' GROUP BY vi.item"""
+    return {r["k"]: r["v"] for r in c.execute(sql, (cid, f, t)) if r["k"]}
+
+
+def compare(cid, mode="month", anchor=None):
+    ps = _periods(mode if mode in ("month", "quarter", "year") else "month", anchor)
+    today = date.today()
+    with store.conn() as c:
+        cols = []
+        for label, f, t in ps:
+            fx = _figures(c, cid, f.isoformat(), t.isoformat())
+            cols.append({"label": label, "from": f.isoformat(), "to": t.isoformat(),
+                         "partial": f <= today <= t, "days_done": (min(today, t) - f).days + 1, "days": (t - f).days + 1, **fx})
+        # who and what moved most against the period before
+        a, b = ps[0], ps[1]
+        moves = {}
+        for what in ("customers", "items"):
+            now, then = _top(c, cid, a[1].isoformat(), a[2].isoformat(), what), _top(c, cid, b[1].isoformat(), b[2].isoformat(), what)
+            diff = [{"name": k, "now": round(now.get(k, 0), 2), "then": round(then.get(k, 0), 2),
+                     "change": round(now.get(k, 0) - then.get(k, 0), 2)} for k in set(now) | set(then)]
+            diff.sort(key=lambda r: -abs(r["change"]))
+            moves[what] = {"up": [r for r in diff if r["change"] > 0][:5], "down": [r for r in diff if r["change"] < 0][:5]}
+    return {"mode": mode, "periods": cols, "moves": moves}

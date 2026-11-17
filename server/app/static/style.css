@@ -687,3 +687,23 @@ dialog .pick { position: fixed; }
 .okc { color: var(--good); }
 .newver.remind { background: #fff4e0; }
 :root[data-theme="dark"] .newver.remind { background: #3a2a10; }
+
+/* GSTR and compare */
+.monthnav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; }
+.monthnav b { font-size: 16px; }
+.monthnav .btn { font-size: 20px; }
+.gsec .row .end { text-align: right; }
+.cnt2 { font-size: 12px; font-weight: 700; background: var(--rule); border-radius: 999px; padding: 1px 7px; color: var(--ink-2); vertical-align: 1px; }
+.tscroll { overflow-x: auto; }
+table.gt { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.gt th, table.gt td { padding: 9px 10px; text-align: right; white-space: nowrap; border-top: 1px solid var(--rule); }
+table.gt th:first-child, table.gt td:first-child { text-align: left; }
+table.gt tr:first-child th { border-top: 0; color: var(--ink-3); font-weight: 700; font-size: 12px; }
+table.gt th { font-weight: 600; }
+table.gt.cmp td.up { color: var(--good); font-weight: 700; }
+table.gt.cmp td.dn { color: var(--cr); font-weight: 700; }
+.movers { padding: 0 16px 12px; }
+.mv { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+.mv:first-child { border-top: 0; }
+.two-col { display: grid; gap: 0 14px; }
+@media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } }

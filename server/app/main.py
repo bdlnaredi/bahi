@@ -36,6 +36,7 @@ import links  # noqa: E402
 import cloud  # noqa: E402
 import tallybk  # noqa: E402
 import insights  # noqa: E402
+import gstr  # noqa: E402
 import upi  # noqa: E402
 import barcodes  # noqa: E402
 import threading  # noqa: E402
@@ -47,7 +48,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.18.0"
+APP_VERSION = "3.19.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -284,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
                 "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
                 "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
                 "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
-                "duedates": "dues", "reminders": "dues"}
+                "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -1173,6 +1174,14 @@ document.getElementById("a").addEventListener("change", function () {{
             return insights.due_dates(cid, q.get("kind", "receivable"))
         if what == "reminders":
             return insights.reminders(cid)
+        if what in ("gstr_one", "gstr_threeb"):
+            m = q.get("month", "") or time.strftime("%Y-%m")
+            if not re.match(r"^\d{4}-\d{2}$", m):
+                return ({"error": "Choose a month."}, 400)
+            return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m)
+        if what == "compare":
+            a = q.get("at", "")
+            return insights.compare(cid, q.get("mode", "month"), a if re.match(r"^\d{4}-\d{2}-\d{2}$", a) else None)
         if what == "entries":
             co = next((c for c in store.companies() if c["id"] == cid), None)
             return ({"entries": entries.listing(co["name"], u) if co else []})

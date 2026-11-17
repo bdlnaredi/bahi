@@ -335,7 +335,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", whatsnew: "reports", duedates: "dues", reminders: "dues", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
+  const map = { "": "home", whatsnew: "reports", gstr: "reports", compare: "reports", duedates: "dues", reminders: "dues", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
   document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
@@ -676,6 +676,90 @@ async function vDueDates(kind) {
   view.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => { location.hash = "#/duedates/" + b.dataset.k; });
   view.querySelectorAll("[data-day]").forEach((b) => b.onclick = () => { S.dueDay = S.dueDay === b.dataset.day ? "" : b.dataset.day; vDueDates(kind).catch(fail); });
   const a = $("#allday"); if (a) a.onclick = (e) => { e.preventDefault(); S.dueDay = ""; vDueDates(kind).catch(fail); };
+}
+
+/* ---------------------------------------------------------------- GSTR-1 and GSTR-3B */
+function monthShift(m, by) { const [y, mm] = m.split("-").map(Number); const d = new Date(y, mm - 1 + by, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+function monthName(m) { const [y, mm] = m.split("-").map(Number); return `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][mm - 1]} ${y}`; }
+async function vGstr(which, month) {
+  setTitle(true);
+  which = which === "3b" ? "3b" : "1";
+  if (!month) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
+  const d = await api(cpath(which === "1" ? "gstr_one" : "gstr_threeb", { month }));
+  const n2 = (x) => nf2.format(x || 0);
+  const taxCells = (r) => `<td>${n2(r.IGST)}</td><td>${n2(r.CGST)}</td><td>${n2(r.SGST)}</td>${r.Cess ? `<td>${n2(r.Cess)}</td>` : ""}`;
+  const head = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-${which === "1" ? "1" : "3B"}</h1>
+    <div class="seg" role="tablist"><button data-w="1" aria-selected="${which === "1"}">GSTR-1 (sales)</button><button data-w="3b" aria-selected="${which === "3b"}">GSTR-3B (summary)</button></div>
+    <div class="monthnav"><button class="btn ic" id="mprev" aria-label="Previous month">‹</button><b>${monthName(month)}</b><button class="btn ic" id="mnext" aria-label="Next month">›</button></div>`;
+  let body = "";
+  if (d.no_tax_ledgers) body = '<section class="page"><div class="empty">No GST ledgers found under Duties &amp; Taxes in Tally.</div></section>';
+  else if (which === "1") {
+    const S1 = d.sections;
+    const sec = (k, title, sub) => `<section class="page gsec"><button class="row" data-open="${k}" aria-expanded="false"><div class="main"><div class="name">${title} <span class="cnt2">${S1[k].count}</span></div><div class="meta">${sub}</div></div>
+      <div class="end"><div>${rupees(S1[k].taxable)}</div><div class="meta">tax ${rupees(S1[k].IGST + S1[k].CGST + S1[k].SGST + S1[k].Cess)}</div></div><span class="chev down"></span></button>
+      <div class="gdet" id="g_${k}" hidden>${k === "B2CS" ? `<div class="tscroll"><table class="gt"><tr><th>Rate</th><th>Supply</th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
+          ${S1.B2CS.rows.map((r) => `<tr><td>${r.rate}%</td><td>${r.supply}</td><td>${n2(r.taxable)}</td>${taxCells({ ...r, Cess: 0 })}</tr>`).join("")}</table></div>`
+        : (S1[k].invoices.map((v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party)}</div><div class="meta">${h(v.number)}, ${fdate(v.date)}${v.gstin ? ` · ${h(v.gstin)}` : ""} · ${v.rates.map((r) => r.rate + "%").join(", ")}</div></div><div class="end"><div>${rupees(v.taxable)}</div><div class="meta">tax ${rupees(v.IGST + v.CGST + v.SGST + v.Cess)}</div></div></a>`).join("") || '<div class="empty">None this month.</div>')}</div></section>`;
+    body = `<section class="herocards">
+        <div class="bold in"><div class="label">Taxable value</div><div class="big">${short(d.total.taxable)}</div><div class="go">${d.total.count} invoices and notes</div></div>
+        <div class="bold nil"><div class="label">Tax on them</div><div class="big">${short(d.total.IGST + d.total.CGST + d.total.SGST + d.total.Cess)}</div><div class="go">IGST ${short(d.total.IGST)} · CGST ${short(d.total.CGST)} · SGST ${short(d.total.SGST)}</div></div></section>
+      ${sec("B2B", "B2B invoices", "To customers with a GSTIN")}
+      ${sec("B2CL", "B2C (Large)", "Other state, no GSTIN, over ₹1 lakh")}
+      ${sec("B2CS", "B2C (Small)", "Everything else without a GSTIN, by rate")}
+      ${sec("CDNR", "Credit / debit notes (registered)", "Notes to customers with a GSTIN")}
+      ${sec("CDNUR", "Credit / debit notes (unregistered)", "Notes to customers without a GSTIN")}
+      ${d.nil ? `<p class="subtitle">Nil-rated or exempt sales: ${rupees(d.nil)}</p>` : ""}
+      <div class="setgroup">HSN summary</div>
+      <section class="page"><div class="tscroll"><table class="gt"><tr><th>HSN</th><th>Rate</th><th>Qty</th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
+        ${d.hsn.map((r) => `<tr><td>${h(r.hsn)}</td><td>${r.rate ?? "?"}%</td><td>${nf2.format(r.qty)} ${h(r.unit)}</td><td>${n2(r.taxable)}</td>${taxCells({ ...r, Cess: 0 })}</tr>`).join("") || '<tr><td colspan="7">No stock lines this month.</td></tr>'}</table></div></section>`;
+  } else {
+    const row = (label, r, extra = "") => `<tr><th>${label}</th><td>${extra}</td>${taxCells(r)}</tr>`;
+    body = `<section class="herocards">
+        <div class="bold out"><div class="label">Tax on sales</div><div class="big">${short(d.out_total)}</div><div class="go">on ${short(d.out.taxable)} taxable</div></div>
+        <div class="bold in"><div class="label">Input credit</div><div class="big">${short(d.itc_total)}</div><div class="go">on purchases of ${short(d.purchases)}</div></div></section>
+      <section class="bold ${d.net_total > 0 ? "nil" : "in"}" style="margin-bottom:14px"><div class="label">${d.net_total > 0 ? "Left to pay after input credit" : "Input credit left over"}</div><div class="big">${rupees(Math.abs(d.net_total))}</div>
+        <div class="go" style="opacity:.85">IGST ${n2(d.net.IGST)} · CGST ${n2(d.net.CGST)} · SGST ${n2(d.net.SGST)}</div></section>
+      <section class="page"><div class="tscroll"><table class="gt"><tr><th></th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th>${d.out.Cess || d.itc.Cess ? "<th>Cess</th>" : ""}</tr>
+        ${row("3.1(a) Outward taxable supplies", d.out, n2(d.out.taxable))}
+        <tr><th>3.1(c) Nil-rated, exempt</th><td>${n2(d.nil)}</td><td></td><td></td><td></td></tr>
+        ${row("4. Input tax credit", d.itc)}
+        ${row("Net (3.1 less 4)", d.net)}</table></div></section>`;
+  }
+  view.innerHTML = head + body + `<p class="hint" style="margin:0 4px 14px">Put together from the vouchers synced from Tally: tax as posted on Tally's GST ledgers, rates as Tally gave each line. Use it to check, then file from Tally's own GSTR reports or with your CA. Reverse charge, amendments and the portal's set-off order aren't covered.</p>`;
+  view.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { location.hash = `#/gstr/${b.dataset.w}/${month}`; });
+  $("#mprev").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, -1)}`; };
+  $("#mnext").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, 1)}`; };
+  view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+}
+
+/* ---------------------------------------------------------------- compare periods */
+async function vCompare(mode, at) {
+  setTitle(true);
+  mode = ["month", "quarter", "year"].includes(mode) ? mode : "month";
+  const d = await api(cpath("compare", { mode, at: at || "" }));
+  const P = d.periods;
+  const pct = (a, b) => (!b ? (a ? "new" : "") : `${a >= b ? "▲" : "▼"} ${Math.abs(Math.round((a - b) / Math.abs(b) * 100))}%`);
+  const goodUp = { sales: 1, receipts: 1, income: 1, bills: 1, avg_bill: 1, customers: 1, purchases: 0, direct_exp: -1, indirect_exp: -1, payments: 0 };
+  const M = [["sales", "Sales"], ["purchases", "Purchases"], ["direct_exp", "Direct expenses"], ["indirect_exp", "Indirect expenses"], ["income", "Other income"],
+    ["receipts", "Money received"], ["payments", "Money paid out"], ["bills", "Sales bills", 1], ["avg_bill", "Average bill"], ["customers", "Customers billed", 1]];
+  const cell = (k, v, isCount) => isCount ? String(v) : short(v);
+  const tone = (k, a, b) => { const g = goodUp[k]; if (!g || a === b || !b) return ""; return (a > b) === (g > 0) ? "up" : "dn"; };
+  const step = (by) => { const a = new Date(P[0].from + "T00:00:00"); if (mode === "year") a.setFullYear(a.getFullYear() + by); else a.setMonth(a.getMonth() + by * (mode === "quarter" ? 3 : 1)); return iso(a); };
+  const mover = (r) => `<div class="mv"><span>${h(r.name)}</span><b class="${r.change > 0 ? "okc" : "od"}">${r.change > 0 ? "+" : "−"}${short(Math.abs(r.change))}</b></div>`;
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Compare periods</h1>
+    <div class="seg" role="tablist">${[["month", "Month"], ["quarter", "Quarter"], ["year", "Year"]].map(([k, l]) => `<button data-m="${k}" aria-selected="${k === mode}">${l}</button>`).join("")}</div>
+    <div class="monthnav"><button class="btn ic" id="cprev" aria-label="Earlier">‹</button><b>${h(P[0].label)}</b><button class="btn ic" id="cnext" aria-label="Later">›</button></div>
+    ${P[0].partial ? `<p class="hint" style="margin:-4px 4px 10px">${h(P[0].label)} isn't over yet: ${P[0].days_done} of ${P[0].days} days so far.</p>` : ""}
+    <section class="page"><div class="tscroll"><table class="gt cmp"><tr><th></th>${P.map((p, i) => `<th>${h(p.label)}${i ? "" : " ●"}</th>`).join("")}<th>vs ${h(P[1].label)}</th></tr>
+      ${M.map(([k, l, isCount]) => `<tr><th>${l}</th>${P.map((p) => `<td>${cell(k, p[k], isCount)}</td>`).join("")}<td class="${tone(k, P[0][k], P[1][k])}">${pct(P[0][k], P[1][k])}</td></tr>`).join("")}</table></div></section>
+    <div class="two-col">
+      <section class="page"><div class="block-title">Customers: biggest changes</div><div class="movers">${[...d.moves.customers.up, ...d.moves.customers.down].map(mover).join("") || '<div class="empty">No sales in either period.</div>'}</div></section>
+      <section class="page"><div class="block-title">Items: biggest changes</div><div class="movers">${[...d.moves.items.up, ...d.moves.items.down].map(mover).join("") || '<div class="empty">No item sales in either period.</div>'}</div></section>
+    </div>
+    <p class="hint" style="margin:0 4px 14px">From the vouchers synced from Tally. Changes are against ${h(P[1].label)}.</p>`;
+  view.querySelectorAll("[data-m]").forEach((b) => b.onclick = () => { location.hash = `#/compare/${b.dataset.m}`; });
+  $("#cprev").onclick = () => { location.hash = `#/compare/${mode}/${step(-1)}`; };
+  $("#cnext").onclick = () => { location.hash = `#/compare/${mode}/${step(1)}`; };
 }
 
 /* ---------------------------------------------------------------- morning reminders */
@@ -1370,6 +1454,8 @@ function vReports() {
     ["#/brs", "Bank reconciliation", "Match your bank statement with the bank ledger in Tally", can("accounts")],
     ["#/collect", "Follow-up list", "Who should pay you: overdue, due this week, promises", can("dues")],
     ["#/gst", "GST summary", "Output tax, input credit and net payable by month", can("accounts")],
+    ["#/gstr", "GSTR-1 and GSTR-3B", "The month's returns in summary, from your Tally vouchers, to check before filing", can("accounts")],
+    ["#/compare", "Compare periods", "This month, quarter or year against the last one and a year ago", can("accounts")],
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
@@ -2805,6 +2891,8 @@ async function route() {
       case "vouchers": await vVouchers(); break;
       case "whatsnew": await vWhatsNew(); break;
       case "duedates": await vDueDates(parts[1]); break;
+      case "gstr": await vGstr(parts[1], parts[2]); break;
+      case "compare": await vCompare(parts[1], parts[2]); break;
       case "reminders": await vReminders(); break;
       default: await vHome();
     }
