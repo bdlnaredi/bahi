@@ -2,6 +2,17 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.20.0 (17 November 2026)
+
+- **Reorder list** (Reports, or Stock): items to buy now, grouped by the supplier you last bought each from.
+  - An item is listed when it's at or below the reorder level set in Tally (or the minimum set in Bahi), or will run out within 15 days at its recent selling rate.
+  - The suggested quantity covers about a month and keeps to Tally's minimum order.
+  - *Send to supplier* opens WhatsApp with the list ready to send; *Copy list* copies it.
+- **Item profit** (Reports): profit and margin on each item and each customer for any period. Selling value less the cost of what was sold, at the item's average purchase rate in Tally.
+- **Quotations** (Reports): make a quotation for a Tally customer or anyone else, with items, GST and validity.
+  - Share or print it as a PDF laid out like your Tally invoice, titled Quotation.
+  - Mark it lost, or tap *Make sales order*: the order form opens filled in. Nothing goes into Tally until that order is saved.
+
 ## 3.19.0 (17 November 2026)
 
 - **GSTR-1 and GSTR-3B** (Reports): the month's returns in summary, put together from your Tally vouchers, to check before filing.

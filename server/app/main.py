@@ -37,6 +37,8 @@ import cloud  # noqa: E402
 import tallybk  # noqa: E402
 import insights  # noqa: E402
 import gstr  # noqa: E402
+import quotes  # noqa: E402
+import invoice  # noqa: E402
 import upi  # noqa: E402
 import barcodes  # noqa: E402
 import threading  # noqa: E402
@@ -48,7 +50,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.19.0"
+APP_VERSION = "3.20.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -285,7 +287,8 @@ class Handler(BaseHTTPRequestHandler):
                 "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
                 "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
                 "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
-                "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts"}
+                "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts",
+                "reorder": "stock", "profit": "accounts"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -303,6 +306,8 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             return (users.can(u, "parties") or users.can(u, "dues")) and arg and \
                 store.voucher_party(cid, int(arg)) in store.party_names(cid)
+        if what in ("quotes", "quote", "quote_pdf", "quote_form"):      # quotations: owner, or staff who can bill or take orders
+            return users.can(u, "e_sales") or users.can(u, "e_order")
         if what in ("entry_form", "party_bills", "entries", "entry", "partycheck"):
             return any(users.can(u, p) for p in entries.PERM.values())
         return False
@@ -1062,6 +1067,23 @@ document.getElementById("a").addEventListener("change", function () {{
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
 
+        mp = re.match(r"^/api/c/(\d+)/quotes(?:/(\d+)(?:/(status|delete))?)?$", path)
+        if mp and method == "POST":
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "quotes", q, None):
+                return self.send_json({"error": "You can't make quotations."}, 403)
+            data = json.loads(self.body(65536) or b"{}")
+            try:
+                if mp.group(3) == "status":
+                    return self.send_json(quotes.set_status(cid, int(mp.group(2)), str(data.get("status", ""))))
+                if mp.group(3) == "delete":
+                    return self.send_json(quotes.delete(cid, int(mp.group(2))))
+                if mp.group(2):
+                    data["id"] = int(mp.group(2))
+                return self.send_json(quotes.save(cid, data, u.get("name") or "Owner"))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+
         mp = re.match(r"^/api/c/(\d+)/followup$", path)
         if mp and method == "POST":
             if not self.allowed(int(mp.group(1)), "followup", q, None):
@@ -1103,6 +1125,11 @@ document.getElementById("a").addEventListener("change", function () {{
             if d:
                 return self.send_pdf(pdf.ledger_pdf(d), d["ledger"]["name"] + " ledger")
             return self.send_json({"error": "not found"}, 404)
+        if what == "quote_pdf" and arg:
+            qq = quotes.get(cid, int(arg))
+            if not qq:
+                return self.send_json({"error": "not found"}, 404)
+            return self.send_pdf(pdf.voucher_pdf(quotes.pdf_data(cid, qq)), f"Quotation {qq['number']} {qq['party']}")
         if what == "voucher_pdf" and arg:
             d = _with_upi(store.voucher(cid, int(arg)))
             if d:
@@ -1141,7 +1168,7 @@ document.getElementById("a").addEventListener("change", function () {{
             params = {str(k): str(v) for k, v in (r.get("params") or {}).items() if v not in (None, "")}
             res = None
             if re.match(r"^[a-z_]+$", what) and what not in ("bulk", "export", "ledger_pdf", "voucher_pdf", "entry_form",
-                                                               "party_bills", "entries", "entry", "brs", "partycheck"):
+                                                               "party_bills", "entries", "entry", "brs", "partycheck", "quote_form", "quote_pdf"):
                 try:
                     if self.allowed(cid, what, params, arg):
                         res = self.company_data(cid, what, arg, params)
@@ -1179,6 +1206,18 @@ document.getElementById("a").addEventListener("change", function () {{
             if not re.match(r"^\d{4}-\d{2}$", m):
                 return ({"error": "Choose a month."}, 400)
             return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m)
+        if what == "reorder":
+            return insights.reorder(cid)
+        if what == "profit":
+            return insights.profit(cid, f, t)
+        if what == "quotes":
+            return quotes.listing(cid)
+        if what == "quote" and arg:
+            qq = quotes.get(cid, int(arg))
+            return qq if qq else ({"error": "No such quotation."}, 404)
+        if what == "quote_form":
+            fm = invoice.form(cid, "sales")
+            return {k: fm[k] for k in ("today", "company_state", "parties", "party_info", "items")}
         if what == "compare":
             a = q.get("at", "")
             return insights.compare(cid, q.get("mode", "month"), a if re.match(r"^\d{4}-\d{2}-\d{2}$", a) else None)

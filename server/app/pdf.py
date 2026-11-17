@@ -458,7 +458,7 @@ def invoice_pdf(d):
     P = d.get("party") or {}
     base = V.get("base") or V["vtype"]
     tax_lines = [l for l in d["lines"] if l["kind"] == "tax"]
-    title = {"Credit Note": "Credit Note", "Debit Note": "Debit Note", "Purchase": "Purchase Invoice"}.get(
+    title = V.get("title") or {"Credit Note": "Credit Note", "Debit Note": "Debit Note", "Purchase": "Purchase Invoice"}.get(
         base, "Tax Invoice" if tax_lines else "Invoice")
     p = PDF()
     L, R = 28, PDF.W - 28
@@ -536,7 +536,7 @@ def invoice_pdf(d):
 
     # right column cells (label / value), two per row like Tally
     cells = [
-        ("Invoice No." if base != "Purchase" else "Supplier Invoice No.", V["number"] if base != "Purchase" else (V.get("reference") or V["number"])),
+        (V.get("no_label") or ("Invoice No." if base != "Purchase" else "Supplier Invoice No."), V["number"] if base != "Purchase" else (V.get("reference") or V["number"])),
         ("Dated", tdate(V["date"])),
         ("Delivery Note", X.get("delivery_note", "")), ("Mode/Terms of Payment", X.get("terms_payment", "")),
         ("Reference No. & Date.", " ".join(x for x in (V.get("reference", ""), tdate(X.get("reference_date", ""))) if x)),
@@ -849,7 +849,7 @@ def invoice_pdf(d):
     p.line(L, bottom_y, R, bottom_y, 0.6)
     if X.get("ewb_no") and not X.get("ewb_cancelled"):
         _eway_page(p, d, X, pname, pgst, pstate, paddr if base == "Purchase" else (X.get("consignee_address") or paddr))
-    return p.output("This is a Computer Generated Invoice")
+    return p.output(V.get("footer") or "This is a Computer Generated Invoice")
 
 
 def _eway_page(p, d, X, pname, pgst, pstate, ship_addr):
@@ -1108,7 +1108,7 @@ def accounting_pdf(d):
 
 def voucher_pdf(d):
     base = d["voucher"].get("base") or d["voucher"]["vtype"]
-    if d["items"] or base in ("Sales", "Purchase", "Credit Note", "Debit Note"):
+    if d["items"] or base in ("Sales", "Purchase", "Credit Note", "Debit Note", "Quotation"):
         return invoice_pdf(d)
     return accounting_pdf(d)
 

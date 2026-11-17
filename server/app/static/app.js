@@ -335,7 +335,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", whatsnew: "reports", gstr: "reports", compare: "reports", duedates: "dues", reminders: "dues", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
+  const map = { "": "home", whatsnew: "reports", gstr: "reports", compare: "reports", reorder: "reports", profit: "reports", quotes: "reports", quote: "reports", duedates: "dues", reminders: "dues", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
   document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
@@ -730,6 +730,145 @@ async function vGstr(which, month) {
   $("#mprev").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, -1)}`; };
   $("#mnext").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, 1)}`; };
   view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+}
+
+/* ---------------------------------------------------------------- reorder list */
+async function vReorder() {
+  setTitle(true);
+  const d = await api(cpath("reorder"));
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  const by = {};
+  d.items.forEach((r) => (by[r.supplier || ""] = by[r.supplier || ""] || []).push(r));
+  const q = (n, u) => `${nfq.format(n)} ${h(u || "")}`;
+  const msg = (sup, rows) => `Dear ${sup || "Sir"}, please send the following for ${co}:\n` +
+    rows.map((r, i) => `${i + 1}. ${r.item}: ${nfq.format(r.order)} ${r.unit}`).join("\n") + "\nKindly confirm rate and delivery. Thank you.";
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Reorder list</h1>
+    <p class="subtitle">${d.items.length ? `${d.items.length} item${d.items.length === 1 ? "" : "s"} to buy, about ${rupees(d.total)} at the last purchase rates` : ""}</p>
+    ${Object.keys(by).map((sup) => {
+      const rows = by[sup], ph = digits((rows[0] || {}).supplier_phone);
+      return `<div class="setgroup">${sup ? h(sup) : "No purchase from a supplier yet"}</div><section class="page">
+        ${rows.map((r) => `<div class="row"><div class="main"><div class="name">${h(r.item)}</div>
+          <div class="meta"><span class="${r.qty <= 0 ? "od" : ""}">${q(r.qty, r.unit)} in hand</span>${r.level != null ? ` · reorder at ${q(r.level, r.unit)} (${r.level_from})` : ""}${r.per_day ? ` · sells ${nfq.format(r.per_day)}/day` : ""}</div>
+          <div class="meta od">${h(r.why)}</div></div>
+          <div class="end"><div><b>${q(r.order, r.unit)}</b></div><div class="meta">${r.last_rate ? `@ ${rupees(r.last_rate)}` : ""}</div></div></div>`).join("")}
+        <div class="actions" style="padding:4px 14px 12px">
+          <a class="btn primary wa" href="https://wa.me/${ph}?text=${enc(msg(sup, rows))}" target="_blank" rel="noopener">${ICON.wa}${ph ? "Send to " + h(sup.split(" ")[0]) : "Send on WhatsApp"}</a>
+          <button class="btn" data-copy="${h(msg(sup, rows))}">Copy list</button></div></section>`;
+    }).join("") || '<section class="page"><div class="empty">Nothing needs buying right now. 👍</div></section>'}
+    <p class="hint" style="margin:0 4px 14px">An item is listed when it's at or below its reorder level (set on the item in Tally, or the minimum set in Bahi's Stock), or will run out within 15 days at the rate it sold over the last ${d.days} days. The quantity covers about ${d.cover} days and respects Tally's minimum order. Supplier = whoever you last bought it from.</p>`;
+  view.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied."); } catch (e) { toast("Couldn't copy here."); } });
+}
+
+/* ---------------------------------------------------------------- item profit */
+async function vProfit(tab) {
+  setTitle(true);
+  tab = tab === "customers" ? "customers" : "items";
+  const d = await api(cpath("profit", periodParams()));
+  const m = (x) => x == null ? "–" : `${x}%`;
+  const rows = tab === "items"
+    ? d.items.map((r) => `<div class="row"><div class="main"><div class="name">${h(r.item)}</div><div class="meta">${nfq.format(r.qty)} ${h(r.unit || "")} sold @ ${rupees(r.rate)}${r.buy_rate ? `, cost ${rupees(r.buy_rate)}` : ", no purchase cost"}</div></div>
+        <div class="end"><div class="${(r.profit || 0) < 0 ? "od" : ""}"><b>${r.profit == null ? "–" : rupees(r.profit)}</b></div><div class="meta">${m(r.margin)} on ${short(r.sales)}</div></div></div>`)
+    : d.customers.map((r) => `<a class="row" href="#/ledger/${enc(r.party)}"><div class="main"><div class="name">${h(r.party)}</div><div class="meta">Sales ${short(r.sales)}${r.no_cost > 0.5 ? `, ${short(r.no_cost)} without a cost` : ""}</div></div>
+        <div class="end"><div class="${r.profit < 0 ? "od" : ""}"><b>${rupees(r.profit)}</b></div><div class="meta">${m(r.margin)}</div></div></a>`);
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Item profit</h1>${periodBar(d.from, d.to)}
+    <section class="herocards">
+      <div class="bold in"><div class="label">Profit on goods sold</div><div class="big">${short(d.profit)}</div><div class="go">${d.margin == null ? "" : d.margin + "% margin"}</div></div>
+      <div class="bold nil"><div class="label">Sales of stock items</div><div class="big">${short(d.sales)}</div><div class="go">${d.items.length} items</div></div></section>
+    <div class="seg" role="tablist"><button data-t="items" aria-selected="${tab === "items"}">By item</button><button data-t="customers" aria-selected="${tab === "customers"}">By customer</button></div>
+    <section class="page">${rows.join("") || '<div class="empty">No items sold in this period.</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">Selling value before tax, less the cost of what was sold. Cost is the item's average purchase rate in your Tally purchases (Tally's stock rate when it was never bought). Expenses like rent and salaries aren't included: see Profit &amp; Loss for those.${d.no_cost.length ? ` No cost for: ${d.no_cost.map(h).join(", ")}.` : ""}</p>`;
+  wirePeriod(d.from, d.to);
+  view.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { location.hash = "#/profit/" + b.dataset.t; });
+}
+
+/* ---------------------------------------------------------------- quotations */
+const QSTATUS = { open: "Open", ordered: "Ordered", lost: "Lost" };
+async function vQuotes() {
+  setTitle(true);
+  const d = await api(cpath("quotes"));
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Quotations</h1>
+    <div class="newrow" style="margin-bottom:14px"><a class="btn primary big" href="#/quote/new">${ICON.plus}New quotation</a></div>
+    <section class="page">${d.quotes.map((q) => `<a class="row" href="#/quote/${q.id}"><div class="main"><div class="name">${h(q.party)}</div>
+      <div class="meta">${h(q.number)}, ${fdate(q.date)} · <span class="qst ${q.status}">${QSTATUS[q.status] || q.status}</span>${q.status === "open" && q.valid < iso(new Date()) ? ' · <span class="od">expired</span>' : ""}</div></div>
+      <div class="end">${rupees(q.total)}</div><span class="chev"></span></a>`).join("") || '<div class="empty">No quotations yet.</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">Quotations stay in Bahi; nothing goes into Tally until you turn one into a sales order.</p>`;
+}
+
+async function vQuote(id) {
+  setTitle(true);
+  const q = await api(cpath("quote", {}).replace(/\?$/, "") + "/" + id);
+  const url = `/api/c/${S.cid}/quote_pdf/${id}`;
+  view.innerHTML = `<div class="crumbs"><a href="#/quotes">Quotations</a></div><h1 class="title">${h(q.number)}</h1>
+    <p class="subtitle">${h(q.party)} · ${fdate(q.date)} · valid till ${fdate(q.valid)} · <span class="qst ${q.status}">${QSTATUS[q.status]}</span></p>
+    <section class="bold in" style="margin-bottom:12px"><div class="label">Total</div><div class="big">${rupees(q.total)}</div><div class="go" style="opacity:.85">${rupees(q.taxable)} + GST ${rupees(q.tax)}${q.igst ? " (IGST)" : ""}</div></section>
+    <div class="actions top"><button class="btn primary" id="qshare">${ICON.share}Share</button><button class="btn" id="qprint">${ICON.print}Print</button><a class="btn" href="#/quote/${id}/edit">Edit</a></div>
+    <section class="page">${q.items.map((i) => `<div class="row"><div class="main"><div class="name">${h(i.item)}</div><div class="meta">${nfq.format(i.qty)} ${h(i.unit)} @ ${rupees(i.rate)} · GST ${i.gst}%</div></div><div class="end">${rupees(i.amount)}</div></div>`).join("")}
+      ${q.notes ? `<div class="row"><div class="main meta">${h(q.notes)}</div></div>` : ""}</section>
+    <div class="actions" style="padding:0 0 14px">
+      ${q.status !== "ordered" && can("e_order") ? '<button class="btn primary" id="qorder">Make sales order</button>' : ""}
+      ${q.status === "open" ? '<button class="btn" id="qlost">Mark lost</button>' : q.status === "lost" ? '<button class="btn" id="qopen">Reopen</button>' : ""}
+      <button class="btn" id="qdel"><span class="od">Delete</span></button></div>`;
+  const status = (st) => fetch(`/api/c/${S.cid}/quotes/${id}/status`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: st }) });
+  $("#qshare").onclick = () => sharePdf(url, `Quotation ${q.number} ${q.party}`, q.party, false);
+  $("#qprint").onclick = () => printPdf(url, `Quotation ${q.number}`);
+  const o = $("#qorder"); if (o) o.onclick = async () => {
+    await status("ordered");
+    S.prefill = { kind: "order", party: q.party, items: q.items.map((i) => ({ item: i.item, qty: i.qty, rate: i.rate })), note: `Against quotation ${q.number}` };
+    location.hash = "#/new/order";
+  };
+  const l = $("#qlost"); if (l) l.onclick = async () => { await status("lost"); vQuote(id).catch(fail); };
+  const r = $("#qopen"); if (r) r.onclick = async () => { await status("open"); vQuote(id).catch(fail); };
+  $("#qdel").onclick = async () => {
+    if (!confirm(`Delete quotation ${q.number}?`)) return;
+    await fetch(`/api/c/${S.cid}/quotes/${id}/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    location.hash = "#/quotes";
+  };
+}
+
+const dlist = (id, arr) => `<datalist id="${id}">${arr.map((x) => `<option value="${h(x)}">`).join("")}</datalist>`;
+async function vQuoteForm(id) {
+  setTitle(true);
+  const [f, q] = await Promise.all([api(cpath("quote_form")), id ? api(cpath("quote", {}).replace(/\?$/, "") + "/" + id) : null]);
+  const items = Object.fromEntries(f.items.map((i) => [i.name, i]));
+  const plus15 = new Date(); plus15.setDate(plus15.getDate() + 15);
+  view.innerHTML = `<div class="crumbs"><a href="#/quotes">Quotations</a></div><h1 class="title">${q ? "Edit " + h(q.number) : "New quotation"}</h1>
+    <section class="page"><form class="form" id="qf" style="padding-top:14px" autocomplete="off">
+      <label>Customer<input name="party" list="qplist" required placeholder="A Tally customer, or type any name" value="${h(q ? q.party : "")}">${dlist("qplist", f.parties)}</label>
+      <div class="two"><label>Date<input type="date" name="date" value="${q ? q.date : f.today}" required></label><label>Valid till<input type="date" name="valid" value="${q ? q.valid : iso(plus15)}" required></label></div>
+      <label><span><input type="checkbox" name="igst" ${q && q.igst ? "checked" : ""}> Customer is in another state (IGST)</span></label>
+      <div id="items"></div><button class="btn" type="button" id="additem">+ Add item</button>${dlist("qilist", f.items.map((i) => i.name))}
+      <div class="qtotal" id="qtot"></div>
+      <label>Notes (terms, delivery, payment)<textarea name="notes" rows="2">${h(q ? q.notes : "")}</textarea></label>
+      <button class="btn primary" type="submit">Save quotation</button><p class="hint" id="qmsg"></p></form></section>`;
+  const form = $("#qf");
+  const add = (pre) => {
+    const row = document.createElement("div"); row.className = "irow";
+    row.innerHTML = `<label>Item<input name="item" list="qilist" placeholder="Start typing an item"></label>
+      <div class="three"><label>Qty<input name="qty" type="number" min="0" step="any" inputmode="decimal"></label><label>Rate<input name="rate" type="number" min="0" step="0.01" inputmode="decimal"></label><label>GST %<input name="gst" type="number" min="0" max="40" step="0.01" inputmode="decimal"></label></div>`;
+    $("#items").appendChild(row);
+    const it = row.querySelector("[name=item]");
+    it.onchange = () => { const x = items[it.value]; if (x) { if (!row.querySelector("[name=rate]").value) row.querySelector("[name=rate]").value = x.rate || ""; if (row.querySelector("[name=gst]").value === "") row.querySelector("[name=gst]").value = x.gst ?? ""; } tot(); };
+    row.oninput = tot;
+    if (pre) { it.value = pre.item; row.querySelector("[name=qty]").value = pre.qty; row.querySelector("[name=rate]").value = pre.rate; row.querySelector("[name=gst]").value = pre.gst; }
+  };
+  const rowsData = () => Array.from($("#items").querySelectorAll(".irow")).map((r) => ({ item: r.querySelector("[name=item]").value.trim(), qty: r.querySelector("[name=qty]").value, rate: r.querySelector("[name=rate]").value, gst: r.querySelector("[name=gst]").value })).filter((r) => r.item);
+  const tot = () => {
+    let t = 0, tx = 0;
+    rowsData().forEach((r) => { const a = (+r.qty || 0) * (+r.rate || 0); t += a; tx += a * (+r.gst || 0) / 100; });
+    $("#qtot").innerHTML = `Before tax <b>${rupees(t)}</b> · GST <b>${rupees(tx)}</b> · Total <b>${rupees(t + tx)}</b>`;
+  };
+  form.party.addEventListener("change", () => { const p = f.party_info[form.party.value] || {}; if (p.state && f.company_state) form.igst.checked = p.state.toLowerCase() !== f.company_state.toLowerCase(); });
+  $("#additem").onclick = () => add();
+  if (q) q.items.forEach(add); else add();
+  tot();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { party: form.party.value.trim(), date: form.date.value, valid: form.valid.value, igst: form.igst.checked, notes: form.notes.value, items: rowsData() };
+    const r = await fetch(`/api/c/${S.cid}/quotes${id ? "/" + id : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { $("#qmsg").innerHTML = `<span class="od">${h(j.error || "Couldn't save.")}</span>`; return; }
+    toast(`Saved ${j.number}.`); location.hash = `#/quote/${j.id}`;
+  };
 }
 
 /* ---------------------------------------------------------------- compare periods */
@@ -1253,7 +1392,7 @@ async function vStock(q = "") {
         <div class="sc"><span class="lbl">In / Out</span><b class="up">+${nfq.format(i.in_qty)}</b><b class="down">−${nfq.format(i.out_qty)}</b></div>
         <div class="sc"><span class="lbl">Closing</span><b>${qty(i.close_qty, i.unit)}</b><span class="meta">${i.close_exact ? "" : "≈ "}${money(i.close_value)}</span></div></a>`).join("")
       || '<div class="empty">No stock item matches that name.</div>'}</section>
-    <div class="actions" style="padding:0 0 4px">${can("e_item") ? '<a class="btn primary" href="#/new/stockitem">+ New item</a>' : ""}<a class="btn" href="#/godowns">Stock by godown</a>${excelBtn("stock", periodParams())}</div>
+    <div class="actions" style="padding:0 0 4px">${can("e_item") ? '<a class="btn primary" href="#/new/stockitem">+ New item</a>' : ""}<a class="btn" href="#/reorder">Reorder list</a><a class="btn" href="#/godowns">Stock by godown</a>${excelBtn("stock", periodParams())}</div>
     <p class="note" style="border:0">Set a minimum on an item's page to be told on Telegram when it runs low. Negative stock (all godowns together) is flagged too.</p>
     <p class="note" style="border:0;margin-top:0">Opening and closing are Tally's own figures for whole months, quarters and years, across all godowns. For other dates Bahi works them out from the nearest month-end and marks them ≈.</p>`;
   const sf = $("#sflag"); if (sf) sf.onclick = (e) => { e.preventDefault(); S.sflag = !S.sflag; vStock(S.sq || "").catch(fail); };
@@ -1456,6 +1595,9 @@ function vReports() {
     ["#/gst", "GST summary", "Output tax, input credit and net payable by month", can("accounts")],
     ["#/gstr", "GSTR-1 and GSTR-3B", "The month's returns in summary, from your Tally vouchers, to check before filing", can("accounts")],
     ["#/compare", "Compare periods", "This month, quarter or year against the last one and a year ago", can("accounts")],
+    ["#/profit", "Item profit", "Profit on each item and each customer, at Tally's purchase cost", can("accounts")],
+    ["#/reorder", "Reorder list", "Items to buy now, by supplier, ready to send", can("stock")],
+    ["#/quotes", "Quotations", "Make and share quotations; turn one into a sales order", can("e_sales") || can("e_order")],
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
@@ -2605,6 +2747,18 @@ async function vNewEntry(kind) {
     };
     $("#additem").onclick = add; add();
     $("#scanitem").onclick = () => scanItems(add).catch(fail);
+    if (S.prefill && S.prefill.kind === "order") {          // from a quotation: its customer and items
+      const pf = S.prefill; S.prefill = null;
+      form.party.value = pf.party; form.party.dispatchEvent(new Event("change"));
+      pf.items.forEach((it, i) => {
+        if (i) add();
+        const rows = $("#items").querySelectorAll(".irow"), row = rows[rows.length - 1];
+        row.querySelector("[name=item]").value = it.item; row.querySelector("[name=item]").dispatchEvent(new Event("change"));
+        row.querySelector("[name=qty]").value = it.qty; row.querySelector("[name=rate]").value = it.rate;
+      });
+      if (form.narration && pf.note) form.narration.value = pf.note;
+      tot();
+    }
   } else {
     let typed = false;
     form.amount.oninput = () => { typed = true; };
@@ -2892,6 +3046,10 @@ async function route() {
       case "whatsnew": await vWhatsNew(); break;
       case "duedates": await vDueDates(parts[1]); break;
       case "gstr": await vGstr(parts[1], parts[2]); break;
+      case "reorder": await vReorder(); break;
+      case "profit": await vProfit(parts[1]); break;
+      case "quotes": await vQuotes(); break;
+      case "quote": await (parts[1] === "new" || parts[2] === "edit" ? vQuoteForm(parts[1] === "new" ? null : +parts[1]) : vQuote(+parts[1])); break;
       case "compare": await vCompare(parts[1], parts[2]); break;
       case "reminders": await vReminders(); break;
       default: await vHome();

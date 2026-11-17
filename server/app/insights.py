@@ -246,3 +246,89 @@ def compare(cid, mode="month", anchor=None):
             diff.sort(key=lambda r: -abs(r["change"]))
             moves[what] = {"up": [r for r in diff if r["change"] > 0][:5], "down": [r for r in diff if r["change"] < 0][:5]}
     return {"mode": mode, "periods": cols, "moves": moves}
+
+
+# ------------------------------------------------------------------ reorder list
+def reorder(cid, days=90, cover=30):
+    """Items to buy: at or below the reorder level set in Tally (or the minimum set in Bahi), or that will run out
+    within 15 days at the rate they sold over the last 90 days. Suggested quantity covers about a month."""
+    import math
+    co = next((x for x in store.companies() if x["id"] == cid), None)
+    mins = store.stock_mins(co["name"]) if co else {}
+    since = (date.today() - timedelta(days=days)).isoformat()
+    with store.conn() as c:
+        items = [dict(r) for r in c.execute("""SELECT name, parent, unit, closing_qty, closing_rate, reorder, minorder
+            FROM stock WHERE company_id=? ORDER BY name""", (cid,))]
+        sold = {r["item"]: r["q"] for r in c.execute("""SELECT vi.item, SUM(ABS(vi.qty)) q FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+            WHERE v.company_id=? AND v.base='Sales' AND v.status='' AND v.date>=? GROUP BY vi.item""", (cid, since))}
+        last_buy = {}
+        for r in c.execute("""SELECT vi.item, v.party, vi.rate, v.date FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+                WHERE v.company_id=? AND v.base='Purchase' AND v.status='' ORDER BY v.date, v.id""", (cid,)):
+            last_buy[r["item"]] = {"party": r["party"], "rate": r["rate"], "date": r["date"]}
+        phones = {r["name"]: r["mobile"] or r["phone"] or "" for r in c.execute("SELECT name, mobile, phone FROM ledger WHERE company_id=?", (cid,))}
+    out = []
+    for it in items:
+        qty = it["closing_qty"] or 0
+        avg = (sold.get(it["name"]) or 0) / days
+        level = it["reorder"] if it["reorder"] else mins.get(it["name"])
+        left = max(qty, 0) / avg if avg > 0 else None
+        why = ""
+        if level is not None and qty <= level:
+            why = "at or below the reorder level"
+        elif avg > 0 and qty <= 0:
+            why = "out of stock"
+        elif left is not None and left < 15:
+            why = f"runs out in about {max(0, int(left))} days"
+        if not why:
+            continue
+        have = max(qty, 0)       # stock below zero in Tally is a timing gap, not something to buy back
+        want = max(it["minorder"] or 0, (level * 2 - have) if level else 0, cover * avg - have, 1 if have <= 0 else 0)
+        want = math.ceil(want) if want > 0 else 0
+        lb = last_buy.get(it["name"]) or {}
+        out.append({"item": it["name"], "group": it["parent"], "unit": it["unit"], "qty": round(qty, 3), "level": level,
+                    "level_from": "Tally" if it["reorder"] else ("Bahi" if level is not None else ""), "minorder": it["minorder"],
+                    "per_day": round(avg, 2), "days_left": None if left is None else round(left, 1), "why": why, "order": want,
+                    "supplier": lb.get("party", ""), "supplier_phone": phones.get(lb.get("party", ""), ""),
+                    "last_rate": lb.get("rate"), "last_date": lb.get("date"),
+                    "value": round(want * (lb.get("rate") or it["closing_rate"] or 0), 2)})
+    out.sort(key=lambda r: (r["supplier"] or "~", r["days_left"] if r["days_left"] is not None else -1))
+    return {"items": out, "days": days, "cover": cover, "total": round(sum(r["value"] for r in out), 2)}
+
+
+# ------------------------------------------------------------------ item profit
+def profit(cid, d_from=None, d_to=None):
+    """Profit on each item sold and on each customer: selling value less the cost of what was sold, cost being the
+    item's average purchase rate in Tally (or Tally's stock rate when it was never bought)."""
+    a = store.analysis_items(cid, d_from, d_to)
+    cost = {r["item"]: r["buy_rate"] for r in a["items"]}
+    items = []
+    for r in a["items"]:
+        c_ = (r["buy_rate"] or 0) * (r["qty"] or 0)
+        items.append({"item": r["item"], "unit": r["unit"], "qty": r["qty"], "sales": round(r["value"], 2),
+                      "cost": round(c_, 2) if r["buy_rate"] else None, "rate": r["rate"], "buy_rate": r["buy_rate"],
+                      "profit": round(r["value"] - c_, 2) if r["buy_rate"] else None, "margin": r["margin"]})
+    with store.conn() as c:
+        rows = c.execute("""SELECT v.party, vi.item, SUM(ABS(vi.qty)) q, SUM(vi.amount) amt FROM vitem vi JOIN voucher v ON v.id=vi.voucher_id
+            WHERE v.company_id=? AND v.base='Sales' AND v.status='' AND v.date BETWEEN ? AND ? GROUP BY v.party, vi.item""",
+                         (cid, a["from"], a["to"])).fetchall()
+    cust = {}
+    for r in rows:
+        x = cust.setdefault(r["party"], {"party": r["party"], "sales": 0.0, "cost": 0.0, "unknown": 0.0})
+        x["sales"] += r["amt"] or 0
+        if cost.get(r["item"]):
+            x["cost"] += cost[r["item"]] * (r["q"] or 0)
+        else:
+            x["unknown"] += r["amt"] or 0
+    customers = []
+    for x in cust.values():
+        known = x["sales"] - x["unknown"]
+        p = known - x["cost"]
+        customers.append({"party": x["party"], "sales": round(x["sales"], 2), "cost": round(x["cost"], 2), "profit": round(p, 2),
+                          "margin": round(p / known * 100, 1) if known > 0.5 else None, "no_cost": round(x["unknown"], 2)})
+    items.sort(key=lambda r: -(r["profit"] or 0))
+    customers.sort(key=lambda r: -r["profit"])
+    tp = sum(r["profit"] for r in items if r["profit"] is not None)
+    ts = sum(r["sales"] for r in items if r["profit"] is not None)
+    return {"from": a["from"], "to": a["to"], "items": items, "customers": customers, "profit": round(tp, 2),
+            "sales": round(a["total"], 2), "margin": round(tp / ts * 100, 1) if ts > 0.5 else None,
+            "no_cost": [r["item"] for r in items if r["profit"] is None]}

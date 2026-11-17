@@ -707,3 +707,13 @@ table.gt.cmp td.dn { color: var(--cr); font-weight: 700; }
 .mv:first-child { border-top: 0; }
 .two-col { display: grid; gap: 0 14px; }
 @media (min-width: 760px) { .two-col { grid-template-columns: 1fr 1fr; } }
+
+/* quotations */
+.three { display: grid; grid-template-columns: 1fr 1fr 0.8fr; gap: 10px; }
+.qst { font-weight: 700; }
+.qst.open { color: var(--cover); }
+.qst.ordered { color: var(--good); }
+.qst.lost { color: var(--ink-3); }
+.form .three { display: grid; grid-template-columns: 1fr 1fr 0.8fr; gap: 10px; }
+.form .three label, .form .three input { min-width: 0; width: 100%; box-sizing: border-box; }
+.qtotal { font-size: 14.5px; color: var(--ink-2); padding: 10px 0; line-height: 1.6; }
