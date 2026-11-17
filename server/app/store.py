@@ -194,8 +194,12 @@ def _migrate(c):
     if "data_at" not in cols:
         # when the copy here was last confirmed to match Tally (a sync that found nothing new counts too)
         c.execute("ALTER TABLE company ADD COLUMN data_at REAL")
-    if "gst" not in [r[1] for r in c.execute("PRAGMA table_info(stock)")]:
+    scols = [r[1] for r in c.execute("PRAGMA table_info(stock)")]
+    if "gst" not in scols:
         c.execute("ALTER TABLE stock ADD COLUMN gst REAL")         # item's GST rate from Tally (added in 3.4)
+    for col in ("reorder", "minorder"):                            # reorder level, minimum order (added in 3.18)
+        if col not in scols:
+            c.execute(f"ALTER TABLE stock ADD COLUMN {col} REAL")
     gcols = [r[1] for r in c.execute("PRAGMA table_info(grp)")]
     for col in ("revenue", "gp", "debit"):        # Tally's nature of each group (added in 2.7)
         if col not in gcols:
@@ -654,7 +658,8 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
             ledger_x = {r["name"]: json.loads(r["extra"] or "{}") for r in
                         c.execute("SELECT name, extra FROM ledger WHERE company_id=?", (cid,))}
         if not stock_x:
-            stock_x = {r["name"]: {"hsn": r["hsn"], "gst": r["gst"]} for r in c.execute("SELECT name, hsn, gst FROM stock WHERE company_id=?", (cid,))}
+            stock_x = {r["name"]: {"hsn": r["hsn"], "gst": r["gst"], "reorder": r["reorder"], "minorder": r["minorder"]}
+                       for r in c.execute("SELECT name, hsn, gst, reorder, minorder FROM stock WHERE company_id=?", (cid,))}
         ledger_x = ledger_x or {}
         stock_x = stock_x or {}
         if ledgers or not partial:
@@ -668,10 +673,12 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                 for l in ledgers])
         if stock or not partial:
             c.execute("DELETE FROM stock WHERE company_id=?", (cid,))
-            c.executemany("INSERT OR REPLACE INTO stock VALUES(?,?,?,?,?,?,?,?,?,?,?)", [
+            c.executemany("""INSERT OR REPLACE INTO stock(company_id, name, parent, unit, opening_qty, opening_value,
+                closing_qty, closing_value, closing_rate, hsn, gst, reorder, minorder) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", [
                 (cid, s["name"], s["parent"], s["unit"], s["opening_qty"], s["opening_value"],
                  s["closing_qty"], s["closing_value"], s["closing_rate"], stock_x.get(s["name"], {}).get("hsn", ""),
-                 stock_x.get(s["name"], {}).get("gst"))
+                 stock_x.get(s["name"], {}).get("gst"), stock_x.get(s["name"], {}).get("reorder"),
+                 stock_x.get(s["name"], {}).get("minorder"))
                 for s in stock])
 
         if guids is not None:

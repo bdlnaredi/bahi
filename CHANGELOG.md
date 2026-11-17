@@ -2,6 +2,14 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.18.0 (17 November 2026)
+
+- **Credit warning:** when you make a sales invoice or order, choosing a customer who is over the credit limit set on their ledger in Tally, or who has bills overdue more than 30 days, shows an orange warning with the oldest bills. It's only a warning: the entry can still be saved. Settings, Credit warning turns it off or changes the days.
+- **Due dates:** Dues, *Due dates* shows bills by the day they fall due (bill date plus the credit period in Tally): a strip of the next 14 days with the amount on each, everything due in the next month, and what's already overdue. For both money to receive and money to pay.
+- **Reminders:** Dues, *Reminders* lists every customer with overdue bills, newly overdue ones first. *Send reminder* opens WhatsApp with the overdue bills, their customer link and UPI payment, and marks them reminded for 7 days (staff see it too). Home shows "N customers to remind today".
+- The Telegram morning summary now says what falls due today and how many customers to remind.
+- Bahi now reads the credit limit and credit period on ledgers, and the reorder level and minimum order on stock items, from Tally.
+
 ## 3.17.2 (15 November 2026)
 
 - **Bill references shown once.** TallyPrime sends a voucher's ledger lines twice (as *all ledger entries* and *ledger entries*), each with the same bill references, and Bahi kept both. Now it reads them from one list only. The Tally PC sends every voucher again once by itself so the stored copies are corrected (the first sync after updating takes a little longer). Pending bills worked out from vouchers are corrected by the same re-read.

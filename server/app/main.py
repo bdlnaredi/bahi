@@ -35,6 +35,7 @@ import bankrec  # noqa: E402
 import links  # noqa: E402
 import cloud  # noqa: E402
 import tallybk  # noqa: E402
+import insights  # noqa: E402
 import upi  # noqa: E402
 import barcodes  # noqa: E402
 import threading  # noqa: E402
@@ -46,7 +47,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.17.2"
+APP_VERSION = "3.18.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -282,7 +283,8 @@ class Handler(BaseHTTPRequestHandler):
         need = {"dashboard": "accounts", "daily": "sales", "group": "accounts", "stock": "stock", "stock_item": "stock", "godowns": "stock",
                 "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
                 "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
-                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers"}
+                "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
+                "duedates": "dues", "reminders": "dues"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -300,7 +302,7 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             return (users.can(u, "parties") or users.can(u, "dues")) and arg and \
                 store.voucher_party(cid, int(arg)) in store.party_names(cid)
-        if what in ("entry_form", "party_bills", "entries", "entry"):
+        if what in ("entry_form", "party_bills", "entries", "entry", "partycheck"):
             return any(users.can(u, p) for p in entries.PERM.values())
         return False
 
@@ -748,6 +750,26 @@ document.getElementById("a").addEventListener("change", function () {{
             store.update_sync(request=True)
             return self.send_json({"ok": True})
 
+        if path == "/api/credit":
+            if method == "POST":
+                if not u["owner"]:
+                    return self.send_json({"error": "Only the owner can do that."}, 403)
+                data = json.loads(self.body(4096) or b"{}")
+                try:
+                    return self.send_json(insights.set_credit(data.get("on"), data.get("days")))
+                except (TypeError, ValueError):
+                    return self.send_json({"error": "Enter a number of days."}, 400)
+            return self.send_json(insights.credit_settings())
+        if path == "/api/reminded" and method == "POST":
+            data = json.loads(self.body(4096) or b"{}")
+            try:
+                cid = int(data.get("cid"))
+            except (TypeError, ValueError):
+                return self.send_json({"error": "Which company?"}, 400)
+            if not self.allowed(cid, "reminders", {}, None):
+                return self.send_json({"error": "Not allowed."}, 403)
+            return self.send_json(insights.mark_sent(cid, str(data.get("party", ""))[:200], u.get("name") or "Owner"))
+
         if path == "/api/interest":
             if method == "POST":
                 if not u["owner"]:
@@ -1118,7 +1140,7 @@ document.getElementById("a").addEventListener("change", function () {{
             params = {str(k): str(v) for k, v in (r.get("params") or {}).items() if v not in (None, "")}
             res = None
             if re.match(r"^[a-z_]+$", what) and what not in ("bulk", "export", "ledger_pdf", "voucher_pdf", "entry_form",
-                                                               "party_bills", "entries", "entry", "brs"):
+                                                               "party_bills", "entries", "entry", "brs", "partycheck"):
                 try:
                     if self.allowed(cid, what, params, arg):
                         res = self.company_data(cid, what, arg, params)
@@ -1145,6 +1167,12 @@ document.getElementById("a").addEventListener("change", function () {{
             return (entries.form(cid, k))
         if what == "party_bills":
             return (entries.party_bills(cid, name))
+        if what == "partycheck":
+            return insights.party_check(cid, name)
+        if what == "duedates":
+            return insights.due_dates(cid, q.get("kind", "receivable"))
+        if what == "reminders":
+            return insights.reminders(cid)
         if what == "entries":
             co = next((c for c in store.companies() if c["id"] == cid), None)
             return ({"entries": entries.listing(co["name"], u) if co else []})

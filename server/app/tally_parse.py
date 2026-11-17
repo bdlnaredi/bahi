@@ -718,6 +718,14 @@ def parse_ledger_extra(root):
             "ifsc": txt(el, "IFSCODE"), "branch": txt(el, "BANKBRANCHNAME") or txt(el, "BRANCHNAME"),
             "holder": txt(el, "BANKACCHOLDERNAME"),
         })
+        # the credit limit and credit period set on the ledger in Tally (for the warning when billing)
+        cl = abs(num(txt(el, "CREDITLIMIT")))
+        if cl > 0.005:
+            info["credit_limit"] = cl
+        cp = txt(el, "BILLCREDITPERIOD")
+        m = re.search(r"(\d+)", cp or "")
+        if m and int(m.group(1)) > 0:
+            info["credit_days"] = int(m.group(1))
         if info["bank_account"] or info["ifsc"]:
             lv = _leaves(el)
             if not info["branch"]:          # Tally releases name it differently
@@ -755,7 +763,10 @@ def parse_stock_extra(root):
                 if head in ("igst", "integrated tax") and txt(r, "GSTRATE"):
                     gst = num(txt(r, "GSTRATE"))
                     break
-        out[n] = {"hsn": hsn or txt(el, "HSNCODE"), "gst": gst}
+        # reorder level and minimum order quantity, as set on the item in Tally (base units)
+        reorder = abs(num(txt(el, "REORDERBASE") or txt(el, "REORDERLEVEL")))
+        minorder = abs(num(txt(el, "MINIMUMORDERBASE") or txt(el, "MINORDERQTY")))
+        out[n] = {"hsn": hsn or txt(el, "HSNCODE"), "gst": gst, "reorder": reorder or None, "minorder": minorder or None}
     return out
 
 

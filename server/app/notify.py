@@ -123,6 +123,13 @@ def summary_text(cid, day=None):
     if col["due_soon"] > 0.5:
         n = sum(1 for p in col["parties"] if p["due_soon"] > 0.5)
         lines += [f"Falling due this week: {_inr(col['due_soon'])} from {n} parties"]
+    try:
+        import insights
+        due = insights.due_today_text(cid)
+        if due:
+            lines += ["", "Today: " + "; ".join(_esc(x) for x in due) + ". Open Bahi, Reminders to send them."]
+    except Exception as e:
+        print("due today line failed:", e, flush=True)
     if col["promised_today"]:
         lines += ["", "Promised to pay today: " + ", ".join(_esc(x) for x in col["promised_today"][:8])]
     missed = [p["name"] for p in col["parties"] if p["promise_missed"]]

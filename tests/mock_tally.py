@@ -44,6 +44,9 @@ for n, o in CREDITORS:
     LEDGERS[n] = ("Sundry Creditors", -o)
 # balance the opening trial balance through Capital
 LEDGERS["Capital"] = ("Capital Account", -sum(o for _, o in LEDGERS.values()) - 0)
+# credit limit (rupees) and credit period (days) set on some parties, reorder level and minimum order on some items
+CREDIT = {"Gupta Hardware": (100000, 30), "Patel Enterprises": (500000, 45)}
+REORDER = {"Wall Paint 20L": (80, 40), "Primer 4L": (60, 30), "PVC Pipe 2 inch": (100, 50)}
 STOCK = [("PVC Pipe 1 inch", "Pipes", "Nos", 400, 120.0), ("PVC Pipe 2 inch", "Pipes", "Nos", 250, 210.0),
          ("Wall Paint 20L", "Paints", "Nos", 60, 3200.0), ("Primer 4L", "Paints", "Nos", 90, 650.0),
          ("TMT Bar 12mm", "Steel", "Kg", 1500, 62.0)]
@@ -546,6 +549,8 @@ class H(BaseHTTPRequestHandler):
                                 + f"</ADDRESS.LIST><LEDSTATENAME>{STATE.get(n, 'Maharashtra')}</LEDSTATENAME>")
                     if n == "HDFC Bank":
                         out += "<BANKDETAILS>50200012345678</BANKDETAILS><IFSCODE>HDFC0001234</IFSCODE><BANKBRANCHNAME>Sitabuldi, Nagpur</BANKBRANCHNAME>"
+                    if n in CREDIT:      # credit limit and credit period on the ledger (as Tally exports them)
+                        out += f"<CREDITLIMIT>-{CREDIT[n][0]:.2f}</CREDITLIMIT><BILLCREDITPERIOD>{CREDIT[n][1]} Days</BILLCREDITPERIOD>"
                     out += "</LEDGER></TALLYMESSAGE>"
             elif at == "Stock Items":
                 for name, grp, unit, oq, rate in STOCK:
@@ -554,8 +559,11 @@ class H(BaseHTTPRequestHandler):
                     rate = ("<STATEWISEDETAILS.LIST><STATENAME>&#4; Any</STATENAME><RATEDETAILS.LIST><GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>"
                             "<GSTRATE> 18</GSTRATE></RATEDETAILS.LIST><RATEDETAILS.LIST><GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD><GSTRATE> 9</GSTRATE>"
                             "</RATEDETAILS.LIST></STATEWISEDETAILS.LIST>") if tag == "GSTDETAILS.LIST" else ""
+                    ro = REORDER.get(name)
                     out += (f'<TALLYMESSAGE><STOCKITEM NAME="{escape(name)}"><{tag}><APPLICABLEFROM>20170701</APPLICABLEFROM>'
-                            f'<HSNCODE>{HSN[name]}</HSNCODE>{rate}</{tag}></STOCKITEM></TALLYMESSAGE>')
+                            f'<HSNCODE>{HSN[name]}</HSNCODE>{rate}</{tag}>'
+                            + (f"<REORDERBASE> {ro[0]} {unit}</REORDERBASE><MINIMUMORDERBASE> {ro[1]} {unit}</MINIMUMORDERBASE>" if ro else "")
+                            + '</STOCKITEM></TALLYMESSAGE>')
             out += "</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>"
         elif typ == "Data" and rid == "Day Book":
             WANT_RATES[0] = True          # the Day Book has every field

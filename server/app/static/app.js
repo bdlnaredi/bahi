@@ -335,7 +335,7 @@ function loading() { view.innerHTML = '<div class="skeleton"></div><div class="s
 function setTitle(back) {
   $("#back").hidden = !back;
   const tab = (location.hash.split("/")[1] || "home").split("?")[0];
-  const map = { "": "home", whatsnew: "reports", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
+  const map = { "": "home", whatsnew: "reports", duedates: "dues", reminders: "dues", ledger: "parties", group: "parties", item: "reports", daybook: "reports", voucher: "vouchers", pl: "reports", gst: "reports", check: "reports", settings: "reports", analysis: "reports", bs: "reports", cashbook: "reports", collect: "dues", entries: "reports", new: "home", day: "sales", stock: "reports", groups: "reports", godowns: "reports", brs: "reports" };
   const on = map[tab] || tab;
   document.querySelectorAll("#tabs a[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === on));
   document.querySelectorAll("#tabs a[data-route]").forEach((a) => a.classList.toggle("on", a.dataset.route === tab));
@@ -348,7 +348,7 @@ async function vHome() {
   if (!can("accounts")) return vStaffHome();
   const d = await api(cpath("dashboard", periodParams()));
   const thisMonth = new Date().toISOString().slice(0, 7);
-  view.innerHTML = `${updatedCard()}${entryBar()}
+  view.innerHTML = `${updatedCard()}<div id="remhome"></div>${entryBar()}
   <section class="herocards">
     <a class="bold in" href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div><div class="go">See dues</div></a>
     <a class="bold out" href="#/dues/payable"><div class="label">You owe</div><div class="big">${short(d.payable)}</div><div class="go">See dues</div></a>
@@ -385,6 +385,11 @@ async function vHome() {
   </section>
   ${d.company.unbalanced ? `<p class="note warn">${d.company.unbalanced} vouchers didn't add up during the last sync, so some figures may be off.</p>` : ""}`;
   drawSales($("#chart"), d.monthly_sales, thisMonth);
+  if (can("dues")) api(cpath("reminders")).then((r) => {
+    const el = $("#remhome");
+    if (!el || !r.todo) return;
+    el.innerHTML = `<a class="newver remind" href="#/reminders"><span class="nv-i">🔔</span><span><b>${r.todo} customer${r.todo === 1 ? "" : "s"} to remind today</b>${r.new ? `, ${r.new} newly overdue` : ""}</span><span class="chev"></span></a>`;
+  }).catch(() => {});
 }
 
 function vrow(v) {
@@ -628,6 +633,77 @@ window.addEventListener("scroll", () => { if (PICK.el) pickPlace(); }, true);
 window.addEventListener("resize", () => { if (PICK.el) pickPlace(); });
 if (window.visualViewport) visualViewport.addEventListener("resize", () => { if (PICK.el) pickPlace(); });
 window.addEventListener("hashchange", pickClose);
+
+/* ---------------------------------------------------------------- due dates: bills by the day they fall due */
+async function vDueDates(kind) {
+  setTitle(true);
+  kind = kind === "payable" ? "payable" : "receivable";
+  const d = await api(cpath("duedates", { kind }));
+  const rec = kind === "receivable";
+  const sel = S.dueDay && d.days.some((x) => x.day === S.dueDay) ? S.dueDay : "";
+  const dayName = (iso) => {
+    const t = d.today, dt = new Date(iso + "T00:00:00");
+    const diff = Math.round((dt - new Date(t + "T00:00:00")) / 86400000);
+    return diff === 0 ? "Today" : diff === 1 ? "Tomorrow" : dt.toLocaleDateString("en-IN", { weekday: "short" });
+  };
+  const strip = [];
+  for (let i = 0; i < 14; i++) {
+    const dt = new Date(d.today + "T00:00:00"); dt.setDate(dt.getDate() + i);
+    const iso = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const x = d.days.find((y) => y.day === iso);
+    strip.push(`<button class="dday${x ? " has" : ""}${sel === iso ? " on" : ""}" data-day="${iso}" ${x ? "" : "disabled"}>
+      <span class="dn">${dayName(iso)}</span><span class="dd">${dt.getDate()} ${MON[dt.getMonth()]}</span><span class="da">${x ? short(x.total) : "–"}</span></button>`);
+  }
+  const row = (r) => `<a class="row" href="#/ledger/${enc(r.party)}"><div class="main"><div class="name">${h(r.party)}</div>
+      <div class="meta">${h(r.ref || "Bill")}${r.date ? `, ${fdate(r.date)}` : ""}${r.overdue ? ` · <span class="od">${r.overdue} days overdue</span>` : ` · due ${fdate(r.due)}`}${r.nodue ? " (no credit period: bill date)" : ""}</div></div>
+      <div class="end">${rupees(r.amount)}</div></a>`;
+  const shown = sel ? d.upcoming.filter((r) => r.due === sel) : d.upcoming;
+  const groups = {};
+  shown.forEach((r) => (groups[r.due] = groups[r.due] || []).push(r));
+  view.innerHTML = `<h1 class="title">Due dates</h1>
+    <div class="seg" role="tablist"><button data-k="receivable" aria-selected="${rec}">To receive</button><button data-k="payable" aria-selected="${!rec}">To pay</button></div>
+    <div class="dstrip">${strip.join("")}</div>
+    <section class="herocards">
+      <div class="bold out"><div class="label">Overdue</div><div class="big">${short(d.overdue_total)}</div><div class="go" style="opacity:.85">${d.overdue.length} bills</div></div>
+      <div class="bold ${rec ? "in" : "nil"}"><div class="label">Due in the next 31 days</div><div class="big">${short(d.upcoming.reduce((t, r) => t + r.amount, 0))}</div><div class="go" style="opacity:.85">${d.upcoming.length} bills</div></div>
+    </section>
+    ${sel ? `<p class="subtitle">${dayName(sel)}, ${fdate(sel)} · <a href="#" id="allday">show every day</a></p>` : ""}
+    ${Object.keys(groups).map((day) => `<div class="setgroup">${dayName(day)}, ${fdate(day)} · ${rupees(groups[day].reduce((t, r) => t + r.amount, 0))}</div>
+      <section class="page">${groups[day].map(row).join("")}</section>`).join("") || `<section class="page"><div class="empty">Nothing falls due ${sel ? "that day" : "in the next 31 days"}.</div></section>`}
+    ${!sel && d.overdue.length ? `<div class="setgroup">Already overdue · ${rupees(d.overdue_total)}</div><section class="page">${d.overdue.slice(0, 100).map(row).join("")}</section>
+      ${rec ? '<div class="actions" style="padding:0 0 14px"><a class="btn primary" href="#/reminders">Send reminders</a></div>' : ""}` : ""}
+    <p class="hint" style="margin:0 4px 14px">Due date = bill date plus the credit period in Tally.${d.later_total > 0.5 ? ` Later than 31 days: ${rupees(d.later_total)}.` : ""}</p>`;
+  view.querySelectorAll("[data-k]").forEach((b) => b.onclick = () => { location.hash = "#/duedates/" + b.dataset.k; });
+  view.querySelectorAll("[data-day]").forEach((b) => b.onclick = () => { S.dueDay = S.dueDay === b.dataset.day ? "" : b.dataset.day; vDueDates(kind).catch(fail); });
+  const a = $("#allday"); if (a) a.onclick = (e) => { e.preventDefault(); S.dueDay = ""; vDueDates(kind).catch(fail); };
+}
+
+/* ---------------------------------------------------------------- morning reminders */
+async function vReminders() {
+  setTitle(true);
+  const d = await api(cpath("reminders"));
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  const card = (p) => {
+    const ph = digits(p.phone);
+    const text = reminderText(p.party, co, p.balance, p.bills, p.interest, S.irate || 0);
+    return `<section class="page remcard${p.sent ? " sent" : ""}"><div class="row" style="border:0">
+      <div class="main"><div class="name">${h(p.party)} ${p.new ? '<span class="tagnew">New today</span>' : ""}</div>
+        <div class="meta"><span class="od">${rupees(p.overdue_amount)} overdue</span> in ${p.bills.length} bill${p.bills.length === 1 ? "" : "s"}, oldest ${p.oldest} days${p.sent ? ` · <b class="okc">✓ Reminded ${ago(p.sent.t)}${p.sent.by ? " by " + h(p.sent.by) : ""}</b>` : ""}</div></div>
+      <div class="end">${rupees(p.balance)}</div></div>
+      <div class="actions" style="padding:0 14px 12px">
+        ${ph ? `<a class="btn ${p.sent ? "" : "primary"} wa" data-wa-party="${h(p.party)}" data-wa-pay="1" data-remind="${h(p.party)}" href="https://wa.me/${ph}?text=${enc(text)}" target="_blank" rel="noopener">${ICON.wa}${p.sent ? "Remind again" : "Send reminder"}</a>
+          <a class="btn ic" href="tel:+${ph}" aria-label="Call">${ICON.call}<span class="bl">Call</span></a>` : '<span class="hint">No mobile number in Tally</span>'}
+        <a class="btn" href="#/ledger/${enc(p.party)}">Ledger</a></div></section>`;
+  };
+  view.innerHTML = `<h1 class="title">Reminders</h1>
+    <p class="subtitle">${d.todo ? `${d.todo} customer${d.todo === 1 ? "" : "s"} to remind${d.new ? `, ${d.new} newly overdue` : ""}` : "Everyone with overdue bills has been reminded in the last 7 days."}</p>
+    ${d.parties.map(card).join("") || '<section class="page"><div class="empty">Nobody has overdue bills. 🎉</div></section>'}
+    <p class="hint" style="margin:0 4px 14px">Each message lists the overdue bills and adds the customer's own link and UPI payment, when set up. A reminder counts as sent for 7 days.</p>`;
+  view.querySelectorAll("[data-remind]").forEach((a) => a.addEventListener("click", () => {
+    fetch("/api/reminded", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cid: S.cid, party: a.dataset.remind }) })
+      .then(() => setTimeout(() => vReminders().catch(() => {}), 1500)).catch(() => {});
+  }));
+}
 
 /* ---------------------------------------------------------------- what's new */
 function seenVersion() { try { return localStorage.getItem("seenVersion") || ""; } catch (e) { return ""; } }
@@ -924,6 +1000,8 @@ async function vDues(kind) {
       <a class="chip ${rec ? "on" : ""}" href="#/dues/receivable" aria-pressed="${rec}">To receive</a>
       <a class="chip ${!rec ? "on" : ""}" href="#/dues/payable" aria-pressed="${!rec}">To pay</a>
       <a class="chip" href="#/collect">Follow-up list</a>
+      <a class="chip" href="#/duedates/${S.dueKind}">Due dates</a>
+      ${rec ? '<a class="chip" href="#/reminders">Reminders</a>' : ""}
     </div>
     <section class="page">
       <div class="hero"><div><div class="label">${rec ? "You will receive" : "You owe"}</div>
@@ -1809,6 +1887,7 @@ const SETTINGS = [
     ["upi", "UPI payments", "M7 4h11 M7 9h11 M7 4c6 0 6 9 0 9h-1l8 8"],
     ["links", "Customer links", "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
     ["interest", "Interest on overdue bills", "M19 5L5 19 M7 7h.01 M17 17h.01"],
+    ["credit", "Credit warning", "M12 3l9 16H3z M12 10v4 M12 17h.01"],
     ["telegram", "Telegram summary and alerts", "M21 4L3 11l6 2 2 6 3-4 5 4z M9 13l12-9"],
   ]],
   ["People and security", [
@@ -1824,7 +1903,7 @@ const settingsPart = () => (location.hash.split("/")[2] || "").split("?")[0] || 
 async function vSettingsMenu() {
   view.innerHTML = '<h1 class="title">Settings</h1><div class="empty">Loading ...</div>';
   const get = (u) => api(u).catch(() => null);
-  const [tg, it, upi, ln, us, bk, cl] = await Promise.all([get("/api/telegram"), get("/api/interest"), get("/api/upi"), get("/api/links"), get("/api/users"), get("/api/backups"), get("/api/cloud")]);
+  const [tg, it, upi, ln, us, bk, cl, cr] = await Promise.all([get("/api/telegram"), get("/api/interest"), get("/api/upi"), get("/api/links"), get("/api/users"), get("/api/backups"), get("/api/cloud"), get("/api/credit")]);
   const off = typeof offlineInfo === "function" ? offlineInfo() : null;
   const upiOn = upi && upi.companies.some((c) => c.vpa);
   const st = {
@@ -1834,6 +1913,7 @@ async function vSettingsMenu() {
     upi: upiOn ? "On" : '<span class="off">Off</span>',
     links: ln ? `${ln.links.length} given out` : "",
     interest: it ? (it.on ? `${it.rate}% a year` : '<span class="off">Off</span>') : "",
+    credit: cr ? (cr.on ? `Over ${cr.days} days` : '<span class="off">Off</span>') : "",
     telegram: tg ? (tg.configured ? "On" : '<span class="off">Off</span>') : "",
     staff: us ? (us.users.length ? `${us.users.length} ${us.users.length === 1 ? "person" : "people"}` : "None") : "",
     password: "Change",
@@ -1886,6 +1966,7 @@ async function vSettings(part) {
         <button class="btn primary" type="submit">Connect</button><div class="msg" id="tgmsg" role="status"></div></form>`}
     </section>
     <section class="page" id="intsec"></section>
+    <section class="page" id="crsec"></section>
     <section class="page" id="upisec"></section>
     <section class="page" id="lnsec"></section>
     <section class="page" id="stsec"></section>
@@ -1917,7 +1998,7 @@ async function vSettings(part) {
       ${c.paused && S.sync.mode !== "paused" ? '<p class="hint" style="padding:0 14px"><span class="od">Syncing is paused for this company.</span></p>' : ""}
       <p class="hint" style="padding:0 14px 14px">If the company is still open in Tally, the next sync copies it again from scratch.</p>
     </section>`).join("")}`;
-  const PART = { sync: "#syncsec", offline: "#offsec", android: "[data-sec=android]", telegram: "#tgsec", interest: "#intsec", upi: "#upisec",
+  const PART = { sync: "#syncsec", offline: "#offsec", android: "[data-sec=android]", telegram: "#tgsec", interest: "#intsec", credit: "#crsec", upi: "#upisec",
     links: "#lnsec", staff: "#stsec", password: "[data-sec=password]", backups: "#tbsec, #bksec, #cbsec", companies: "[data-cid]" };
   const keep = PART[part] || "#syncsec";
   view.querySelectorAll(":scope > section.page").forEach((sec) => { sec.hidden = !sec.matches(keep); });
@@ -1984,6 +2065,20 @@ async function vSettings(part) {
   showStaff().catch(() => {});
   linksSection().catch(() => {});
   upiSection().catch(() => {});
+  (async () => {
+    const cr = await api("/api/credit").catch(() => null);
+    if (!cr || !$("#crsec")) return;
+    $("#crsec").innerHTML = `<div class="block-title">Credit warning <span>${cr.on ? "on" : "off"}</span></div>
+      <form class="form" id="crf">
+        <label><span><input type="checkbox" name="on" ${cr.on ? "checked" : ""}> Warn when making a sales invoice or order for a customer who is over their credit limit, or has old bills unpaid</span></label>
+        <label>Warn about bills overdue more than (days)<input type="number" name="days" min="0" max="3650" step="1" value="${cr.days}"></label>
+        <button class="btn primary" type="submit">Save</button>
+        <p class="hint">The credit limit is the one set on the customer's ledger in Tally (Credit Limit). The warning shows under the customer's name; the entry can still be saved.</p></form>`;
+    $("#crf").onsubmit = async (e) => {
+      e.preventDefault(); const f = e.target;
+      try { await post("/api/credit", { on: f.on.checked, days: f.days.value }); toast("Saved."); vSettings(settingsPart()).catch(fail); } catch (err) { toast(err.message); }
+    };
+  })();
   (async () => {
     const it = await api("/api/interest").catch(() => null);
     if (!it || !$("#intsec")) return;
@@ -2223,6 +2318,7 @@ async function vNewEntry(kind) {
       <label>Voucher type${sel("vtype", f.vtypes)}${f.vtypes.length > 1 ? `<span class="hint">${f.vtypes.length} ${h(ENTRY[kind][0].toLowerCase())} types in Tally</span>` : ""}</label>
       <label>Date<input type="date" name="date" value="${f.today}" required></label>
       ${inv ? `<label>${sale ? "Customer" : "Supplier"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>
+        ${sale ? '<div id="cwarn"></div>' : ""}
         ${sale ? `<label>Invoice no.<input name="number" value="${h(f.next_number[f.vtypes[0]] || "")}" placeholder="Leave empty and Tally numbers it"></label>`
           : `<div class="two"><label>Supplier's invoice no.<input name="number" required></label><label>Invoice date<input type="date" name="ref_date" value="${f.today}" required></label></div>`}
         <label><span><input type="checkbox" name="igst"> ${sale ? "Customer" : "Supplier"} is in another state (IGST)</span></label>
@@ -2237,7 +2333,7 @@ async function vNewEntry(kind) {
         <div class="total">Dr <b id="jdr">₹0</b> &nbsp; Cr <b id="jcr">₹0</b> <span id="jdiff" class="od"></span></div>`
       : contra ? `<label>From${sel("account", f.accounts)}</label><label>To${sel("to", f.accounts.slice(1).concat(f.accounts.slice(0, 1)))}</label>
         <label>Amount (₹)<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label>`
-      : `<label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>`}
+      : `<label>${order ? "Customer" : rec ? "Received from" : "Paid to"}<input name="party" list="plist" required placeholder="Start typing a name">${list("plist", f.parties)}</label>${order ? '<div id="cwarn"></div>' : ""}`}
       ${jv || contra || inv ? "" : order ? `
         <div id="items"></div><div class="actions" style="padding:0"><button class="btn" type="button" id="additem">+ Add item</button><button class="btn" type="button" id="scanitem">▥ Scan items</button></div>${list("ilist", f.items.map((i) => i.name))}
         <div class="total">Total before tax <b id="otot">₹0</b></div>
@@ -2252,6 +2348,20 @@ async function vNewEntry(kind) {
       <p class="hint">${S.me.owner || can("e_direct") ? "It goes into Tally the next time the Tally PC syncs." : "The owner approves it first, then it goes into Tally at the next sync."}</p>
     </form></section>`;
   const form = $("#ef");
+  // selling to someone over their credit limit, or with old bills unpaid: say so before the entry is made
+  if ($("#cwarn")) form.party.addEventListener("change", async () => {
+    const box = $("#cwarn"); box.innerHTML = "";
+    if (!f.parties.includes(form.party.value)) return;
+    const r = await api(cpath("partycheck", { name: form.party.value })).catch(() => null);
+    if (!r || !r.warn || !r.warn.length) return;
+    const over = r.limit && r.balance > r.limit;
+    const lines = [];
+    if (over) lines.push(`over the credit limit: owes ${rupees(r.balance)} against a limit of ${rupees(r.limit)}`);
+    if (r.late.length) lines.push(`has ${rupees(r.late_total)} in bills overdue more than ${r.days} days (oldest ${r.late[0].overdue} days)`);
+    box.innerHTML = `<div class="warnbox" role="alert"><b>⚠ ${h(form.party.value)} ${over ? "is " : ""}${lines.join(", and ")}.</b>
+      ${r.late.length ? `<div class="meta">${r.late.slice(0, 3).map((b) => `${h(b.ref)}: ${rupees(b.amount)}, ${b.overdue} days`).join(" · ")}${r.late.length > 3 ? " …" : ""}</div>` : ""}
+      <div class="meta">You can still save it. <a href="#/ledger/${enc(form.party.value)}">Open ledger</a></div></div>`;
+  });
   // scanning items: each scan adds the item (or one more of it); keeps scanning until the scanner is closed
   const scanItems = async (addRow) => {
     const map = await barcodeMap();
@@ -2694,6 +2804,8 @@ async function route() {
       case "day": await vDay(parts[1], parts[2]); break;
       case "vouchers": await vVouchers(); break;
       case "whatsnew": await vWhatsNew(); break;
+      case "duedates": await vDueDates(parts[1]); break;
+      case "reminders": await vReminders(); break;
       default: await vHome();
     }
     wireEntryBar();
