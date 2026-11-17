@@ -103,8 +103,9 @@ function iso(d) { return d.toISOString().slice(0, 10); }
 
 /* ---------------------------------------------------------------- data */
 let offlineSeen = false;
-async function api(path) {
-  const r = await fetch(path, { credentials: "same-origin" });
+async function api(path, opts) {
+  // opts (method, body) sends a change, as JSON; without it, a plain read that the offline copy can answer
+  const r = await fetch(path, opts ? { credentials: "same-origin", ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } } : { credentials: "same-origin" });
   if (r.headers.get("X-From-Cache")) offlineSeen = true;
   if (r.status === 401) { throw Object.assign(new Error("login"), { login: true }); }
   if (r.status >= 502 && !r.headers.get("X-From-Cache")) throw new Error("offline");   // server down (Cloudflare 502/530) and nothing saved
@@ -413,6 +414,10 @@ async function vHome() {
   if (can("dues") && new Date().getDate() <= 7) api(cpath("statements")).then((r) => {
     const el = $("#stmthome"), left = r.parties.length - r.sent;
     if (el && left > 0) el.innerHTML = `<a class="newver remind" href="#/statements"><span class="nv-i">📄</span><span><b>Send month-end statements</b>: ${left} of ${r.parties.length} customer${r.parties.length === 1 ? "" : "s"} still to send</span><span class="chev"></span></a>`;
+  }).catch(() => {});
+  if (can("accounts")) api(cpath("cheques")).then((r) => {
+    const el = $("#stmthome"), n = r.due_in + r.due_out;
+    if (el && n) el.insertAdjacentHTML("beforeend", `<a class="newver remind" href="#/cheques"><span class="nv-i">🧾</span><span><b>${n} cheque${n === 1 ? "" : "s"} due this week</b>${r.due_in ? `: ${r.due_in} to deposit (${short(r.due_in_amount)})` : ""}${r.due_out ? `${r.due_in ? "," : ":"} ${r.due_out} to be presented (${short(r.due_out_amount)})` : ""}</span><span class="chev"></span></a>`);
   }).catch(() => {});
   if (can("dues")) api(cpath("reminders")).then((r) => {
     const el = $("#remhome");
@@ -884,6 +889,131 @@ async function vEinvoice(month) {
     <p class="hint" style="margin:0 4px 14px">From the e-invoice and e-way bill details Tally keeps on each voucher. ${d.uses_einvoice ? "E-invoice is checked because your company already has e-invoices in Tally." : "E-invoice isn't checked: no voucher in Tally has one, so your company may not need them (needed above ₹5 crore turnover)."} An e-way bill is listed for goods worth more than ${rupees(d.ewb_limit)}; some goods and short distances within a state don't need one. Check with your CA if unsure.</p>`;
   $("#mprev").onclick = () => { location.hash = `#/einvoice/${monthShift(month, -1)}`; };
   $("#mnext").onclick = () => { location.hash = `#/einvoice/${monthShift(month, 1)}`; };
+}
+
+/* ---------------------------------------------------------------- TDS and TCS */
+async function vTds() {
+  setTitle(true);
+  const d = await api(cpath("tds", S.tdsP ? { from: S.tdsP[0], to: S.tdsP[1] } : {}));
+  const head = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">TDS and TCS</h1>`;
+  if (d.none) { view.innerHTML = head + '<section class="page"><div class="empty">No TDS or TCS ledgers in Tally (ledgers with type of duty TDS/TCS, or with TDS or TCS in their name).</div></section>'; return; }
+  const mon = (m) => monthName(m);
+  view.innerHTML = head + `<p class="subtitle">${fdate(d.from)} to ${fdate(d.to)}</p>
+    <section class="herocards">
+      <div class="bold nil"><div class="label">Deducted / collected</div><div class="big">${short(d.total)}</div><div class="go">paid ${short(d.paid)}</div></div>
+      <div class="bold ${d.balance > 1 ? "out" : "in"}"><div class="label">Still to pay now</div><div class="big">${short(Math.max(0, d.balance))}</div><div class="go">balance of the TDS/TCS ledgers</div></div></section>
+    <div class="setgroup">Month by month</div><section class="page">${d.months.map((m) => `<div class="row"><div class="main"><div class="name">${mon(m.month)}</div>
+      <div class="meta">${m.TDS ? `TDS ${rupees(m.TDS)}` : ""}${m.TDS && m.TCS ? " · " : ""}${m.TCS ? `TCS ${rupees(m.TCS)}` : ""}${m.paid ? ` · paid ${rupees(m.paid)}` : ""}</div>
+      <div class="meta ${m.late ? "od" : ""}">Due ${fdate(m.due)}${m.left > 1 ? `, ${rupees(m.left)} not paid${m.late ? " (late: interest applies)" : ""}` : m.left < -1 ? `, ${rupees(-m.left)} paid more` : ", paid"}</div></div></div>`).join("") || '<div class="empty">Nothing deducted in this period.</div>'}</section>
+    <div class="setgroup">By section (ledger)</div><section class="page">${d.ledgers.map((l) => `<a class="row" href="#/ledger/${enc(l.ledger)}"><div class="main"><div class="name">${h(l.ledger)}</div><div class="meta">${l.kind}, ${l.count} entr${l.count === 1 ? "y" : "ies"}</div></div><div class="end"><b>${rupees(l.amount)}</b></div></a>`).join("") || '<div class="empty">None.</div>'}</section>
+    <div class="setgroup">By party</div><section class="page">${d.parties.slice(0, 100).map((p) => `<a class="row" href="#/ledger/${enc(p.party)}"><div class="main"><div class="name">${h(p.party || "(no party)")}</div><div class="meta">${h(p.ledger)}</div></div><div class="end"><b>${rupees(p.amount)}</b></div></a>`).join("") || '<div class="empty">None.</div>'}</section>
+    ${d.receivable.length ? `<div class="setgroup">Deducted by your customers (check with Form 26AS)</div><section class="page">${d.receivable.map((p) => `<div class="row"><div class="main"><div class="name">${h(p.party)}</div><div class="meta">${p.count} entr${p.count === 1 ? "y" : "ies"}</div></div><div class="end"><b>${rupees(p.amount)}</b></div></div>`).join("")}</section>` : ""}
+    <p class="hint" style="margin:0 4px 14px">From Tally's TDS and TCS ledgers. A credit to them is tax deducted or collected; a payment to them from cash or bank is tax paid to the government. Due on the 7th of the next month (30 April for March). Returns (24Q, 26Q, 27EQ) are filed separately.</p>`;
+}
+
+/* ---------------------------------------------------------------- cheque register */
+async function vCheques(tab) {
+  setTitle(true);
+  tab = tab === "out" ? "out" : "in";
+  const d = await api(cpath("cheques"));
+  const rows = d.cheques.filter((c) => c.kind === tab);
+  const open = rows.filter((c) => ["pending", "deposited", "bounced"].includes(c.status)), done = rows.filter((c) => !open.includes(c));
+  const when = (c) => c.days === 0 ? "today" : c.days === 1 ? "tomorrow" : c.days > 0 ? `in ${c.days} days` : `${-c.days} day${c.days === -1 ? "" : "s"} ago`;
+  const stat = { pending: tab === "in" ? "to deposit" : "to be presented", deposited: "deposited, not cleared", cleared: "cleared", bounced: "bounced", cancelled: "cancelled" };
+  const row = (c) => `<div class="row"><div class="main"><div class="name">${h(c.party)}</div>
+      <div class="meta">No. ${h(c.number)}${c.bank ? ", " + h(c.bank) : ""} · ${fdate(c.date)} <b class="${c.late || c.status === "bounced" ? "od" : c.due ? "warn-t" : ""}">${["pending", "deposited"].includes(c.status) ? when(c) : ""}</b></div>
+      <div class="meta">${stat[c.status]}${c.src === "tally" ? ` · in Tally: <a href="#/voucher/${c.vid}">${h(c.vtype)} ${h(c.vno)}</a>` : " · written down in Bahi"}${c.note ? " · " + h(c.note) : ""}</div>
+      ${c.src === "bahi" && c.status !== "cancelled" ? `<div class="chips">${(c.status === "pending" ? ["deposited", "cleared", "bounced"] : c.status === "deposited" ? ["cleared", "bounced"] : c.status === "bounced" ? ["pending", "cancelled"] : ["pending"]).map((st) => `<button class="chip" data-st="${st}" data-id="${c.id}">${st === "pending" ? "Not yet" : st[0].toUpperCase() + st.slice(1)}</button>`).join("")}<button class="chip" data-st="delete" data-id="${c.id}">Delete</button></div>` : ""}</div>
+    <div class="end"><b>${rupees(c.amount)}</b></div></div>`;
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Cheque register</h1>
+    <div class="seg" role="tablist"><button data-t="in" aria-selected="${tab === "in"}">Received</button><button data-t="out" aria-selected="${tab === "out"}">Issued</button></div>
+    <section class="page">${open.map(row).join("") || `<div class="empty">No ${tab === "in" ? "cheques to deposit" : "cheques waiting to be presented"}.</div>`}</section>
+    <details class="page addq" style="padding:0 16px"><summary class="row"><b>+ Write down a ${tab === "in" ? "cheque received" : "cheque issued"}</b></summary>
+      <form class="form" id="chf" style="padding:0 0 12px"><label>${tab === "in" ? "From" : "To"}<input name="party" required></label>
+        <div class="two"><label>Cheque no.<input name="number" required inputmode="numeric"></label><label>Cheque date<input name="date" type="date" required></label></div>
+        <div class="two"><label>Amount<input name="amount" required inputmode="decimal"></label><label>Bank<input name="bank"></label></div>
+        <label>Note<input name="note"></label><button class="btn primary" type="submit">Save</button>
+        <p class="hint">For post-dated cheques you're holding. It's only noted in Bahi: enter the receipt or payment in Tally when the cheque is deposited.</p></form></details>
+    ${done.length ? `<div class="setgroup">Cleared and closed</div><section class="page">${done.slice(0, 60).map(row).join("")}</section>` : ""}
+    <p class="hint" style="margin:0 4px 14px">Cheques from Tally come from the bank details on receipts and payments (cheque number and date). They show as cleared once the bank date is set in Tally's bank reconciliation. Home reminds you of cheques due within a week.</p>`;
+  view.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { location.hash = "#/cheques/" + b.dataset.t; });
+  $("#chf").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api(cpath("cheques"), { method: "POST", body: JSON.stringify({ ...f, kind: tab, amount: +String(f.amount).replace(/[^\d.]/g, "") }) }); toast("Saved."); route(); }
+    catch (err) { toast(err.message); }
+  };
+  view.querySelectorAll("[data-st]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.st === "delete" && !confirm("Delete this cheque from the register?")) return;
+    try { await api(cpath(`cheques/${b.dataset.id}/status`), { method: "POST", body: JSON.stringify({ status: b.dataset.st }) }); route(); } catch (err) { toast(err.message); }
+  });
+}
+
+/* ---------------------------------------------------------------- stock count */
+async function vCounts() {
+  setTitle(true);
+  const d = await api(cpath("stockcounts"));
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Stock count</h1>
+    <form class="form" id="ncf"><label>New count<input name="name" placeholder="e.g. Godown, 31 March"></label><button class="btn primary" type="submit">Start counting</button></form>
+    <section class="page">${d.counts.map((c) => `<a class="row" href="#/count/${c.id}"><div class="main"><div class="name">${h(c.name)}</div>
+      <div class="meta">${c.items} item${c.items === 1 ? "" : "s"} counted · started ${new Date(c.started * 1000).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} by ${h(c.by)} · ${c.status === "open" ? "open" : "finished"}</div></div><span class="chev"></span></a>`).join("") || '<div class="empty">No counts yet.</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">Count the shelves on your phone (type the quantity or scan barcodes) and see the difference from Tally's stock, item by item, with its value. Several people can count in the same count. Tally's stock isn't changed: make the stock journal in Tally for any difference.</p>`;
+  $("#ncf").onsubmit = async (e) => {
+    e.preventDefault();
+    try { const c = await api(cpath("stockcount"), { method: "POST", body: JSON.stringify({ name: e.target.name.value }) }); location.hash = "#/count/" + c.id; } catch (err) { toast(err.message); }
+  };
+}
+
+async function vCount(id, show) {
+  setTitle(true);
+  show = show || "all";
+  const d = await api(cpath(`stockcount/${id}`));
+  const open = d.status === "open";
+  const q = (S.countQ || "").toLowerCase();
+  let list = d.rows.filter((r) => !q || r.item.toLowerCase().includes(q));
+  if (show === "left") list = list.filter((r) => r.counted == null);
+  if (show === "diff") list = list.filter((r) => r.counted != null && Math.abs(r.diff) > 0.0005);
+  const row = (r) => `<div class="row cnt"><div class="main"><div class="name">${h(r.item)}</div>
+      <div class="meta">Tally ${nfq.format(r.tally)} ${h(r.unit)}${r.counted != null ? ` · counted ${nfq.format(r.counted)}${Math.abs(r.diff) > 0.0005 ? ` · <b class="${r.diff < 0 ? "od" : "in"}">${r.diff > 0 ? "+" : ""}${nfq.format(r.diff)} (${r.value < 0 ? "−" : "+"}${rupees(Math.abs(r.value))})</b>` : ' · <span class="in">matches</span>'}` : ""}</div></div>
+      ${open ? `<input class="cntq" type="number" inputmode="decimal" min="0" step="any" placeholder="Qty" value="${r.counted ?? ""}" data-item="${h(r.item)}" aria-label="Counted quantity of ${h(r.item)}">` : `<div class="end">${r.counted != null ? nfq.format(r.counted) : "–"}</div>`}</div>`;
+  const diffs = d.rows.filter((r) => r.counted != null && Math.abs(r.diff) > 0.0005);
+  const text = `Stock count: ${d.name}\n` + diffs.map((r) => `${r.item}: Tally ${nfq.format(r.tally)}, counted ${nfq.format(r.counted)} ${r.unit} (${r.diff > 0 ? "+" : ""}${nfq.format(r.diff)})`).join("\n");
+  view.innerHTML = `<div class="crumbs"><a href="#/count">Stock count</a></div><h1 class="title">${h(d.name)}</h1>
+    <p class="subtitle">${d.counted} of ${d.total} items counted${d.differ ? `, ${d.differ} differ` : ""}${open ? "" : " · finished"}</p>
+    <section class="herocards">
+      <div class="bold ${d.short_value > 0.5 ? "out" : "nil"}"><div class="label">Short</div><div class="big">${short(d.short_value)}</div><div class="go">less than Tally, at cost</div></div>
+      <div class="bold nil"><div class="label">Extra</div><div class="big">${short(d.extra_value)}</div><div class="go">more than Tally, at cost</div></div></section>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><input class="search" id="cq" type="search" placeholder="Find an item" value="${h(S.countQ || "")}">${open ? '<button class="btn" id="cscan" type="button">▥ Scan</button>' : ""}</div>
+    <div class="seg" role="tablist"><button data-s="all" aria-selected="${show === "all"}">All</button><button data-s="left" aria-selected="${show === "left"}">Not counted</button><button data-s="diff" aria-selected="${show === "diff"}">Differences</button></div>
+    <section class="page">${list.slice(0, 300).map(row).join("") || '<div class="empty">Nothing here.</div>'}</section>
+    <div class="actions" style="margin:0 0 12px">${open ? '<button class="btn primary" id="cdone">Finish count</button>' : '<button class="btn" id="copen">Open again</button>'}
+      ${diffs.length ? `<button class="btn" data-copy="${h(text)}">Copy differences</button><a class="btn wa" href="https://wa.me/?text=${enc(text)}" target="_blank" rel="noopener">${ICON.wa}Share</a>` : ""}
+      <button class="btn" id="cdel">Delete</button></div>
+    <p class="hint" style="margin:0 4px 14px">Tally's quantity is the current closing stock. Differences are valued at Tally's stock rate. Correct the stock in Tally with a stock journal or physical stock voucher, then sync.</p>`;
+  const post = (sub, body) => api(cpath(`stockcount/${id}/${sub}`), { method: "POST", body: JSON.stringify(body) });
+  view.querySelectorAll(".cntq").forEach((inp) => inp.onchange = async () => {
+    try { await post("item", { item: inp.dataset.item, qty: inp.value === "" ? null : +inp.value }); const y = window.scrollY; await vCount(id, show); window.scrollTo(0, y); } catch (err) { toast(err.message); }
+  });
+  $("#cq").oninput = (e) => { S.countQ = e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(() => vCount(id, show).then(() => { const x = $("#cq"); x.focus(); x.setSelectionRange(x.value.length, x.value.length); }), 250); };
+  view.querySelectorAll("[data-s]").forEach((b) => b.onclick = () => { location.hash = `#/count/${id}/${b.dataset.s}`; });
+  if ($("#cscan")) $("#cscan").onclick = async () => {
+    const map = await barcodeMap();
+    for (;;) {
+      const code = await scanCode("Scan an item to count");
+      if (!code) return;
+      const item = map[code];
+      if (!item) { toast("That barcode isn't linked to an item yet (Stock, Scan to link it)."); return; }
+      const cur = d.rows.find((r) => r.item === item);
+      const v = prompt(`${item}\nTally: ${nfq.format(cur?.tally || 0)} ${cur?.unit || ""}. How many are there?`, cur?.counted ?? "");
+      if (v === null) break;
+      try { await post("item", { item, qty: v === "" ? null : +v }); } catch (err) { toast(err.message); break; }
+    }
+    vCount(id, show);
+  };
+  if ($("#cdone")) $("#cdone").onclick = async () => { await post("status", { status: "done" }); route(); };
+  if ($("#copen")) $("#copen").onclick = async () => { await post("status", { status: "open" }); route(); };
+  $("#cdel").onclick = async () => { if (!confirm(`Delete the count "${d.name}"?`)) return; await post("status", { status: "delete" }); location.hash = "#/count"; };
+  view.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied."); } catch (e) { toast("Couldn't copy here."); } });
 }
 
 /* ---------------------------------------------------------------- year-end checklist */
@@ -1890,6 +2020,9 @@ function vReports() {
     ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
     ["#/twob", "GSTR-2B matching", "Upload the GSTR-2B from the GST portal and match it with your purchase bills", can("accounts")],
     ["#/einvoice", "E-invoice and e-way bills", "Sales that seem to need an e-invoice or e-way bill but have none", can("accounts")],
+    ["#/tds", "TDS and TCS", "Deducted each month by section and party, paid, and due dates", can("accounts")],
+    ["#/cheques", "Cheque register", "Post-dated and uncleared cheques, received and issued, with reminders", can("accounts")],
+    ["#/count", "Stock count", "Count stock on the phone and compare with Tally", can("stock")],
     ["#/yearend", "Year-end checklist", "What to tidy in Tally before closing the year", can("accounts")],
     ["#/activity", "Staff activity", "Who made which entry, reminder or change in the app, and when", S.me.owner],
     ["#/quotes", "Quotations", "Make and share quotations; turn one into a sales order", can("e_sales") || can("e_order")],
@@ -3347,6 +3480,9 @@ async function route() {
       case "twob": await vTwoB(parts[1]); break;
       case "einvoice": await vEinvoice(parts[1]); break;
       case "yearend": await vYearEnd(); break;
+      case "tds": await vTds(); break;
+      case "cheques": await vCheques(parts[1]); break;
+      case "count": await (parts[1] ? vCount(+parts[1], parts[2]) : vCounts()); break;
       case "activity": await vActivity(parts[1]); break;
       case "lost": await vLost(); break;
       case "statements": await vStatements(); break;

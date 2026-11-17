@@ -47,6 +47,16 @@ def describe(path, data, companies):
         return "Saved a quotation" + (f" for {party}" if party else "") , co
     simple = {"followup": f"Noted a follow-up for {party}", "barcodes": "Changed item barcodes",
               "stock_min": "Changed minimum stock levels", "brs": "Worked on bank reconciliation", "gstr_twob": "Uploaded a GSTR-2B file"}
+    if rest == "cheques":
+        return f"Wrote down a cheque {'from' if d.get('kind') != 'out' else 'to'} {party} #{d.get('number', '')}" + _money(d.get("amount")), co
+    if rest.startswith("cheques/"):
+        return f"Marked a cheque {d.get('status', '')}", co
+    if rest == "stockcount":
+        return "Started a stock count", co
+    if rest.startswith("stockcount/"):
+        if rest.endswith("/status"):
+            return f"Stock count: {'finished' if d.get('status') == 'done' else d.get('status', '')}", co
+        return None                              # each item counted isn't worth a line
     if rest.startswith("gstr_twob/"):
         return "Removed a GSTR-2B file", co
     if rest in simple:

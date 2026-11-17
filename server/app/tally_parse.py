@@ -489,7 +489,28 @@ def voucher_extra(v):
     x.update(einvoice_fields(v))
     if is_rcm(v):
         x["rcm"] = True
+    if yes(v, "ISPOSTDATED"):
+        x["postdated"] = True
+    ch = cheques_of(v)
+    if ch:
+        x["cheques"] = ch
     return {k: val for k, val in x.items() if val}
+
+
+def cheques_of(v):
+    """Cheques and other instruments on the bank lines (Tally's bank allocations): number, date, bank, and the
+    date the bank cleared it when it has been reconciled in Tally. in = money coming into the bank."""
+    out = []
+    for e in v.findall("ALLLEDGERENTRIES.LIST") or v.findall("LEDGERENTRIES.LIST"):
+        for b in e.findall("BANKALLOCATIONS.LIST"):
+            no = txt(b, "INSTRUMENTNUMBER")
+            if not no:
+                continue
+            amt = num(txt(b, "AMOUNT")) or num(txt(e, "AMOUNT"))
+            out.append({"ledger": txt(e, "LEDGERNAME"), "no": no[:40], "date": tdate(txt(b, "INSTRUMENTDATE")),
+                        "type": txt(b, "TRANSACTIONTYPE")[:30], "bank": txt(b, "BANKNAME")[:60],
+                        "cleared": tdate(txt(b, "BANKERSDATE")), "amount": round(abs(amt), 2), "in": amt < 0})
+    return out[:20]
 
 
 _RCM_TEXT = re.compile(r"reverse\s*charge|unregistered|\bRCM\b", re.I)

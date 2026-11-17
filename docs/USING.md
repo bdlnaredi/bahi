@@ -574,3 +574,28 @@ Make the corrections in Tally, then sync.
 ## Staff activity
 
 **Reports, Staff activity** (owner only) lists every change made in the app, with who did it and when: entries, reminders, statements, quotations, settings and logins. Pick a person to see only theirs.
+
+## TDS and TCS
+
+**Reports, TDS and TCS** reads Tally's TDS and TCS ledgers: ledgers with type of duty TDS or TCS, or with TDS or TCS in their name. For the financial year it shows:
+- **Each month:** tax deducted or collected, tax paid to the government (a payment to the TDS ledger from cash or bank), and the due date.
+- **Late months:** marked when a month isn't fully paid by its due date.
+- **Totals:** by section ledger and by party.
+- **TDS your customers deducted:** taken from a TDS receivable ledger, to check against Form 26AS.
+
+## Cheque register
+
+**Reports, Cheque register** has two tabs, Received and Issued.
+- **Cheques from Tally:** from the bank details on receipts and payments (cheque number, date, bank). They show as cleared once the bank date is set in Tally's bank reconciliation.
+- **Cheques written down in Bahi:** tap **Write down a cheque** for a post-dated cheque you're holding, then mark it deposited, cleared or bounced. Enter it in Tally when it's deposited.
+- **Reminders:** Home shows the cheques due within a week.
+
+## Stock count
+
+**Reports, Stock count**, then **Start counting**:
+1. For each item, type the quantity you find, or tap **Scan** to scan barcodes.
+2. Bahi shows each item's difference from Tally's stock and its value, plus totals for short and extra stock.
+3. Several people can count in the same count at once.
+4. Tap **Finish count** when done, and share the differences.
+
+Tally's stock isn't changed. Correct it in Tally with a stock journal, then sync.

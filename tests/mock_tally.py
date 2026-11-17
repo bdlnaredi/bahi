@@ -35,6 +35,7 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Input CGST": ("Duties & Taxes", 0), "Input SGST": ("Duties & Taxes", 0),
     "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
     "Cartage & Loading": ("Indirect Incomes", 0), "Packing Charges": ("Indirect Expenses", 0), "Labour Charges": ("Direct Expenses", 0),
+    "TDS on Contract 194C": ("Duties & Taxes", 0), "Labour Charges": ("Direct Expenses", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
     "Discount Received": ("Indirect Incomes", 0), "Capital": ("Capital Account", 0),
     "Commission Received": ("Commission Earned", 0),
@@ -110,6 +111,18 @@ def make_vouchers():
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"E{d.month}", "party": "Freight Inward",
                        "ledgers": [("Freight Inward", 1000.0), ("Input CGST", 90.0), ("Input SGST", 90.0), ("Cash", -1180.0)],
                        "narration": "Freight with GST"})
+        if d.day == 10:      # a contractor paid by bank, 2% TDS kept back
+            vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"T{d.month}", "party": "Labour Charges",
+                       "ledgers": [("Labour Charges", 20000.0), ("TDS on Contract 194C", -400.0), ("HDFC Bank", -19600.0)], "narration": "Loading contractor"})
+        if d.day == 6 and d.month != 4:      # last month's TDS paid to the government
+            vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"TP{d.month}", "party": "TDS on Contract 194C",
+                       "ledgers": [("TDS on Contract 194C", 400.0), ("HDFC Bank", -400.0)], "narration": "TDS challan"})
+        if d.day == 25:      # a customer's cheque, dated ten days ahead
+            ins = d + timedelta(days=10)
+            vs.append({"kind": "acct", "date": d, "type": "Receipt", "no": f"CQ{d.month}", "party": "Krishna Agencies",
+                       "ledgers": [("HDFC Bank", 25000.0), ("Krishna Agencies", -25000.0)], "narration": "Cheque received",
+                       "cheque": {"ledger": "HDFC Bank", "no": f"{400100 + d.month}", "date": ins, "bank": "ICICI Bank",
+                                  "cleared": ins + timedelta(days=2) if ins + timedelta(days=2) < date.today() else None}})
         if d.day == 15:      # freight from an unregistered transporter, with the reverse-charge journal
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"R{d.month}", "party": "Freight Inward",
                        "ledgers": [("Freight Inward", 5000.0), ("Cash", -5000.0)], "narration": "Freight, unregistered transporter", "rcm": True})
@@ -295,6 +308,12 @@ def xml_voucher(v):
                if v["kind"] in ("sales", "purchase") else ""))
     body = ""
     def ba(ln):
+        cq = v.get("cheque")
+        if cq and ln == cq["ledger"]:
+            return (f'<BANKALLOCATIONS.LIST><DATE>{v["date"].strftime("%Y%m%d")}</DATE><INSTRUMENTDATE>{cq["date"].strftime("%Y%m%d")}</INSTRUMENTDATE>'
+                    f'<TRANSACTIONTYPE>Cheque</TRANSACTIONTYPE><BANKNAME>{cq["bank"]}</BANKNAME><INSTRUMENTNUMBER>{cq["no"]}</INSTRUMENTNUMBER>'
+                    + (f'<BANKERSDATE>{cq["cleared"].strftime("%Y%m%d")}</BANKERSDATE>' if cq.get("cleared") else "")
+                    + f'<AMOUNT>{amt(25000.0)}</AMOUNT></BANKALLOCATIONS.LIST>')
         if ln != v["party"]:
             return ""
         return "".join(f"<BILLALLOCATIONS.LIST><NAME>{escape(r)}</NAME><BILLTYPE>{t}</BILLTYPE>"

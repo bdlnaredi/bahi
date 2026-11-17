@@ -36,6 +36,8 @@ import links  # noqa: E402
 import cloud  # noqa: E402
 import tallybk  # noqa: E402
 import activity
+import cheques
+import stockcount
 import gstr2b
 import insights  # noqa: E402
 import gstr  # noqa: E402
@@ -52,7 +54,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.24.0"
+APP_VERSION = "3.25.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -294,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
                 "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts",
                 "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
                 "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts", "gstr_twob": "accounts",
-                "einvoice": "accounts"}
+                "einvoice": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -1134,6 +1136,36 @@ document.getElementById("a").addEventListener("change", function () {{
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
 
+        mp = re.match(r"^/api/c/(\d+)/cheques(?:/(\d+)/(status))?$", path)
+        if mp and method == "POST":             # post-dated cheques written down in Bahi (not in Tally)
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "cheques", q, None):
+                return self.send_json({"error": "You don't have access to this."}, 403)
+            data = json.loads(self.body(8192) or b"{}")
+            try:
+                if mp.group(2):
+                    return self.send_json(cheques.set_status(cid, int(mp.group(2)), str(data.get("status", "")), u.get("name") or "Owner"))
+                return self.send_json(cheques.save(cid, data, u.get("name") or "Owner"))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+
+        mp = re.match(r"^/api/c/(\d+)/stockcount(?:/(\d+)(?:/(item|status))?)?$", path)
+        if mp and method == "POST":             # stock count on the phone (kept in Bahi; Tally's stock isn't changed)
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "stockcount", q, None):
+                return self.send_json({"error": "You don't have access to stock."}, 403)
+            data = json.loads(self.body(8192) or b"{}")
+            try:
+                if not mp.group(2):
+                    return self.send_json(stockcount.new(cid, str(data.get("name", "")), u.get("name") or "Owner"))
+                kid = int(mp.group(2))
+                if mp.group(3) == "status":
+                    return self.send_json(stockcount.set_status(cid, kid, str(data.get("status", ""))))
+                qty = data.get("qty")
+                return self.send_json(stockcount.put(cid, kid, str(data.get("item", "")), None if qty in (None, "") else qty, u.get("name") or "Owner"))
+            except (TypeError, ValueError) as e:
+                return self.send_json({"error": str(e) if isinstance(e, ValueError) and str(e)[:1].isupper() else "Check the quantity."}, 400)
+
         mp = re.match(r"^/api/c/(\d+)/gstr_twob(?:/(\d{4}-\d{2})/delete)?$", path)
         if mp and method == "POST":             # GSTR-2B file from the GST portal (kept beside Tally, never in it)
             cid = int(mp.group(1))
@@ -1297,6 +1329,17 @@ document.getElementById("a").addEventListener("change", function () {{
             return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m)
         if what == "reorder":
             return insights.reorder(cid)
+        if what == "tds":
+            return insights.tds(cid, f if q.get("from") else None, t if q.get("to") else None)
+        if what == "cheques":
+            return cheques.listing(cid)
+        if what == "stockcounts":
+            return stockcount.listing(cid)
+        if what == "stockcount" and arg:
+            try:
+                return stockcount.get(cid, int(arg))
+            except ValueError as e:
+                return ({"error": str(e)}, 404)
         if what == "yearend":
             return insights.yearend(cid)
         if what == "gstr_twob":

@@ -609,3 +609,76 @@ def yearend(cid):
     out.sort(key=lambda x: order[x["status"]])
     return {"company": co["name"], "fy_end": fy_end.isoformat(), "days_left": (fy_end - today).days, "checks": out,
             "warn": sum(1 for x in out if x["status"] == "warn"), "info": sum(1 for x in out if x["status"] == "info")}
+
+
+# ------------------------------------------------------------------ TDS / TCS
+def tds(cid, d_from=None, d_to=None):
+    """TDS and TCS from Tally's TDS/TCS ledgers: what you deducted (or collected) each month, by section ledger and
+    by party, what was paid to the government, and the due date (7th of the next month; 30 April for March).
+    TDS your customers deducted from you (a TDS receivable ledger) is listed apart, to check against Form 26AS."""
+    import re as _re
+    today = date.today()
+    if not d_from:
+        y = today.year - (today.month < 4)
+        d_from, d_to = f"{y}-04-01", f"{y + 1}-03-31"
+    with store.conn() as c:
+        led = {r["name"]: dict(r) for r in c.execute("SELECT name, chain, taxtype, closing FROM ledger WHERE company_id=?", (cid,))}
+        def kind_of(l):
+            tt = (l.get("taxtype") or "").upper()
+            if tt in ("TDS", "TCS"):
+                return tt
+            m = _re.search(r"\b(TDS|TCS)\b", l["name"], _re.I)
+            return m.group(1).upper() if m else None
+        tl = {n: kind_of(l) for n, l in led.items() if kind_of(l)}
+        receivable = {n for n in tl if any(g in (led[n]["chain"] or "") for g in ("|Current Assets|", "|Loans & Advances (Asset)|", "|Loans and Advances (Asset)|"))
+                      and "|Duties & Taxes|" not in (led[n]["chain"] or "")}
+        cashbank = {n for n, l in led.items() if any(g in (l["chain"] or "") for g in ("|Cash-in-Hand|", "|Bank Accounts|", "|Bank OD A/c|"))}
+        if not tl:
+            return {"from": d_from, "to": d_to, "none": True}
+        ph = ",".join("?" * len(tl))
+        rows = c.execute(f"""SELECT v.id, v.date, v.vtype, v.number, v.party, vl.ledger, vl.amount FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+            WHERE v.company_id=? AND v.posting=1 AND v.status='' AND v.date BETWEEN ? AND ? AND vl.ledger IN ({ph}) ORDER BY v.date""",
+                         [cid, d_from, d_to, *tl]).fetchall()
+        others = {}
+        for vid in {r["id"] for r in rows}:
+            others[vid] = [x["ledger"] for x in c.execute("SELECT ledger FROM vline WHERE voucher_id=?", (vid,)) if x["ledger"] not in tl]
+    months, by_ledger, by_party, recv = {}, {}, {}, {}
+    for r in rows:
+        n, a, k = r["ledger"], r["amount"], tl[r["ledger"]]
+        oth = others.get(r["id"], [])
+        party = r["party"] if r["party"] and r["party"] not in tl else next((o for o in oth if o not in cashbank), "")
+        if n in receivable:
+            p = recv.setdefault(party or "(no party)", {"party": party, "amount": 0.0, "count": 0})
+            p["amount"] += a
+            p["count"] += 1
+            continue
+        if a > 0 and oth and all(o in cashbank for o in oth):
+            # tax paid to the government (challan): paid by the due date, it is for the month before
+            y, mm = int(r["date"][:4]), int(r["date"][5:7])
+            py, pm = (y, mm - 1) if mm > 1 else (y - 1, 12)
+            due_prev = f"{py}-04-30" if pm == 3 else f"{py + (pm == 12)}-{pm % 12 + 1:02d}-07"
+            key = f"{py}-{pm:02d}" if r["date"] <= due_prev else r["date"][:7]
+            months.setdefault(key, {"month": key, "TDS": 0.0, "TCS": 0.0, "paid": 0.0})["paid"] += a
+            continue
+        m = months.setdefault(r["date"][:7], {"month": r["date"][:7], "TDS": 0.0, "TCS": 0.0, "paid": 0.0})
+        m[k] += -a                               # credit = deducted / collected; debit elsewhere = reversed
+        lg = by_ledger.setdefault(n, {"ledger": n, "kind": k, "amount": 0.0, "count": 0})
+        lg["amount"] += -a
+        lg["count"] += 1
+        p = by_party.setdefault((party, n), {"party": party, "ledger": n, "kind": k, "amount": 0.0, "count": 0})
+        p["amount"] += -a
+        p["count"] += 1
+    out_m = []
+    for mk in sorted(months):
+        m = months[mk]
+        y, mm = int(mk[:4]), int(mk[5:7])
+        due = f"{y}-04-30" if mm == 3 else (f"{y + (mm == 12)}-{mm % 12 + 1:02d}-07")
+        owed = round(m["TDS"] + m["TCS"], 2)
+        out_m.append({"month": mk, "TDS": round(m["TDS"], 2), "TCS": round(m["TCS"], 2), "paid": round(m["paid"], 2),
+                      "due": due, "left": round(owed - m["paid"], 2), "late": due < today.isoformat() and owed - m["paid"] > 1})
+    rnd = lambda xs: [{**x, "amount": round(x["amount"], 2)} for x in sorted(xs, key=lambda x: -abs(x["amount"]))]
+    balance = round(-sum(led[n]["closing"] for n in tl if n not in receivable), 2)
+    return {"from": d_from, "to": d_to, "none": False, "months": out_m, "ledgers": rnd(by_ledger.values()),
+            "parties": rnd(by_party.values()), "receivable": rnd(recv.values()),
+            "total": round(sum(m["TDS"] + m["TCS"] for m in out_m), 2), "paid": round(sum(m["paid"] for m in out_m), 2),
+            "balance": balance}

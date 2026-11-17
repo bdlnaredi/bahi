@@ -2,6 +2,19 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.25.0 (17 November 2026)
+
+- **TDS and TCS** (Reports): from Tally's TDS/TCS ledgers. It shows what you deducted or collected each month, what you paid to the government, the due date (7th of the next month, 30 April for March) and whether it was late. Totals are listed by section ledger and by party. TDS your customers deducted from you is listed apart, to check against Form 26AS.
+- **Cheque register** (Reports): cheques received and issued.
+  - From Tally: cheque number, date and bank on receipts and payments, shown as cleared once the bank date is set in Tally.
+  - Written down in Bahi: post-dated cheques you're holding, which you can mark deposited, cleared or bounced.
+  - Home shows the cheques due within a week.
+- **Stock count** (Reports): count the shelves on your phone, by typing quantities or scanning barcodes, and compare with Tally's stock item by item.
+  - Shows what's short or extra, with its value. Several people can count at once.
+  - Share the differences on WhatsApp. Tally's stock isn't changed.
+- **Fixed:** in 3.23 and 3.24, setting the sales target, marking a statement as sent and removing a GSTR-2B file didn't save. They do now.
+- The Tally PC reads all vouchers again once, to pick up cheque details and post-dated marks.
+
 ## 3.24.0 (17 November 2026)
 
 - **GSTR-2B matching** (Reports): upload the GSTR-2B JSON (or zip) from the GST portal. Bahi matches each supplier bill with your purchase bills in Tally by GSTIN and bill number, and sorts them into:
