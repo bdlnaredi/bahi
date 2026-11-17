@@ -509,3 +509,35 @@ How GSTR-3B is worked out:
 
 - **App lock:** in **Settings, Android app**, turn on *Lock the app*. Bahi then asks for your fingerprint, face or phone PIN when it opens, and again when you come back after more than a minute. The phone needs a screen lock set for this to work.
 - **Widget:** long-press an empty spot on the home screen, tap **Widgets**, find **Bahi** and drag it out. It shows today's sales and bills, cash and bank, and money to receive for the company you last opened, with the time of the data. It refreshes every 30 minutes and whenever you open Home. Tap it to open Bahi.
+
+## Cash flow forecast
+
+**Reports, Cash flow forecast** shows how your cash and bank balance is likely to move over the next 30 days.
+- It starts from today's cash and bank balances in Tally.
+- It adds customers' bills on their due dates, takes away suppliers' bills on theirs, and takes away your average daily spending of the last 90 days.
+- The lowest point and its date show when money will be tightest. Overdue bills are listed separately.
+
+## Customers who stopped buying
+
+**Reports, Customers who stopped buying** lists customers who bought at least 3 times in the last year but haven't bought for more than twice their usual gap, and at least 30 days. Biggest buyers come first, each with a WhatsApp message and a call button.
+
+## Month-end statements
+
+**Reports, Month-end statements** lists every customer who owes you.
+- Tap **Send** and WhatsApp opens with their balance and a link to their own statement, bills and pay button.
+- Each send is marked for the month, so anyone can carry on where you stopped.
+- In the first week of each month, Home shows how many are left.
+
+## Sales target
+
+On Home, the owner taps **Set a monthly sales target**. The card then shows this month's sales against the target, whether you're on track for the day of the month, and how much you need to sell each day to reach it.
+
+## Price list
+
+**Reports, Price list** makes a PDF of your items and rates to share or print.
+- Choose one stock group or all, rates with or without GST, and whether to list only items in stock.
+- The rate is the last one each item was sold at in Tally.
+
+## Payment notifications (Android app)
+
+In **Settings, Android app**, turn on **Payment notifications**. When a receipt comes in from Tally, your phone shows "₹… received from …". Tap it to open the receipt, which has a **Say thank you** WhatsApp button. The phone checks about every 15 minutes; Android may check less often to save battery.

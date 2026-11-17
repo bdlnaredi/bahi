@@ -196,8 +196,20 @@ function androidSection() {
     ${typeof BahiAndroid.setLock === "function" ? `<div class="block-title" style="padding-top:6px">App lock</div>
     <form class="form" style="padding-top:0"><label><span><input type="checkbox" id="applock" ${BahiAndroid.lockOn() ? "checked" : ""} onchange="appLock(this)"> Lock the app with your fingerprint, face or phone PIN</span></label>
       <p class="hint">Asked when Bahi opens, and when you come back to it after more than a minute. It uses your phone's own screen lock.</p></form>
+    ${typeof BahiAndroid.setPayAlerts === "function" ? `<div class="block-title" style="padding-top:0">Payment notifications</div>
+    <form class="form" style="padding-top:0"><label><span><input type="checkbox" ${BahiAndroid.payAlertsOn() ? "checked" : ""} onchange="payAlerts(this)"> Notify me when a customer's payment is entered in Tally</span></label>
+      <p class="hint">After each sync, this phone shows "₹… received from …". Tap it to open the receipt and send a thank-you.</p></form>` : ""}
     <div class="block-title" style="padding-top:0">Home-screen widget</div>
     <div class="info"><div>Long-press an empty spot on your home screen, tap <b>Widgets</b>, find <b>Bahi</b> and drag it out. It shows today's sales, cash and money to receive for the company you last opened, and refreshes every 30 minutes and whenever you open Home.</div></div>` : ""}</section>`;
+}
+/* a tapped "payment received" notification opens that receipt, in its company */
+window.bahiGo = (cid, hash) => {
+  if (cid && S.cid !== cid && (!(S.companies || []).length || S.companies.some((c) => c.id === cid))) { S.cid = cid; try { localStorage.setItem("cid", cid); } catch (e) {} }
+  if (location.hash === hash) route(); else location.hash = hash;
+};
+function payAlerts(box) {
+  BahiAndroid.setPayAlerts(box.checked);
+  toast(box.checked ? "You'll get a notification for each payment received (checked about every 15 minutes)." : "Payment notifications are off.");
 }
 function appLock(box) {
   const r = BahiAndroid.setLock(box.checked);
@@ -358,7 +370,7 @@ async function vHome() {
   if (!can("accounts")) return vStaffHome();
   const d = await api(cpath("dashboard", periodParams()));
   const thisMonth = new Date().toISOString().slice(0, 7);
-  view.innerHTML = `${updatedCard()}<div id="remhome"></div>${entryBar()}
+  view.innerHTML = `${updatedCard()}<div id="remhome"></div><div id="stmthome"></div>${entryBar()}<div id="tgthome"></div>
   <section class="herocards">
     <a class="bold in" href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div><div class="go">See dues</div></a>
     <a class="bold out" href="#/dues/payable"><div class="label">You owe</div><div class="big">${short(d.payable)}</div><div class="go">See dues</div></a>
@@ -397,6 +409,11 @@ async function vHome() {
   drawSales($("#chart"), d.monthly_sales, thisMonth);
   // the Android home-screen widget gets the latest figures
   if (window.BahiAndroid && typeof BahiAndroid.widget === "function") api(`/api/widget?cid=${S.cid}`).then((w) => { try { BahiAndroid.widget(JSON.stringify(w), String(S.cid)); } catch (e) {} }).catch(() => {});
+  if (can("sales")) api(cpath("target")).then((t) => { const el = $("#tgthome"); if (el) el.innerHTML = targetCard(t); }).catch(() => {});
+  if (can("dues") && new Date().getDate() <= 7) api(cpath("statements")).then((r) => {
+    const el = $("#stmthome"), left = r.parties.length - r.sent;
+    if (el && left > 0) el.innerHTML = `<a class="newver remind" href="#/statements"><span class="nv-i">📄</span><span><b>Send month-end statements</b>: ${left} of ${r.parties.length} customer${r.parties.length === 1 ? "" : "s"} still to send</span><span class="chev"></span></a>`;
+  }).catch(() => {});
   if (can("dues")) api(cpath("reminders")).then((r) => {
     const el = $("#remhome");
     if (!el || !r.todo) return;
@@ -794,6 +811,129 @@ async function vReorder() {
     }).join("") || '<section class="page"><div class="empty">Nothing needs buying right now. 👍</div></section>'}
     <p class="hint" style="margin:0 4px 14px">An item is listed when it's at or below its reorder level (set on the item in Tally, or the minimum set in Bahi's Stock), or will run out within 15 days at the rate it sold over the last ${d.days} days. The quantity covers about ${d.cover} days and respects Tally's minimum order. Supplier = whoever you last bought it from.</p>`;
   view.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied."); } catch (e) { toast("Couldn't copy here."); } });
+}
+
+/* ---------------------------------------------------------------- sales target (Home card) */
+function targetCard(t) {
+  const set = S.me.owner ? `<button class="linkbtn" onclick="setTarget()">${t.target ? "Change" : "Set a monthly sales target"}</button>` : "";
+  if (!t.target) return S.me.owner ? `<p class="hint" style="margin:-4px 4px 12px">${set}</p>` : "";
+  const pct = Math.min(100, t.pct);
+  return `<section class="page tgt"><div class="tgt-h"><b>Sales target</b><span>${short(t.sales)} of ${short(t.target)}</span></div>
+    <div class="tgt-bar"><i style="width:${pct}%" class="${t.on_track ? "ok" : "late"}"></i><s style="left:${(t.day / t.days_in_month * 100).toFixed(1)}%"></s></div>
+    <div class="tgt-f"><span>${t.pct}% done${t.pct >= 100 ? " 🎉" : t.on_track ? ", on track" : ", behind"}</span>
+    <span>${t.pct >= 100 ? "" : `${short(t.need_per_day)} a day for ${t.days_left} day${t.days_left === 1 ? "" : "s"}`}</span></div>
+    <div class="tgt-f">${set}</div></section>`;
+}
+async function setTarget() {
+  const t = await api(cpath("target"));
+  const v = prompt("Sales target for every month (₹). Leave empty to remove it.", t.monthly || "");
+  if (v === null) return;
+  try {
+    await api("/api/target", { method: "POST", body: JSON.stringify({ cid: S.cid, monthly: +String(v).replace(/[^\d.]/g, "") || 0 }) });
+    toast("Target saved."); route();
+  } catch (e) { toast(e.message); }
+}
+
+/* ---------------------------------------------------------------- cash flow forecast */
+async function vCashflow() {
+  setTitle(true);
+  const d = await api(cpath("cashflow"));
+  const vals = d.series.map((x) => x.balance), pad = (Math.max(...vals) - Math.min(...vals)) * 0.15 || Math.abs(vals[0]) * 0.1 || 1;
+  const lo = Math.min(...vals) - pad, hi = Math.max(...vals) + pad, span = hi - lo;
+  const W = 320, Hh = 120, X = (i) => (i / (d.series.length - 1)) * W, Y = (v) => Hh - ((v - lo) / span) * Hh;
+  const path = d.series.map((x, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(x.balance).toFixed(1)}`).join("");
+  const li = d.series.findIndex((x) => x.day === d.low.day);
+  const chart = `<svg viewBox="-4 -8 ${W + 8} ${Hh + 26}" class="cfchart" role="img" aria-label="Expected cash and bank balance">
+    ${lo < 0 && hi > 0 ? `<line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" class="zero"/><text x="${W}" y="${Y(0) - 4}" text-anchor="end">₹0</text>` : ""}
+    <text x="0" y="${Y(vals[0]) - 8}">${short(vals[0])}</text><path d="${path}" class="ln"/>
+    <text x="${X(li)}" y="${Y(d.low.balance) - 10}" text-anchor="${li > d.series.length * 0.7 ? "end" : "middle"}">${short(d.low.balance)}</text>
+    <circle cx="${X(li)}" cy="${Y(d.low.balance)}" r="4" class="${d.low.balance < 0 ? "neg" : "lo"}"/>
+    <text x="0" y="${Hh + 16}">Today</text><text x="${W}" y="${Hh + 16}" text-anchor="end">${fdate(d.series[d.series.length - 1].day)}</text></svg>`;
+  const busy = d.series.filter((x) => x.in > 0.5 || x.out > 0.5);
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Cash flow forecast</h1>
+    <p class="subtitle">Next ${d.days} days</p>
+    <section class="herocards">
+      <div class="bold nil"><div class="label">Cash and bank today</div><div class="big">${short(d.now)}</div><div class="go">${d.accounts.length} account${d.accounts.length === 1 ? "" : "s"}</div></div>
+      <div class="bold ${d.low.balance < 0 ? "out" : "in"}"><div class="label">Lowest point</div><div class="big">${short(d.low.balance)}</div><div class="go">${fdate(d.low.day)}</div></div></section>
+    <section class="page" style="padding:14px 12px 6px">${chart}</section>
+    <section class="page g3"><div class="g3h"><b>Over the next ${d.days} days</b><span>From bills with a due date in Tally, and your usual expenses</span></div>
+      <div class="g3r"><span>Customers' bills falling due</span><span class="in">+ ${rupees(d.in_total)}</span></div>
+      <div class="g3r"><span>Suppliers' bills falling due</span><span class="od">− ${rupees(d.out_total)}</span></div>
+      <div class="g3r"><span>Usual expenses (${rupees(d.exp_per_day)} a day)</span><span class="od">− ${rupees(d.exp_total)}</span></div>
+      <div class="g3r g3t"><span>Expected on ${fdate(d.series[d.series.length - 1].day)}</span><span>${rupees(d.end)}</span></div></section>
+    ${d.overdue_in > 0.5 || d.overdue_out > 0.5 ? `<section class="page g3"><div class="g3h"><b>Already overdue (not counted above)</b><span>These may come in or go out at any time</span></div>
+      ${d.overdue_in > 0.5 ? `<a class="g3r" href="#/collect"><span>To receive, ${d.overdue_in_n} bill${d.overdue_in_n === 1 ? "" : "s"}</span><span class="in">+ ${rupees(d.overdue_in)}</span></a>` : ""}
+      ${d.overdue_out > 0.5 ? `<a class="g3r" href="#/dues/payable"><span>To pay, ${d.overdue_out_n} bill${d.overdue_out_n === 1 ? "" : "s"}</span><span class="od">− ${rupees(d.overdue_out)}</span></a>` : ""}</section>` : ""}
+    ${busy.length ? `<div class="setgroup">Day by day</div><section class="page">${busy.map((x) => `<div class="row"><div class="main"><div class="name">${fdate(x.day)}</div>
+      <div class="meta">${x.in > 0.5 ? `<span class="in">+${short(x.in)} in</span> ` : ""}${x.out > 0.5 ? `<span class="od">−${short(x.out)} out</span>` : ""}</div></div>
+      <div class="end"><div class="${x.balance < 0 ? "od" : ""}"><b>${short(x.balance)}</b></div><div class="meta">balance</div></div></div>`).join("")}</section>` : ""}
+    <p class="hint" style="margin:0 4px 14px">A guide, not a promise. It starts from your cash and bank balances in Tally, adds customers' bills on their due dates, takes away suppliers' bills on theirs, and takes away your average daily spending of the last 90 days (payments other than to suppliers). Bills without a credit period count on their bill date.</p>`;
+}
+
+/* ---------------------------------------------------------------- customers who stopped buying */
+async function vLost() {
+  setTitle(true);
+  const d = await api(cpath("lostcust"));
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Customers who stopped buying</h1>
+    <p class="subtitle">${d.customers.length ? `${d.customers.length} customer${d.customers.length === 1 ? "" : "s"}, ${short(d.total)} of sales in the last year` : ""}</p>
+    <section class="page">${d.customers.map((r) => {
+      const ph = digits(r.phone), msg = `Namaste ${r.party}, it's been a while since your last order with ${co}. We have fresh stock and would be glad to serve you again. Please let us know what you need.`;
+      return `<div class="row"><a class="main" href="#/ledger/${enc(r.party)}"><div class="name">${h(r.party)}</div>
+        <div class="meta">Last bought ${fdate(r.last)}, <b class="od">${r.days} days ago</b>. Usually every ${r.usual} day${r.usual === 1 ? "" : "s"}</div>
+        <div class="meta">${r.bills} bills, ${short(r.value)} in the last year${r.balance > 0.5 ? `, owes ${short(r.balance)}` : ""}</div></a>
+        <div class="end"><a class="btn small wa" href="https://wa.me/${ph}?text=${enc(msg)}" target="_blank" rel="noopener" aria-label="WhatsApp">${ICON.wa}</a>
+          ${ph ? `<a class="btn small" href="tel:+${ph}" aria-label="Call">📞</a>` : ""}</div></div>`;
+    }).join("") || '<div class="empty">Every regular customer has bought recently. 👍</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">Customers with 3 or more bills in the last year who haven't bought for more than twice their usual gap between bills, and at least 30 days. Biggest buyers first.</p>`;
+}
+
+/* ---------------------------------------------------------------- month-end statements */
+async function vStatements() {
+  setTitle(true);
+  const d = await api(cpath("statements"));
+  const mon = new Date(d.month + "-01T00:00").toLocaleString("en-IN", { month: "long", year: "numeric" });
+  const msg = (r) => `Dear ${r.party},\nYour account with ${d.company} shows ${rupees(r.balance)} due as on ${fdate(new Date().toISOString().slice(0, 10))}.\nSee your full statement and bills here: ${r.url}\nPlease ignore if already paid. Thank you.`;
+  const left = d.parties.length - d.sent;
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Month-end statements</h1>
+    <p class="subtitle">${mon}: ${d.sent} of ${d.parties.length} sent</p>
+    <div class="tgt-bar" style="margin:0 4px 14px"><i class="ok" style="width:${d.parties.length ? d.sent / d.parties.length * 100 : 0}%"></i></div>
+    <section class="page">${d.parties.map((r, i) => {
+      const ph = digits(r.phone);
+      return `<div class="row"><a class="main" href="#/ledger/${enc(r.party)}"><div class="name">${h(r.party)}</div>
+        <div class="meta">${rupees(r.balance)} due${r.sent ? ` · <span class="in">sent${r.sent.by ? " by " + h(r.sent.by) : ""}</span>` : ph ? "" : " · no phone number in Tally"}</div></a>
+        <div class="end"><a class="btn small ${r.sent ? "" : "primary"} wa" data-i="${i}" href="https://wa.me/${ph}?text=${enc(msg(r))}" target="_blank" rel="noopener">${ICON.wa}${r.sent ? "Again" : "Send"}</a></div></div>`;
+    }).join("") || '<div class="empty">No customer owes you money right now.</div>'}</section>
+    <p class="hint" style="margin:0 4px 14px">${left ? "Tap Send for each customer: WhatsApp opens with the message ready. " : "All sent for this month. "}The link opens their own statement, bills and a pay button, always up to date. Sends are marked for the month, so you or your staff can carry on from another phone. Home reminds you in the first week of each month.</p>`;
+  view.querySelectorAll("a[data-i]").forEach((a) => a.addEventListener("click", () => {
+    const r = d.parties[+a.dataset.i];
+    api("/api/statement_sent", { method: "POST", body: JSON.stringify({ cid: S.cid, party: r.party }) }).then(() => setTimeout(route, 800)).catch(() => {});
+  }));
+}
+
+/* ---------------------------------------------------------------- price list */
+async function vPriceList() {
+  setTitle(true);
+  const st = (S.pl = S.pl || { group: "", gst: false, stock: true });
+  const prm = { group: st.group, gst: st.gst ? "1" : "", stock: st.stock ? "1" : "" };
+  const d = await api(cpath("pricelist", prm));
+  const pdfUrl = cpath("pricelist_pdf", prm);
+  const co = S.companies.find((c) => c.id === S.cid)?.name || "";
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">Price list</h1>
+    <form class="form" id="plf"><label>Items<select id="plg"><option value="">All stock groups</option>${d.all_groups.map((g) => `<option ${g === st.group ? "selected" : ""}>${h(g)}</option>`).join("")}</select></label>
+      <label><span><input type="checkbox" id="plgst" ${st.gst ? "checked" : ""}> Rates including GST</span></label>
+      <label><span><input type="checkbox" id="plstock" ${st.stock ? "checked" : ""}> Only items in stock</span></label></form>
+    <div class="actions" style="margin:0 0 14px"><button class="btn primary" id="plshare">${ICON.share}Share PDF</button><button class="btn" id="plprint">${ICON.print}Print</button>
+      <a class="btn" href="${pdfUrl}" target="_blank" rel="noopener">${ICON.view}View PDF</a></div>
+    ${d.groups.map((g) => `<div class="setgroup">${h(g.name || "Other items")}</div><section class="page">${g.items.map((i) => `<div class="row"><div class="main"><div class="name">${h(i.name)}</div>
+      <div class="meta">${i.hsn ? "HSN " + h(i.hsn) : ""}${i.gst != null ? ` · GST ${i.gst}%` : ""}</div></div><div class="end"><b>${rupees(i.rate)}</b><div class="meta">per ${h(i.unit)}</div></div></div>`).join("")}</section>`).join("")
+      || '<section class="page"><div class="empty">No items with a selling rate here.</div></section>'}
+    <p class="hint" style="margin:0 4px 14px">${d.count} items. The rate is the last one each item was sold at in Tally (Tally's stock rate if never sold)${st.gst ? ", plus the item's GST" : ""}.</p>`;
+  $("#plg").onchange = (e) => { st.group = e.target.value; route(); };
+  $("#plgst").onchange = (e) => { st.gst = e.target.checked; route(); };
+  $("#plstock").onchange = (e) => { st.stock = e.target.checked; route(); };
+  $("#plshare").onclick = () => sharePdf(pdfUrl, `Price list ${co}`);
+  $("#plprint").onclick = () => printPdf(pdfUrl, `Price list ${co}`);
 }
 
 /* ---------------------------------------------------------------- item profit */
@@ -1634,6 +1774,10 @@ function vReports() {
     ["#/compare", "Compare periods", "This month, quarter or year against the last one and a year ago", can("accounts")],
     ["#/profit", "Item profit", "Profit on each item and each customer, at Tally's purchase cost", can("accounts")],
     ["#/reorder", "Reorder list", "Items to buy now, by supplier, ready to send", can("stock")],
+    ["#/cashflow", "Cash flow forecast", "Cash and bank over the next 30 days, from bills falling due and usual expenses", can("accounts")],
+    ["#/lost", "Customers who stopped buying", "Regular buyers who haven't bought for a while, to call back", can("dues")],
+    ["#/statements", "Month-end statements", "Send every customer their statement on WhatsApp, one tap each", can("dues")],
+    ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
     ["#/quotes", "Quotations", "Make and share quotations; turn one into a sales order", can("e_sales") || can("e_order")],
     ["#/groups", "Group summary", "Balances by Tally group", can("accounts")],
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
@@ -1787,7 +1931,8 @@ async function vVoucher(id) {
       <div class="actions" style="padding:12px 0 0"><button class="btn primary" id="vpdf">${ICON.share}Share PDF</button>
         <button class="btn" id="vprint">${ICON.print}Print</button>
         <a class="btn" href="/api/c/${S.cid}/voucher_pdf/${id}" target="_blank" rel="noopener">${ICON.view}View PDF</a>
-        ${V.party ? `<a class="btn" href="#/ledger/${enc(V.party)}">Party ledger</a>` : ""}</div>
+        ${V.party ? `<a class="btn" href="#/ledger/${enc(V.party)}">Party ledger</a>` : ""}
+        ${V.base === "Receipt" && V.party ? `<a class="btn wa" href="https://wa.me/${digits(P?.mobile || P?.phone)}?text=${enc(`Dear ${V.party}, we have received your payment of ${rupees(Math.abs(V.amount))} on ${fdate(V.date)} (receipt no. ${V.number}). Thank you!\n${S.companies.find((c) => c.id === S.cid)?.name || ""}`)}" target="_blank" rel="noopener">${ICON.wa}Say thank you</a>` : ""}</div>
     </section>
     ${d.items.length ? `<section class="page"><div class="block-title"><span>Items</span><span>Amount</span></div>
       ${d.items.map((i) => `<a class="row" href="#/item/${enc(i.item)}"><div class="main"><div class="name">${h(i.item)}</div>
@@ -3084,6 +3229,10 @@ async function route() {
       case "duedates": await vDueDates(parts[1]); break;
       case "gstr": await vGstr(parts[1], parts[2]); break;
       case "reorder": await vReorder(); break;
+      case "cashflow": await vCashflow(); break;
+      case "lost": await vLost(); break;
+      case "statements": await vStatements(); break;
+      case "pricelist": await vPriceList(); break;
       case "profit": await vProfit(parts[1]); break;
       case "quotes": await vQuotes(); break;
       case "quote": await (parts[1] === "new" || parts[2] === "edit" ? vQuoteForm(parts[1] === "new" ? null : +parts[1]) : vQuote(+parts[1])); break;

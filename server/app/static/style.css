@@ -727,3 +727,22 @@ table.gt.cmp td.dn { color: var(--cr); font-weight: 700; }
 .g3t { font-weight: 700; }
 .g3head { padding: 12px 0 2px; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
 .g3h + .g3head { padding-top: 8px; }
+/* sales target card */
+.tgt { padding: 12px 16px; margin-bottom: 12px; }
+.tgt-h, .tgt-f { display: flex; justify-content: space-between; gap: 10px; font-size: .9rem; }
+.tgt-f { color: var(--ink-3); font-size: .82rem; margin-top: 6px; }
+.tgt-bar { position: relative; height: 10px; border-radius: 6px; background: var(--rule); margin-top: 10px; overflow: hidden; }
+.tgt-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--good); }
+.tgt-bar i.late { background: #f59e0b; }
+.tgt-bar s { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink-3); opacity: .6; }
+/* cash flow chart */
+.cfchart { width: 100%; height: auto; display: block; }
+.cfchart .ln { fill: none; stroke: #16a34a; stroke-width: 2.4; stroke-linejoin: round; }
+.cfchart .zero { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 4 4; }
+.cfchart circle.lo { fill: #16a34a; } .cfchart circle.neg { fill: #dc2626; }
+.cfchart text { font-size: 10px; fill: var(--ink-3); }
+a.g3r { color: inherit; text-decoration: none; }
+span.in, .g3r .in { color: var(--good); font-weight: 600; }
+.cfchart .ln { stroke: var(--good); } .cfchart circle.lo { fill: var(--good); }
+.g3r > span:last-child { white-space: nowrap; text-align: right; }
+.row > a.main { color: inherit; text-decoration: none; min-width: 0; }

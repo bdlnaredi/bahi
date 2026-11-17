@@ -2,6 +2,20 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.23.0 (17 November 2026)
+
+- **Cash flow forecast** (Reports): cash and bank over the next 30 days, as a chart and day by day.
+  - It starts from your Tally balances, adds customers' bills on their due dates, and takes away suppliers' bills and your usual daily spending.
+  - It shows the lowest point and its date. Overdue bills are listed apart, as they may or may not come in.
+- **Customers who stopped buying** (Reports): regular buyers who haven't bought for more than twice their usual gap. Each has a WhatsApp "we miss you" message and a call button.
+- **Month-end statements** (Reports): every customer who owes you, with a Send button that opens WhatsApp with their balance and a link to their statement.
+  - Sends are marked for the month, so you or your staff can carry on from another phone.
+  - Home reminds you in the first week of the month.
+- **Sales target:** the owner sets a monthly target from Home. Home shows the progress bar, whether you're on track, and the sales needed each day to reach it.
+- **Price list** (Reports): your items with rates (the last rate each was sold at in Tally), by stock group, with or without GST, as a PDF to share or print.
+- **Payment notifications** (Android app, Settings, Android app): turn on to get "₹… received from …" on your phone when a receipt comes in from Tally. Tap it to open the receipt.
+- **Say thank you:** a receipt voucher now has a WhatsApp thank-you button.
+
 ## 3.22.0 (17 November 2026)
 
 - **GSTR-3B reworked:**

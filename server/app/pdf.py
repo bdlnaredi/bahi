@@ -1241,3 +1241,62 @@ def ledger_pdf(d):
         p.text(L + 330, y, "Total interest", 8.5, "B")
         p.money(R, y, d["interest"], 8.5, True)
     return p.output()
+
+
+def price_list_pdf(d):
+    """Items with their rates, grouped by stock group: d = {company, company_info, date, gst (rates with GST),
+    groups: [{name, items: [{name, unit, hsn, gst, rate}]}], note}"""
+    p = PDF()
+    L, R = 36, PDF.W - 36
+    gst = d.get("gst")
+    cx = {"no": L, "item": L + 22, "hsn": 330, "gst": 395, "unit": 420, "rate": R}
+
+    def header():
+        y = _company_header(p, d, PDF.H - 40) - 22
+        p.text(PDF.W / 2, y, "Price List", 11, "B", "center")
+        y -= 11
+        p.text(PDF.W / 2, y, f"as on {tdate(d['date'])}" + (", rates include GST" if gst else ", rates before GST"), 8.5, "R", "center")
+        y -= 14
+        p.line(L, y, R, y, 0.6)
+        y -= 11
+        for k, lab, al in (("no", "Sl", "left"), ("item", "Item", "left"), ("hsn", "HSN/SAC", "left"), ("gst", "GST", "right"),
+                           ("unit", "Unit", "left"), ("rate", "Rate", "right")):
+            p.text(cx[k], y, lab, 8.5, "I", al)
+        y -= 5
+        p.line(L, y, R, y, 0.6)
+        return y - 13
+
+    y = header()
+    n = 0
+    for g in d["groups"]:
+        if y < 90:
+            p.text(R, y - 4, "Continued...", 7.5, "I", "right")
+            p.new_page()
+            y = header()
+        if len(d["groups"]) > 1:
+            p.text(L, y, g["name"] or "Other items", 9, "B")
+            y -= 13
+        for it in g["items"]:
+            if y < 70:
+                p.text(R, y - 4, "Continued...", 7.5, "I", "right")
+                p.new_page()
+                y = header()
+            n += 1
+            p.text(cx["no"], y, str(n), 8.5)
+            p.text(cx["item"], y, fit(it["name"], 9, cx["hsn"] - cx["item"] - 8), 9)
+            p.text(cx["hsn"], y, fit(it.get("hsn") or "", 8, cx["gst"] - cx["hsn"] - 26), 8)
+            if it.get("gst") is not None:
+                p.text(cx["gst"], y, f"{it['gst']:g}%", 8, "R", "right")
+            p.text(cx["unit"], y, fit(it.get("unit") or "", 8, 50), 8)
+            p.text(cx["rate"], y, inr(it["rate"]), 9, "B", "right")
+            y -= 13
+        y -= 4
+    if d.get("note"):
+        y -= 6
+        for ln in wrap(d["note"], 8, R - L)[:6]:
+            if y < 50:
+                p.new_page()
+                y = PDF.H - 60
+            p.text(L, y, ln, 8, "I", color=GREY)
+            y -= 10
+    return p.output(footer="Rates are subject to change without notice.")

@@ -50,7 +50,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.22.0"
+APP_VERSION = "3.23.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -288,7 +288,8 @@ class Handler(BaseHTTPRequestHandler):
                 "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
                 "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
                 "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts",
-                "reorder": "stock", "profit": "accounts"}
+                "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
+                "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -766,6 +767,19 @@ document.getElementById("a").addEventListener("change", function () {{
                 except (TypeError, ValueError):
                     return self.send_json({"error": "Enter a number of days."}, 400)
             return self.send_json(insights.credit_settings())
+        if path == "/api/alerts":
+            # the Android app asks every 15 minutes: payments received today and yesterday, for the phone to notify
+            since = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
+            out = []
+            for co in store.companies():
+                if not users.can_company(u, co["name"]) or not self.allowed(co["id"], "outstanding", {}, None):
+                    continue
+                with store.conn() as c:
+                    for v in c.execute("""SELECT id, guid, date, number, party, amount FROM voucher WHERE company_id=? AND base='Receipt'
+                            AND posting=1 AND status='' AND date>=? ORDER BY date, id""", (co["id"], since)):
+                        out.append({"key": f"{co['id']}:{v['guid'] or v['number']}", "cid": co["id"], "company": co["name"], "id": v["id"],
+                                    "party": v["party"] or "", "amount": round(abs(v["amount"] or 0), 2), "number": v["number"], "date": v["date"]})
+            return self.send_json({"receipts": out[-100:]})
         if path == "/api/widget":
             # the Android home-screen widget: a few figures for one company, already worded
             try:
@@ -784,6 +798,22 @@ document.getElementById("a").addEventListener("change", function () {{
             return self.send_json({"cid": co["id"], "company": co["name"], "sales_today": round(st[0], 2), "bills_today": st[1],
                                    "cash": dsh.get("cash", 0), "bank": dsh.get("bank_total", 0), "receivable": dsh.get("receivable", 0),
                                    "payable": dsh.get("payable", 0), "data_at": co.get("data_at") or co.get("last_sync")})
+        if path in ("/api/statement_sent", "/api/target") and method == "POST":
+            data = json.loads(self.body(4096) or b"{}")
+            try:
+                cid = int(data.get("cid"))
+            except (TypeError, ValueError):
+                return self.send_json({"error": "Which company?"}, 400)
+            if path == "/api/statement_sent":
+                if not self.allowed(cid, "statements", {}, None):
+                    return self.send_json({"error": "Not allowed."}, 403)
+                return self.send_json(insights.statement_sent(cid, str(data.get("party", ""))[:200], u.get("name") or "Owner"))
+            if not u["owner"]:
+                return self.send_json({"error": "Only the owner sets the sales target."}, 403)
+            try:
+                return self.send_json(insights.set_target(cid, data.get("monthly"), data.get("this_month")))
+            except (TypeError, ValueError):
+                return self.send_json({"error": "Enter the target as a number."}, 400)
         if path == "/api/reminded" and method == "POST":
             data = json.loads(self.body(4096) or b"{}")
             try:
@@ -1143,6 +1173,14 @@ document.getElementById("a").addEventListener("change", function () {{
             if d:
                 return self.send_pdf(pdf.ledger_pdf(d), d["ledger"]["name"] + " ledger")
             return self.send_json({"error": "not found"}, 404)
+        if what == "pricelist_pdf":
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            d = insights.price_list(cid, unquote(q.get("group", "")), q.get("gst") == "1", q.get("stock") == "1")
+            with store.conn() as c:
+                crow = c.execute("SELECT info FROM company WHERE id=?", (cid,)).fetchone()
+            d.update({"company": co["name"], "company_info": json.loads((crow["info"] if crow else None) or "{}"),
+                      "date": time.strftime("%Y-%m-%d"), "note": unquote(q.get("note", ""))[:400]})
+            return self.send_pdf(pdf.price_list_pdf(d), f"Price list {co['name']}")
         if what == "quote_pdf" and arg:
             qq = quotes.get(cid, int(arg))
             if not qq:
@@ -1186,7 +1224,8 @@ document.getElementById("a").addEventListener("change", function () {{
             params = {str(k): str(v) for k, v in (r.get("params") or {}).items() if v not in (None, "")}
             res = None
             if re.match(r"^[a-z_]+$", what) and what not in ("bulk", "export", "ledger_pdf", "voucher_pdf", "entry_form",
-                                                               "party_bills", "entries", "entry", "brs", "partycheck", "quote_form", "quote_pdf"):
+                                                               "party_bills", "entries", "entry", "brs", "partycheck", "quote_form", "quote_pdf",
+                                                               "pricelist_pdf", "statements"):
                 try:
                     if self.allowed(cid, what, params, arg):
                         res = self.company_data(cid, what, arg, params)
@@ -1226,6 +1265,18 @@ document.getElementById("a").addEventListener("change", function () {{
             return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m)
         if what == "reorder":
             return insights.reorder(cid)
+        if what == "cashflow":
+            return insights.cashflow(cid, 30)
+        if what == "lostcust":
+            return insights.lost_customers(cid)
+        if what == "target":
+            return insights.target(cid)
+        if what == "pricelist":
+            return insights.price_list(cid, unquote(q.get("group", "")), q.get("gst") == "1", q.get("stock") == "1")
+        if what == "statements":
+            co = next((c for c in store.companies() if c["id"] == cid), None)
+            origin = (self.headers.get("X-Forwarded-Proto") or "http") + "://" + (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "")
+            return insights.statements(cid, co["name"], lambda p: links.url(links.get(co["name"], p), origin))
         if what == "profit":
             return insights.profit(cid, f, t)
         if what == "quotes":

@@ -77,6 +77,8 @@ public class MainActivity extends Activity {
 
     private SharedPreferences prefs;
     private WebView web;
+    private String goHash;      // a notification asked to open this screen (a voucher), once the page is ready
+    private int goCid;
     private ProgressBar bar;
     private ValueCallback<Uri[]> fileCallback;
     private String shareText;          // a message to go with the next shared file (the customer link)
@@ -89,6 +91,8 @@ public class MainActivity extends Activity {
         if (server().isEmpty()) showSetup(null);
         else showWeb();
         try { Updates.schedule(this); } catch (Exception ignored) { }
+        try { Payments.schedule(this); } catch (Exception ignored) { }
+        takeGo(getIntent());
         // Android 13 and later: ask once to allow notifications (for "a new version is ready")
         if (Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("asked_notify", false)
                 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -104,6 +108,22 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         if (intent.getBooleanExtra("update", false)) checkForUpdate(true);   // tapped the notification
+        if (takeGo(intent)) goNow();
+    }
+
+    /** A "payment received" notification was tapped: remember which voucher to open */
+    private boolean takeGo(Intent i) {
+        if (i == null || i.getStringExtra("go_hash") == null) return false;
+        goHash = i.getStringExtra("go_hash");
+        goCid = i.getIntExtra("go_cid", 0);
+        i.removeExtra("go_hash");
+        return true;
+    }
+
+    private void goNow() {
+        if (web == null || goHash == null || !goHash.matches("^#/[a-z]+/\\d+$")) return;
+        web.evaluateJavascript("window.bahiGo && window.bahiGo(" + goCid + ",'" + goHash + "')", null);
+        goHash = null;
     }
 
     private String server() {
@@ -260,6 +280,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 CookieManager.getInstance().flush();
+                goNow();
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -521,6 +542,17 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean lockOn() {
             return MainActivity.this.lockOn();
+        }
+
+        /** "Payment received" notifications, checked about every 15 minutes */
+        @JavascriptInterface
+        public void setPayAlerts(boolean on) {
+            Payments.set(MainActivity.this, on);
+        }
+
+        @JavascriptInterface
+        public boolean payAlertsOn() {
+            return Payments.on(MainActivity.this);
         }
 
         /** Fresh figures for the home-screen widget (the server's /api/widget answer) */
