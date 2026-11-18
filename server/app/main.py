@@ -55,7 +55,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.31.0"
+APP_VERSION = "3.31.1"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -1190,7 +1190,9 @@ document.getElementById("a").addEventListener("change", function () {{
             try:
                 if mp.group(3):
                     return self.send_json(gstr1.tally_remove(cid, mp.group(2)))
-                return self.send_json(gstr1.tally_save(cid, mp.group(2), self.body(8 * 1024 * 1024)))
+                if int(self.headers.get("Content-Length") or 0) > 40 * 1024 * 1024:
+                    return self.send_json({"error": "The file is too big. Export GSTR-1 for one month only."}, 400)
+                return self.send_json(gstr1.tally_save(cid, mp.group(2), self.body(40 * 1024 * 1024)))
             except ValueError as e:
                 return self.send_json({"error": str(e)}, 400)
 

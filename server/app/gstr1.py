@@ -355,27 +355,132 @@ TALLY_ROWS = [  # Tally's row (start of its label) -> the table here
     ("Amended Tax Liability", "ata"), ("Amendment of Adjusted Advances", "atadja"), ("HSN Summary", "hsn"), ("Document Summary", "doc")]
 
 
+def _text(raw):
+    """Tally's export as text, whichever way it was saved: UTF-8, or UTF-16 (Tally's 'Unicode'), with or without the
+    byte-order mark, or the old Windows code page."""
+    if isinstance(raw, str):
+        return raw
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16", "replace")
+    head = raw[:400]
+    if head.count(b"\x00") > len(head) // 4:      # UTF-16 without the mark
+        return raw.decode("utf-16-le" if head[1:2] == b"\x00" else "utf-16-be", "replace")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", "replace")
+
+
+def _row_key(label):
+    lab = re.sub(r"\s+", " ", label or "").strip().lower()
+    return next((k for l, k in TALLY_ROWS if lab.startswith(l.lower())), None)
+
+
+def _num(val):
+    try:
+        return abs(float(re.sub(r"[^0-9.\-]", "", str(val)) or 0))
+    except ValueError:
+        return 0.0
+
+
+def _xlsx_rows(raw):
+    """The cells of each row of the first sheet of an Excel export, as text (standard library only)."""
+    import io
+    import zipfile
+    from xml.etree import ElementTree as ET
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        names = z.namelist()
+        shared = []
+        if "xl/sharedStrings.xml" in names:
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(ns + "si"):
+                shared.append("".join(t.text or "" for t in si.iter(ns + "t")))
+        sheet = sorted(n for n in names if n.startswith("xl/worksheets/sheet") and n.endswith(".xml"))
+        if not sheet:
+            raise ValueError("This Excel file has no sheet in it.")
+        out = []
+        for r in ET.fromstring(z.read(sheet[0])).iter(ns + "row"):
+            cells = {}
+            for c in r.iter(ns + "c"):
+                ref = re.match(r"([A-Z]+)", c.get("r") or "")
+                col = 0
+                for ch in (ref.group(1) if ref else ""):
+                    col = col * 26 + ord(ch) - 64
+                v = c.find(ns + "v")
+                if c.get("t") == "s" and v is not None:
+                    txt = shared[int(v.text)] if v.text and int(v.text) < len(shared) else ""
+                elif c.get("t") == "inlineStr":
+                    txt = "".join(t.text or "" for t in c.iter(ns + "t"))
+                else:
+                    txt = v.text if v is not None and v.text else ""
+                cells[(col or len(cells) + 1) - 1] = txt
+            out.append([cells.get(i, "") for i in range(max(cells) + 1)] if cells else [])
+        return out
+
+
+def _from_table(rows):
+    """Tally's GSTR-1 saved as Excel: find the heading row (Taxable ...) and read each table's row under it."""
+    cols = None
+    found = {}
+    for r in rows:
+        low = [str(x).strip().lower() for x in r]
+        if cols is None and any("taxable" in x for x in low):
+            cols = {}
+            for i, x in enumerate(low):
+                f = ("count" if "count" in x or "no. of" in x or "number" in x else
+                     "taxable" if "taxable" in x else
+                     "IGST" if "igst" in x or "integrated" in x else
+                     "CGST" if "cgst" in x or "central" in x else
+                     "SGST" if "sgst" in x or "state" in x or "utgst" in x else
+                     "Cess" if "cess" in x else
+                     "value" if "invoice" in x or "value" in x else
+                     "tax" if "tax" in x else None)
+                if f and f not in cols.values():
+                    cols[i] = f
+            continue
+        if cols is None:
+            continue
+        label = next((str(x) for x in r if str(x).strip()), "")
+        key = _row_key(label)
+        if key and key not in found:
+            found[key] = {"label": label.strip(), **{f: _num(r[i]) if i < len(r) else 0.0 for i, f in cols.items()}}
+    return found
+
+
 def parse_tally(raw):
-    text = raw.decode("utf-8-sig", "replace") if isinstance(raw, bytes) else raw
-    if "GSTRRETVIEWPARTICULARS" not in text:
-        raise ValueError("This isn't Tally's GSTR-1 export. In Tally open GSTR-1, press Alt+E and choose XML (Data Interchange).")
+    """Tally's GSTR-1 export for the month (XML, or Excel), to compare with: each table's row -> its figures."""
+    if isinstance(raw, bytes) and raw[:2] == b"PK":
+        try:
+            rows = _from_table(_xlsx_rows(raw))
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("Couldn't open this Excel file. In Tally open GSTR-1, press Alt+E and choose XML (Data Interchange).")
+        if not rows:
+            raise ValueError("This Excel file isn't Tally's GSTR-1 for a month (no GSTR-1 tables found in it).")
+        return rows
+    if not raw:
+        raise ValueError("The file is empty.")
+    text = _text(raw)
+    if "GSTRRETVIEWPARTICULARS" not in text.upper():
+        if re.search(r"B2B Invoices|B2C \(Small\)", text, re.I):
+            raise ValueError("This is GSTR-1 saved in another format. In Tally press Alt+E, set Format to XML (Data Interchange), and export again.")
+        raise ValueError("This isn't Tally's GSTR-1 export. In Tally open GSTR-1 for the month, press Alt+E and choose XML (Data Interchange).")
     rows, cur = {}, None
     tags = {"GSTRVCHCOUNT": "count", "GSTRTAXABLEAMOUNT": "taxable", "GSTRIGSTAMOUNT": "IGST", "GSTRCGSTAMOUNT": "CGST",
             "GSTRSGSTAMOUNT": "SGST", "GSTRCESSAMOUNT": "Cess", "GSTRTAXAMOUNT": "tax", "GSTRINVOICEAMOUNT": "value"}
-    for m in re.finditer(r"<(GSTRRETVIEWPARTICULARS|GSTR[A-Z]*)>([^<]*)</\1>", text):
-        tag, val = m.group(1), m.group(2).strip().replace("&amp;", "&")
+    ent = {"&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'"}
+    for m in re.finditer(r"<(GSTR[A-Z]*)(?:\s[^>]*)?>([^<]*)</\1\s*>", text, re.I):
+        tag, val = m.group(1).upper(), re.sub(r"&\w+;", lambda e: ent.get(e.group(0), " "), m.group(2)).strip()
         if tag == "GSTRRETVIEWPARTICULARS":
-            key = next((k for lab, k in TALLY_ROWS if val.startswith(lab)), None)
+            key = _row_key(val)
             cur = None
             if key and key not in rows:
                 cur = rows[key] = {"label": val}
         elif cur is not None and tag in tags:
-            try:
-                cur[tags[tag]] = abs(float(val.replace(",", ""))) if val else 0.0
-            except ValueError:
-                cur[tags[tag]] = 0.0
+            cur[tags[tag]] = _num(val) if val else 0.0
     if not rows:
-        raise ValueError("No GSTR-1 rows found in the file.")
+        raise ValueError("No GSTR-1 tables found in the file.")
     return rows
 
 

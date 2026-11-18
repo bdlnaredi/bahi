@@ -803,7 +803,7 @@ async function vGstr1(month) {
       { noFigs: true, meta: `${S1.doc.reduce((a, r) => a + r.total, 0)} documents, ${S1.doc.reduce((a, r) => a + r.cancelled, 0)} cancelled, in ${S1.doc.length} series` })}
     <details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Compare with Tally again" : "Compare with Tally's GSTR-1"}</b></summary>
       <form class="form" id="g1f" style="padding:0 0 12px"><p class="hint" style="margin:0">In Tally open GSTR-1 for ${monthName(month)}, press Alt+E, choose XML (Data Interchange), and upload the file here. Each table then shows whether it matches Tally.</p>
-      <input type="file" id="g1file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload and compare</button>${T ? ' <button class="btn" type="button" id="g1del">Remove Tally\'s file</button>' : ""}<p class="hint" id="g1msg"></p></form></details>
+      <input type="file" id="g1file" accept=".xml,.xlsx,text/xml,application/xml,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required><button class="btn primary" type="submit">Upload and compare</button>${T ? ' <button class="btn" type="button" id="g1del">Remove Tally\'s file</button>' : ""}<p class="hint" id="g1msg"></p></form></details>
     <p class="hint" style="margin:0 4px 14px">Built from your sales vouchers in Tally: tax as posted on the GST ledgers; taxable value per rate as Tally's assessable value on the GST lines, or the stock lines at their GST rate. B2C (Large) is an inter-state invoice to an unregistered buyer over ₹1 lakh. Amendments come from fresh vouchers and notes entered in Tally, so these tables stay empty. Check, then file from Tally or the GST portal.</p>`;
   view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); if (!x) return; x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
   $("#mprev").onclick = () => { location.hash = `#/gstr1/${monthShift(month, -1)}`; };
@@ -813,8 +813,9 @@ async function vGstr1(month) {
     const file = $("#g1file").files[0]; if (!file) return;
     $("#g1msg").textContent = "Reading the file…";
     try {
-      const r = await fetch(cpath(`gstr_one_tally/${month}`), { method: "POST", body: file });
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
+      const r = await fetch(cpath(`gstr_one_tally/${month}`), { method: "POST", body: file, credentials: "same-origin" });
+      let j = {}; try { j = await r.json(); } catch (_) { j = { error: r.status === 413 ? "The file is too big for the server to take." : `The server didn't take the file (error ${r.status}). Try again, or send me the file.` }; }
+      if (!r.ok || j.error) throw new Error(j.error || "Couldn't read the file.");
       route();
     } catch (err) { $("#g1msg").textContent = err.message; }
   };
