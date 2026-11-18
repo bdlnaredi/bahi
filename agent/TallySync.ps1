@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.22"
+$AgentVersion = "3.23"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -778,6 +778,12 @@ foreach ($co in $companies) {
         $deep = @{}
         try { if (Test-Path $deepFile) { (Get-Content $deepFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $deep[$_.Name] = $_.Value } } } catch {}
         $deepCheck = $false
+        # Tally's own GSTR-3B for the months the server lists (missing, old, or asked for in the app): read even when
+        # nothing else changed in Tally
+        if ($state.need_3b) {
+            $r3 = @(); foreach ($ym in @($state.need_3b)) { try { $r3 += [datetime]::ParseExact(([string]$ym + "-01"), "yyyy-MM-dd", $null) } catch {} }
+            if ($r3.Count) { try { Send-Gstr3b $co.Name $r3 } catch { if ($Verbose) { Log ("Tally's GSTR-3B not read: " + $_.Exception.Message) "Gray" } } }
+        }
         if ($unchanged -and -not $Force) {
             $last = 0; try { $last = [double]$deep[$deepKey] } catch {}
             $nowSec = [double](Get-Date -UFormat %s)
@@ -995,9 +1001,9 @@ foreach ($co in $companies) {
         # so the last 15 days' details are read every time (only those fields; the server adds them to its copy)
         $eFrom = $today.Date.AddDays(-15); if ($eFrom -lt $FromDate) { $eFrom = $FromDate }
         if ($eFrom -le $ToDate) { Send-Einv $run $co.Name $eFrom $ToDate $null }
-        # Tally's own GSTR-3B: this month and last month after a change, every month of the year on a full sync
-        if ($full -or $sentTotal -gt 0 -or $sentByVch) {
-            $r3 = @(); $m = if ($full) { Get-Date -Year $FromDate.Year -Month $FromDate.Month -Day 1 } else { $today.Date.AddDays(1 - $today.Day).AddMonths(-1) }
+        # Tally's own GSTR-3B: this month and last month again after a change (the server lists the rest)
+        if ($sentTotal -gt 0 -or $sentByVch) {
+            $r3 = @(); $m = $today.Date.AddDays(1 - $today.Day).AddMonths(-1)
             if ($m -lt $FromDate.AddDays(1 - $FromDate.Day)) { $m = $FromDate.AddDays(1 - $FromDate.Day) }
             while ($m -le $ToDate -and $m -le $today) { $r3 += $m; $m = $m.AddMonths(1) }
             if ($r3.Count -gt 15) { $r3 = $r3[($r3.Count - 15)..($r3.Count - 1)] }

@@ -757,3 +757,4 @@ span.in, .g3r .in { color: var(--good); font-weight: 600; }
 details.addq > summary { list-style: none; cursor: pointer; padding: 14px 0; } details.addq > summary::-webkit-details-marker { display: none; }
 .ephoto { max-width: 100%; max-height: 240px; border-radius: 12px; border: 1px solid var(--rule); object-fit: contain; }
 .ethumb { display: block; margin-top: 8px; width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--rule); }
+.notally { border: 1.5px solid #f59e0b; }

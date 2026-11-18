@@ -306,6 +306,11 @@ def get_alt(name):
         r = c.execute("""SELECT co.id, (SELECT COUNT(*) FROM vitem i JOIN voucher v ON v.id=i.voucher_id WHERE v.company_id=co.id) n,
                 (SELECT COUNT(*) FROM vitem i JOIN voucher v ON v.id=i.voucher_id WHERE v.company_id=co.id AND i.gst IS NOT NULL) g
                 FROM company co WHERE co.name=?""", (name,)).fetchone()
+        # Tally's own GSTR-3B: the months the Tally PC should read (see tally3b.wanted)
+        r3 = c.execute("SELECT id, from_date FROM company WHERE name=?", (name,)).fetchone()
+        if r3:
+            import tally3b
+            out["need_3b"] = tally3b.wanted(r3["id"], r3["from_date"] or "")
         out["need_gst"] = False
         if r and r["n"] and not r["g"]:
             key = f"gst_ask:{r['id']}"

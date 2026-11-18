@@ -802,7 +802,10 @@ async function vGstr(which, month) {
     const upload3b = `<details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Upload Tally's GSTR-3B again" : "Use Tally's own GSTR-3B figures"}</b></summary>
       <form class="form" id="t3f" style="padding:0 0 12px"><p class="hint" style="margin:0">${T ? "" : "The Tally PC reads Tally's GSTR-3B by itself after each sync where Tally allows it. If it isn't here, "}In Tally open GSTR-3B for ${monthName(month)}, press Alt+E, choose XML (Data Interchange), and upload the file here.</p>
       <input type="file" id="t3file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload</button><p class="hint" id="t3msg"></p></form></details>`;
-    body = `${T ? `<p class="hint" style="margin:0 4px 12px">✅ <b>Figures from Tally's own GSTR-3B</b> (${T.source === "upload" ? "uploaded" : "read from Tally"} ${when}). The vouchers lists show Bahi's own working.</p>` : ""}
+    body = `${T ? `<p class="hint" style="margin:0 4px 12px">✅ <b>Figures from Tally's own GSTR-3B</b> (${T.source === "upload" ? "uploaded" : "read from Tally"} ${when}). The vouchers lists show Bahi's own working.</p>`
+      : `<section class="page g3 notally"><div class="g3h"><b>⚠️ Not Tally's GSTR-3B yet</b><span>These figures are Bahi's own working from the vouchers and can differ from Tally. The Tally PC reads Tally's GSTR-3B for every month by itself (Tally must be open).</span></div>
+        <div class="actions" style="padding:8px 0 12px"><button class="btn primary" id="t3ask">Get Tally's figures for ${monthName(month)}</button></div>
+        <p class="hint" id="t3askmsg" style="margin:0 0 10px">Or upload it yourself at the bottom of this page.</p></section>`}
       <section class="herocards">
         <div class="bold ${d.cash_total > 0.005 ? "out" : "in"}"><div class="label">Cash to pay</div><div class="big">${short(d.cash_total)}</div><div class="go">after using your input credit</div></div>
         <div class="bold in"><div class="label">Credit carried forward</div><div class="big">${short(d.left_total)}</div><div class="go">unused input credit, for next month</div></div></section>
@@ -845,6 +848,13 @@ async function vGstr(which, month) {
       const j = await r.json(); if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
       route();
     } catch (err) { $("#t3msg").textContent = err.message; }
+  };
+  if ($("#t3ask")) $("#t3ask").onclick = async () => {
+    try {
+      await api(cpath(`tally3b/${month}/ask`), { method: "POST", body: "{}" });
+      $("#t3askmsg").textContent = "Asked. The Tally PC reads it at its next sync, within a few minutes while Tally is open. Then pull down to refresh this page.";
+      $("#t3ask").disabled = true;
+    } catch (err) { toast(err.message); }
   };
   if ($("#t3del")) $("#t3del").onclick = async () => {
     if (!confirm("Stop using Tally's GSTR-3B for this month? (The Tally PC reads it again after the next change in Tally.)")) return;

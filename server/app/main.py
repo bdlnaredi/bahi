@@ -55,7 +55,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.28.1"
+APP_VERSION = "3.29.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -1190,6 +1190,11 @@ document.getElementById("a").addEventListener("change", function () {{
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
 
+        mp = re.match(r"^/api/c/(\d+)/tally3b/(\d{4}-\d{2})/ask$", path)
+        if mp and method == "POST":             # ask the Tally PC for Tally's GSTR-3B of this month at its next sync
+            if not self.allowed(int(mp.group(1)), "gstr_threeb", q, None):
+                return self.send_json({"error": "You don't have access to this."}, 403)
+            return self.send_json(tally3b.ask(int(mp.group(1)), mp.group(2)))
         mp = re.match(r"^/api/c/(\d+)/tally3b/(\d{4}-\d{2})(/delete)?$", path)
         if mp and method == "POST":             # Tally's GSTR-3B exported from Tally (Alt+E, XML), uploaded for a month
             cid = int(mp.group(1))

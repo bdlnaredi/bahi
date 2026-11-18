@@ -92,14 +92,66 @@ def save(cid, month, raw, source):
     if not re.match(r"^\d{4}-\d{2}$", month or ""):
         raise ValueError("Which month is this GSTR-3B for?")
     rows = parse(raw)
+    detailed = lambda rs: any(re.match(r"^3\.1\s*\(?[a-e]", r["label"]) for r in rs)
     with _lock:
         d = _load(cid)
+        old = d.get(month)
+        if source == "tally" and old and old["source"] == "upload" and detailed(old["rows"]) and not detailed(rows):
+            return {"ok": True, "month": month, "kept": "upload"}      # your detailed upload stays
         d[month] = {"rows": rows, "at": time.time(), "source": source}
         os.makedirs(DIR, exist_ok=True)
         with open(_path(cid) + ".tmp", "w") as f:
             json.dump(d, f)
         os.replace(_path(cid) + ".tmp", _path(cid))
     return {"ok": True, "month": month, "rows": len(rows)}
+
+
+REQ = os.path.join(DIR, "asked.json")
+
+
+def ask(cid, month):
+    """The app asks for Tally's GSTR-3B of a month: the Tally PC reads it at its next sync."""
+    with _lock:
+        try:
+            with open(REQ) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        d.setdefault(str(cid), {})[month] = time.time()
+        os.makedirs(DIR, exist_ok=True)
+        with open(REQ + ".tmp", "w") as f:
+            json.dump(d, f)
+        os.replace(REQ + ".tmp", REQ)
+    return {"ok": True}
+
+
+def asked(cid):
+    try:
+        with open(REQ) as f:
+            return json.load(f).get(str(cid), {})
+    except (OSError, ValueError):
+        return {}
+
+
+def wanted(cid, books_from=""):
+    """Months whose GSTR-3B the Tally PC should read now: every month of this financial year (and last March)
+    without Tally's figures or with figures older than a day, the latest two months every 15 minutes, and any
+    month asked for in the app."""
+    from datetime import date
+    today = date.today()
+    fy = today.year - (today.month < 4)
+    months, y, m = [], fy, 3
+    while (y, m) <= (today.year, today.month):
+        ym = f"{y:04d}-{m:02d}"
+        if not books_from or ym >= books_from[:7]:
+            months.append(ym)
+        y, m = (y + (m == 12), m % 12 + 1)
+    have, now = _load(cid), time.time()
+    recent = months[-2:]
+    out = [ym for ym in months if ym not in have or (have[ym]["source"] != "upload" and
+                                                        now - have[ym]["at"] > (900 if ym in recent else 86400))]
+    out += [ym for ym in asked(cid) if ym not in out and (ym not in have or have[ym]["at"] < asked(cid)[ym])]
+    return sorted(out)[-14:]
 
 
 def remove(cid, month):
