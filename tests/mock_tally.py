@@ -614,6 +614,25 @@ class H(BaseHTTPRequestHandler):
                             + (f"<REORDERBASE> {ro[0]} {unit}</REORDERBASE><MINIMUMORDERBASE> {ro[1]} {unit}</MINIMUMORDERBASE>" if ro else "")
                             + '</STOCKITEM></TALLYMESSAGE>')
             out += "</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>"
+        elif typ == "Data" and rid in ("GSTR-3B", "GSTR3B", "GSTR 3B", "GSTR3B Report", "GSTR-3B Report", "GST GSTR3B"):
+            # Tally's GSTR-3B report: answers only to one name (NO_GSTR3B=1: to none), section totals only
+            if rid != "GSTR3B" or os.environ.get("NO_GSTR3B") == "1":
+                out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>0</STATUS></HEADER><BODY><DATA><LINEERROR>Could not find Report &apos;" + escape(rid) + "&apos;!</LINEERROR></DATA></BODY></ENVELOPE>"
+            else:
+                rows = [("3.1 Tax on Outward and Reverse Charge Inward Supplies", 1000000, 0, 50360.28, 50360.28, 100720.56),
+                        ("3.2 Interstate Supplies", None, None, None, None, None), ("4 Eligible for Input Tax Credit", None, None, None, None, None),
+                        ("A. Input Tax Credit Available (either in part or in full)", None, 0, -18204.02, -18204.02, -36408.04),
+                        ("B. Input Tax Credit Reversed", None, None, None, None, None),
+                        ("C. Net Input Tax Credit Available (A) - (B)", None, 0, -18204.02, -18204.02, -36408.04),
+                        ("5 Exempt, Nil Rated, and Non-GST Inward Supplies", -1500, None, None, None, None),
+                        ("6.1 Interest, Late Fee, Penalty and Others", None, None, None, None, None)]
+                if f.month != 10:
+                    rows = [(r[0], None, None, None, None, None) for r in rows]
+                fmt = lambda x: "" if x is None else f"{x:.2f}"
+                out = "<ENVELOPE>" + "".join(
+                    f"<GSTRRETVIEWPARTICULARS>{escape(lab)}</GSTRRETVIEWPARTICULARS><GSTRTAXABLEAMOUNT>{fmt(tx)}</GSTRTAXABLEAMOUNT>"
+                    f"<GSTRIGSTAMOUNT>{fmt(i)}</GSTRIGSTAMOUNT><GSTRCGSTAMOUNT>{fmt(c_)}</GSTRCGSTAMOUNT><GSTRSGSTAMOUNT>{fmt(s_)}</GSTRSGSTAMOUNT>"
+                    f"<GSTRCESSAMOUNT></GSTRCESSAMOUNT><GSTRTAXAMOUNT>{fmt(tt)}</GSTRTAXAMOUNT>" for lab, tx, i, c_, s_, tt in rows) + "</ENVELOPE>"
         elif typ == "Data" and rid == "Day Book":
             WANT_RATES[0] = True          # the Day Book has every field
             if DAYBOOK_BUG:

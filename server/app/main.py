@@ -38,6 +38,7 @@ import tallybk  # noqa: E402
 import activity
 import cheques
 import stockcount
+import tally3b
 import gstr2b
 import insights  # noqa: E402
 import gstr  # noqa: E402
@@ -54,7 +55,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.27.2"
+APP_VERSION = "3.28.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -539,6 +540,15 @@ document.getElementById("a").addEventListener("change", function () {{
             entries.result(int(r.get("id", 0)), bool(r.get("ok")), str(r.get("error") or ""), bool(r.get("retry")))
             return self.send_json({"ok": True})
         # TallyPrime's own backup files, copied from the Tally PC's backup folder (read there, never changed)
+        if path == "/agent/tally3b" and method == "POST":
+            # Tally's own GSTR-3B report for one month, as the Tally PC got it from Tally
+            co = next((c for c in store.companies() if c["name"] == q.get("company", "")), None)
+            if not co:
+                return self.send_json({"error": "unknown company"}, 404)
+            try:
+                return self.send_json(tally3b.save(co["id"], q.get("month", ""), self.body(8 * 1024 * 1024), "tally"))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
         if path == "/agent/tallybackup" and method == "GET":
             return self.send_json(tallybk.index())
         if path == "/agent/tallybackup" and method == "POST":
@@ -1179,6 +1189,18 @@ document.getElementById("a").addEventListener("change", function () {{
             except (TypeError, ValueError):
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
+
+        mp = re.match(r"^/api/c/(\d+)/tally3b/(\d{4}-\d{2})(/delete)?$", path)
+        if mp and method == "POST":             # Tally's GSTR-3B exported from Tally (Alt+E, XML), uploaded for a month
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "gstr_threeb", q, None):
+                return self.send_json({"error": "You don't have access to this."}, 403)
+            try:
+                if mp.group(3):
+                    return self.send_json(tally3b.remove(cid, mp.group(2)))
+                return self.send_json(tally3b.save(cid, mp.group(2), self.body(8 * 1024 * 1024), "upload"))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
 
         mp = re.match(r"^/api/c/(\d+)/cheques(?:/(\d+)/(status))?$", path)
         if mp and method == "POST":             # post-dated cheques written down in Bahi (not in Tally)

@@ -2,6 +2,15 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.28.0 (18 November 2026)
+
+- **GSTR-3B uses Tally's own figures.** The Tally PC (version 3.22) now reads Tally's GSTR-3B report for each month: this month and last month after every change, and every month of the year on a full sync. The 3B screen shows Tally's figures, marked "Figures from Tally's own GSTR-3B".
+  - **When Tally's export has only section totals:** 3.1(a) is 3.1 less 3.1(d), and 4(A)(5) is 4(C) less 4(A)(3), with reverse charge from your reverse-charge journals.
+  - **Shown as exported:** Tally's report rows appear as Tally gives them (3.1, 4(A), 4(B), 4(C), 5 and 6.1), with a note wherever Bahi's own working differs.
+  - **Upload instead:** if your Tally doesn't answer the request, export GSTR-3B from Tally (Alt+E, XML) and upload it on the month's 3B screen.
+  - Bahi's own working from the vouchers is used when Tally's report isn't there, or if you choose it.
+- Backups include Tally's GSTR-3B figures.
+
 ## 3.27.2 (18 November 2026)
 
 - **GSTR-3B, journals and payments:** these are now sorted by the GST ledger's side, as Tally does, not only by debit or credit:

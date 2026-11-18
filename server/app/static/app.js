@@ -783,8 +783,23 @@ async function vGstr(which, month) {
           <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}</div></div>
           <div class="end meta">${H.filter((x) => Math.abs(r[x]) > 0.004).map((x) => `${HN[x].split(" ")[0]} ${rupees(r[x])}`).join("<br>")}</div></a>`).join("")}</div></section>`;
     };
-    const g1diff = d.out_g1 ? H.filter((x) => Math.abs((d.out[x] || 0) - (d.out_g1[x] || 0)) > 1) : [];
-    body = `<section class="herocards">
+    const g1diff = d.out_g1 && !d.tally ? H.filter((x) => Math.abs((d.out[x] || 0) - (d.out_g1[x] || 0)) > 1) : [];
+    const T = d.tally, when = T ? new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
+    const trow = (k, lab) => T[k] ? `<div class="g3head">${lab}</div>${heads(T[k]).map(([a, v]) => line(a, rupees(v))).join("")}` : "";
+    const calcDiff = T ? ["out", "itc"].filter((k) => H.some((x) => Math.abs((d.calc[k][x] || 0) - (d[k][x] || 0)) > 1)) : [];
+    const tallyCard = T ? `<section class="page g3"><div class="g3h"><b>Tally's GSTR-3B, as exported</b><span>${T.source === "upload" ? "Uploaded" : "Read from Tally"} ${when}</span></div>
+        ${trow("s31", "3.1 Outward and reverse-charge inward supplies")}${T.s31 && T.s31.taxable ? line("Taxable value", rupees(T.s31.taxable)) : ""}
+        ${trow("s4a", "4(A) ITC available")}${trow("s4b", "4(B) ITC reversed")}${trow("s4c", "4(C) Net ITC")}
+        ${T.s5 && T.s5.taxable ? `<div class="g3head">5 Exempt, nil-rated and non-GST inward</div>${line("Value", rupees(T.s5.taxable))}` : ""}
+        ${T.s61 && sum(T.s61) ? trow("s61", "6.1 Interest, late fee and others") : ""}
+        ${d.split.length ? `<p class="hint" style="margin:6px 0 4px">Tally's export has only section totals, so ${d.split.join(" and ")} ${d.split.length > 1 ? "are" : "is"} worked out: 3.1(a) is 3.1 less 3.1(d), and 4(A)(5) is 4(C) less 4(A)(3), with reverse charge from your reverse-charge journals.</p>` : ""}
+        ${calcDiff.length ? `<p class="hint" style="margin:6px 0 4px">Bahi's own working from the vouchers differs (${calcDiff.map((k) => k === "out" ? `3.1(a) CGST ${rupees(d.calc.out.CGST)}` : `4(A)(5) CGST ${rupees(d.calc.itc.CGST)}`).join(", ")}): Tally's figures are used.</p>` : ""}
+        <div class="actions" style="padding:4px 0 10px"><button class="btn small" id="t3del">${T.source === "upload" ? "Remove this file" : "Use Bahi's own working instead"}</button></div></section>` : "";
+    const upload3b = `<details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Upload Tally's GSTR-3B again" : "Use Tally's own GSTR-3B figures"}</b></summary>
+      <form class="form" id="t3f" style="padding:0 0 12px"><p class="hint" style="margin:0">${T ? "" : "The Tally PC reads Tally's GSTR-3B by itself after each sync where Tally allows it. If it isn't here, "}In Tally open GSTR-3B for ${monthName(month)}, press Alt+E, choose XML (Data Interchange), and upload the file here.</p>
+      <input type="file" id="t3file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload</button><p class="hint" id="t3msg"></p></form></details>`;
+    body = `${T ? `<p class="hint" style="margin:0 4px 12px">✅ <b>Figures from Tally's own GSTR-3B</b> (${T.source === "upload" ? "uploaded" : "read from Tally"} ${when}). The vouchers lists show Bahi's own working.</p>` : ""}
+      <section class="herocards">
         <div class="bold ${d.cash_total > 0.005 ? "out" : "in"}"><div class="label">Cash to pay</div><div class="big">${short(d.cash_total)}</div><div class="go">after using your input credit</div></div>
         <div class="bold in"><div class="label">Credit carried forward</div><div class="big">${short(d.left_total)}</div><div class="go">unused input credit, for next month</div></div></section>
       ${card("3.1(a) Outward taxable supplies", "Sales with tax, less credit notes", [["Taxable value", d.out.taxable], ...heads(d.out)], d.out_total, "Total tax")}
@@ -800,6 +815,7 @@ async function vGstr(which, month) {
         ${line("Total credit this month", rupees(d.itc_total), "g3t")}</section>
       ${vlist("itc_rcm", "Vouchers in 4(A)(3)")}${vlist("itc", "Vouchers in 4(A)(5)")}
       ${vlist("left", "Left out: GST paid, set off or moved (not a supply)")}
+      ${tallyCard}
       ${d.bf_avail > 0.005 ? `<section class="page g3"><div class="g3h"><b>Credit brought forward</b><span>Unused credit from earlier months: the debit balance of your GST ledgers in Tally at the start of the month</span></div>
         ${heads(d.bf_all).map(([k, v]) => line(k, rupees(v))).join("")}${line("Total", rupees(d.bf_avail), "g3t")}
         <label class="g3r" style="justify-content:flex-start;gap:10px"><input type="checkbox" id="g3bf" ${d.bf_used ? "checked" : ""}> Use it in the set-off below</label></section>` : ""}
@@ -808,13 +824,28 @@ async function vGstr(which, month) {
       ${card("Credit carried forward", "Input credit left after the set-off, for next month", heads(d.left), d.left_total, "Total")}
       <section class="page g3"><div class="g3h"><b>Your GST ledgers in Tally</b><span>Net balance of each head, as it is in Tally. Dr is credit in your favour, Cr is tax payable.</span></div>
         ${shown.map((x) => `<div class="g3head">${HN[x]}</div>${d.start ? line("Start of the month", drcr(d.start[x])) : ""}${line("End of the month", drcr(d.end[x]))}`).join("")}
-        <p class="hint" style="margin:6px 0 4px">${unpaid.length ? ` ${unpaid.map((x) => HN[x]).join(", ")} had tax payable (Cr) at the start of the month, from earlier months; it isn't part of this month's figures.` : ""}</p></section>`;
+        <p class="hint" style="margin:6px 0 4px">${unpaid.length ? ` ${unpaid.map((x) => HN[x]).join(", ")} had tax payable (Cr) at the start of the month, from earlier months; it isn't part of this month's figures.` : ""}</p></section>
+      ${upload3b}`;
   }
   view.innerHTML = head + body + `<p class="hint" style="margin:0 4px 14px">Put together from the vouchers synced from Tally: tax as posted on Tally's GST ledgers, rates as Tally gave each line. Use it to check, then file from Tally's own GSTR reports or with your CA.${which === "1" ? "" : " Interest, late fee, amendments and blocked credit aren't covered."}</p>`;
   view.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { location.hash = `#/gstr/${b.dataset.w}/${month}`; });
   $("#mprev").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, -1)}`; };
   $("#mnext").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, 1)}`; };
   view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+  if ($("#t3f")) $("#t3f").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = $("#t3file").files[0]; if (!file) return;
+    $("#t3msg").textContent = "Reading the file…";
+    try {
+      const r = await fetch(cpath(`tally3b/${month}`), { method: "POST", body: file });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
+      route();
+    } catch (err) { $("#t3msg").textContent = err.message; }
+  };
+  if ($("#t3del")) $("#t3del").onclick = async () => {
+    if (!confirm("Stop using Tally's GSTR-3B for this month? (The Tally PC reads it again after the next change in Tally.)")) return;
+    await api(cpath(`tally3b/${month}/delete`), { method: "POST", body: "{}" }); route();
+  };
   if ($("#g3bf")) $("#g3bf").onchange = (e) => { try { localStorage.setItem("g3bf", e.target.checked ? "1" : "0"); } catch (x) {} route(); };
 }
 

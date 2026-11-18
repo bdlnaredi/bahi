@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import date
 
 import store
+import tally3b
 
 SLABS = [0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28, 40]
 B2CL_LIMIT = 100000      # inter-state sales to unregistered buyers above this go in B2C (Large)
@@ -294,6 +295,27 @@ def gstr3b(cid, month, use_bf=True):
                 start[h] += store._opening_at(c, cid, n, l["closing"], sync_from, f)
             end[h] += store._opening_at(c, cid, n, l["closing"], sync_from, nxt)
     start, end = _r(start), _r(end)
+    # Tally's own GSTR-3B for the month, when the Tally PC fetched it (or it was uploaded): its figures are used.
+    # Where its export has only section totals, 3.1(a) is 3.1 less 3.1(d), and 4(A)(5) is 4(C) less 4(A)(3),
+    # with 3.1(d) and 4(A)(3) from the reverse-charge vouchers.
+    calc = {"out": dict(out), "rcm": dict(out_rcm), "itc": dict(itc), "itc_rcm": dict(itc_rcm)}
+    t3 = tally3b.get(cid, month)
+    split = []
+    if t3 and t3.get("s31"):
+        sub, s4 = t3.get("sub31") or {}, t3.get("sub4a") or {}
+        if "d" in sub:
+            out_rcm = {h: sub["d"][h] for h in HEADS}
+        if "a" in sub:
+            out = {h: sub["a"][h] for h in HEADS}
+        else:
+            out = {h: round(t3["s31"][h] - out_rcm[h], 2) for h in HEADS}
+            split.append("3.1(a)")
+        if "3" in s4:
+            itc_rcm = {h: s4["3"][h] for h in HEADS}
+        net = t3.get("s4c") or t3.get("s4a") or {h: 0.0 for h in HEADS}
+        itc = {h: round(net[h] - itc_rcm[h], 2) for h in HEADS}
+        if "5" not in s4:
+            split.append("4(A)(5)")
     bf_all = {h: max(0.0, start[h]) for h in HEADS}      # a debit balance at the start is credit not used yet
     bf = bf_all if use_bf else _z()
     credit = {h: itc[h] + itc_rcm[h] + bf[h] for h in HEADS}
@@ -309,6 +331,8 @@ def gstr3b(cid, month, use_bf=True):
             "used": so["used"], "cash": cash, "cash_total": round(sum(cash.values()), 2),
             "left": so["left"], "left_total": round(sum(so["left"].values()), 2),
             "purchases": round(abs(pur), 2), "no_tax_ledgers": g1["no_tax_ledgers"], "detail": detail,
+            "calc": calc, "split": split,
+            "tally": {k: t3[k] for k in ("s31", "s4a", "s4b", "s4c", "s5", "s61", "at", "source") if k in t3} if t3 else None,
             "out_g1": {h: round(g1["total"].get(h, 0), 2) for h in HEADS}}
 
 

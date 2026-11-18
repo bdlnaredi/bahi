@@ -49,6 +49,8 @@ def describe(path, data, companies):
               "stock_min": "Changed minimum stock levels", "brs": "Worked on bank reconciliation", "gstr_twob": "Uploaded a GSTR-2B file"}
     if rest == "entry_photo":
         return None                              # the entry it belongs to is logged
+    if rest.startswith("tally3b/"):
+        return ("Removed" if rest.endswith("/delete") else "Uploaded") + f" Tally's GSTR-3B for {rest.split('/')[1]}", co
     if rest == "cheques":
         return f"Wrote down a cheque {'from' if d.get('kind') != 'out' else 'to'} {party} #{d.get('number', '')}" + _money(d.get("amount")), co
     if rest.startswith("cheques/"):
