@@ -544,7 +544,7 @@ Tap a table to see its invoices or rows.
 
 ## GSTR-3B
 
-**Reports, GSTR-3B** shows a month's GSTR-3B, table by table as Tally has it. Tables 3.1, 3.2 and 4 are ready.
+**Reports, GSTR-3B** shows a month's GSTR-3B, table by table as Tally has it. Tables 3.1, 3.2, 4, 5 and 6.1 are ready.
 
 - **3.1(a) Outward taxable supplies:** from the GSTR-1 tables: B2B (taxable sales, not SEZ), B2C (Large), B2C (Small), credit and debit notes, and tax on advances (11A less 11B).
 - **3.1(b) Zero rated:** exports and supplies to SEZ.
@@ -557,6 +557,9 @@ Tap a table to see its invoices or rows.
 - **4(B) ITC reversed:** the Stat Adjustment journals that reverse credit (Reversal or Decrease of Input Tax Credit): (1) as per rules 38, 42 and 43 of the CGST Rules and section 17(5), when their Additional Details say so, and (2) others.
 - **4(C) Net ITC available:** (A) less (B).
 - **4(D) for information:** (1) ITC reclaimed that was reversed under 4(B)(2) earlier (an Increase of Input Tax Credit journal whose Additional Details say reclaim; it's in 4(A)(5) too), and (2) ineligible ITC under section 16(4) and ITC restricted due to place of supply rules (journals whose Additional Details say so).
+
+- **5 Exempt, nil rated and non-GST inward supplies,** from the purchase bills without GST: (1) from composition dealers, and exempt or nil rated items (or purchase ledgers named exempt or nil rated), and (2) non-GST; each split inter-state (the supplier's state isn't yours) and intra-state.
+- **6.1 Interest, late fee, penalty and others:** what was paid on the GST ledgers for each, by tax head (from the ledger's GST head or its name, such as "Late Fee CGST"). These ledgers are kept out of the tax and ITC tables.
 
 **Checks:** a line at the top shows ✓ when the tax in 3.1(a) and (b) agrees with GSTR-1's sales tables, and another when 4(A)(3) agrees with 3.1(d). To compare with Tally, open GSTR-3B for the month in Tally, press Alt+F5 for the detailed view, then Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the screen. Each row then shows ✓ or ✗ with Tally's figure.
 

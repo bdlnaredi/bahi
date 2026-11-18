@@ -20,6 +20,11 @@
 4(D) for information: (1) ITC reclaimed that was reversed under 4(B)(2) earlier (its journal, Increase of Input
   Tax Credit marked as a reclaim, is in 4(A)(5) too), (2) ineligible ITC under section 16(4) and ITC restricted due
   to place of supply rules.
+5 Exempt, nil rated and non-GST inward supplies, from the purchase bills: (1) from composition dealers, and
+  exempt and nil rated items (or ledgers named exempt / nil rated), (2) non-GST; each inter-state and intra-state
+  (the supplier's state against the company's).
+6.1 Interest, late fee, penalty and others: the amounts paid to (debited on) the GST ledgers for interest, late
+  fee, penalty and other charges, by tax head.
 Read-only: nothing here touches Tally."""
 import json
 import os
@@ -163,7 +168,9 @@ def build(cid, month):
           "c": {**tc, "tax": round(sum(tc.values()), 2)}, "d1": more["d1"], "d2": more["d2"]}
     # the check: the credit taken on reverse charge is the tax paid on it in 3.1(d)
     vs_rcm = {"ok": all(abs(t4a["3"][h] - out["d"][h]) <= 1 for h in HEADS)}
-    return {"month": month, "from": g["from"], "to": g["to"], "company": g["company"], "t31": out, "total31": _fin(total), "t32": t32, "vs_gstr1": vs_g1,
+    t5 = _inward_exempt(cid, month, g.get("state") or "")
+    t61 = _other_dues(cid, month)
+    return {"month": month, "from": g["from"], "to": g["to"], "company": g["company"], "t5": t5, "t61": t61, "t31": out, "total31": _fin(total), "t32": t32, "vs_gstr1": vs_g1,
             "t4a": t4a, "total4a": total4a, "vs_rcm": vs_rcm, "t4": t4,
             "no_tax_ledgers": g.get("no_tax_ledgers")}
 
@@ -321,6 +328,107 @@ def _itc(cid, month):
     return out, {**tot, "tax": round(sum(tot.values()), 2)}
 
 
+def _inward_exempt(cid, month, company_state):
+    """Table 5: purchases with no GST on them, by kind and inter / intra state."""
+    f, t = gstr._month_range(month)
+    st = (company_state or "").strip().lower()
+    out = {k: {"inter": 0.0, "intra": 0.0, "list": []} for k in ("1", "2")}
+    with store.conn() as c:
+        tax, led = gstr._tax_side(c, cid)
+        vs = store._rows(c, """SELECT id, date, vtype, base, number, party, party_gstin, amount, extra FROM voucher
+            WHERE company_id=? AND date BETWEEN ? AND ? AND posting=1 AND status='' AND base IN ('Purchase','Debit Note')
+            ORDER BY date, id""", (cid, f, t))
+        for v in vs:
+            pl = led.get(v["party"])
+            if v["base"] == "Debit Note" and "|Sundry Creditors|" not in ((pl["chain"] if pl else "") or ""):
+                continue
+            x = json.loads(v["extra"] or "{}")
+            sign = -1 if v["base"] == "Debit Note" else 1
+            comp = "composition" in (x.get("gst_reg_type") or "").lower()
+            taxab = x.get("taxability") or {}
+            amt = {"1": 0.0, "2": 0.0}
+            items = list(c.execute("SELECT item, amount, gst FROM vitem WHERE voucher_id=?", (v["id"],)))
+            lines = list(c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],)))
+            for it in items:
+                kind = (taxab.get(it["item"]) or "").lower()
+                a = abs(it["amount"] or 0)
+                if "non" in kind and "gst" in kind:
+                    amt["2"] += a
+                elif comp or kind and "taxable" not in kind or not kind and it["gst"] is not None and it["gst"] == 0:
+                    amt["1"] += a
+            if not items:
+                for r in lines:
+                    l = led.get(r["ledger"])
+                    if r["ledger"] in tax or r["ledger"] == v["party"] or not l or r["amount"] <= 0:
+                        continue
+                    if any(g in (l["chain"] or "") for g in ("|Bank Accounts|", "|Cash-in-Hand|", "|Sundry Creditors|", "|Duties & Taxes|")):
+                        continue
+                    n = r["ledger"].lower()
+                    if re.search(r"non[\s-]*gst", n):
+                        amt["2"] += r["amount"]
+                    elif comp or re.search(r"exempt|nil", n):
+                        amt["1"] += r["amount"]
+            if amt["1"] < 0.005 and amt["2"] < 0.005:
+                continue
+            sup = (x.get("buyer_state") or x.get("place_of_supply") or "").strip().lower()
+            side = "inter" if sup and st and sup != st else "intra"
+            for k in ("1", "2"):
+                if amt[k] > 0.004:
+                    out[k][side] += sign * amt[k]
+                    out[k]["list"].append({"id": v["id"], "date": v["date"], "vtype": v["vtype"], "number": v["number"],
+                                           "party": v["party"] or "", "taxable": round(sign * amt[k], 2), "tax": 0.0,
+                                           "nature": ("Composition dealer" if comp else "") + (" · inter-state" if side == "inter" else "")})
+    labels = {"1": "From a supplier under composition scheme, exempt and nil rated supplies", "2": "Non-GST supply"}
+    res = {}
+    for k, lab in labels.items():
+        o = out[k]
+        res[k] = {"label": lab, "inter": round(o["inter"], 2), "intra": round(o["intra"], 2),
+                  "taxable": round(o["inter"] + o["intra"], 2), "count": len(o["list"]), "list": o["list"]}
+    return res
+
+
+def _other_dues(cid, month):
+    """Table 6.1: interest, late fee, penalty and other charges paid on GST in the month (debits to those GST
+    ledgers), by tax head (from the ledger's GST head or its name)."""
+    f, t = gstr._month_range(month)
+    kinds = {"i": ("Interest", r"interest"), "l": ("Late fee", r"late\s*fee"), "p": ("Penalty", r"penalty"),
+             "o": ("Other charges", r"other charges")}
+    out = {k: {"label": lab, **{h: 0.0 for h in HEADS}, "other": 0.0, "list": []} for k, (lab, _) in kinds.items()}
+    with store.conn() as c:
+        led = {r["name"]: r for r in c.execute("SELECT name, chain, taxtype, gst_head FROM ledger WHERE company_id=?", (cid,))}
+        dues = {}
+        for n, l in led.items():
+            txt_ = n + " " + (l["gst_head"] or "")
+            if not ("|Duties & Taxes|" in (l["chain"] or "") or re.search(r"GST|CESS", n, re.I)):
+                continue
+            k = next((k for k, (_, rx) in kinds.items() if re.search(rx, txt_, re.I)), None)
+            if not k:
+                continue
+            hn = (l["gst_head"] or "").lower() + " " + n.upper()
+            head = ("IGST" if "integrated" in hn or "IGST" in hn else "CGST" if "central" in hn or "CGST" in hn else
+                    "SGST" if "state" in hn or "SGST" in hn or "UTGST" in hn else "Cess" if "CESS" in hn else None)
+            dues[n] = (k, head)
+        if not dues:
+            res = {k: {**{x: round(y, 2) if isinstance(y, float) else y for x, y in o.items()}, "tax": 0.0, "count": 0} for k, o in out.items()}
+            return res
+        marks = ",".join("?" * len(dues))
+        for r in c.execute(f"""SELECT v.id, v.date, v.vtype, v.number, v.party, vl.ledger, vl.amount FROM vline vl JOIN voucher v ON v.id=vl.voucher_id
+                WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND v.posting=1 AND v.status='' AND vl.ledger IN ({marks})
+                AND vl.amount > 0 ORDER BY v.date, v.id""", (cid, f, t, *dues)):
+            k, head = dues[r["ledger"]]
+            o = out[k]
+            o[head or "other"] += r["amount"]
+            o["list"].append({"id": r["id"], "date": r["date"], "vtype": r["vtype"], "number": r["number"], "party": r["party"] or "",
+                              "nature": r["ledger"], "tax": round(r["amount"], 2), **{h: round(r["amount"], 2) if h == head else 0.0 for h in HEADS}})
+    res = {}
+    for k, o in out.items():
+        r_ = {x: round(y, 2) if isinstance(y, float) else y for x, y in o.items()}
+        r_["tax"] = round(sum(o[h] for h in HEADS) + o["other"], 2)
+        r_["count"] = len({x["id"] for x in o["list"]})
+        res[k] = r_
+    return res
+
+
 KINDS32 = {"unreg": "Supplies made to unregistered persons", "comp": "Supplies made to composition taxable persons",
            "uin": "Supplies made to UIN holders"}
 
@@ -402,6 +510,17 @@ def parse_tally(raw):
                 part = ""                       # a new table (4, 5, 6.1 ...)
             if re.match(r"^4\s", lab):
                 part = "4"
+            elif re.match(r"^5\s", lab):
+                part, key = "5", "5"
+            elif re.match(r"^6\.1\s", lab):
+                part, key = "61", "61"
+            elif part == "5" and re.match(r"^From a Supplier", lab, re.I):
+                key = "51"
+            elif part == "5" and re.match(r"^Non-?GST", lab, re.I):
+                key = "52"
+            elif part == "61":
+                k6 = next((k for k, rx in (("61i", r"^Interest"), ("61l", r"^Late"), ("61p", r"^Penalty"), ("61o", r"^Other")) if re.match(rx, lab, re.I)), None)
+                key = k6 or key
             elif mp and part[:1] == "4":
                 part = "4" + mp.group(1).lower()
                 if part == "4a":
@@ -474,6 +593,8 @@ def with_tally(cid, month):
     targets = [(k, r["t31"][k]) for k in LABELS] + [("total", r["total31"])]
     targets += [(k, r["t32"][k]) for k in KINDS32]
     targets += [("4a" + k, r["t4a"][k]) for k in ITC_LABELS] + [("4a", r["total4a"])]
+    targets += [("51", r["t5"]["1"]), ("52", r["t5"]["2"])]
+    targets += [("61" + k, r["t61"][k]) for k in ("i", "l", "p", "o")]
     targets += [("4b1", r["t4"]["b1"]), ("4b2", r["t4"]["b2"]), ("4b", r["t4"]["b"]), ("4c", r["t4"]["c"]),
                 ("4d1", r["t4"]["d1"]), ("4d2", r["t4"]["d2"])]
     for k, mine in targets:

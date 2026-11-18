@@ -13,10 +13,13 @@ def _month_range(month):
     return f"{y:04d}-{m:02d}-01", date.fromordinal(end).isoformat()
 
 
+OTHER_DUES = re.compile(r"interest|late\s*fee|penalty|other charges", re.I)   # GST ledgers that aren't tax (table 6.1)
+
+
 def _tax_side(c, cid):
     """{ledger: (head, side)} for every GST ledger (the same rules as the GST summary)."""
     led = {r["name"]: r for r in c.execute("SELECT name, chain, taxtype, gst_head, closing, gstin FROM ledger WHERE company_id=?", (cid,))}
-    tax = {n: l for n, l in led.items() if store._is_tax(l)}
+    tax = {n: l for n, l in led.items() if store._is_tax(l) and not OTHER_DUES.search(n + " " + (l["gst_head"] or ""))}
     use = {r["ledger"]: (r["s"], r["p"]) for r in c.execute("""SELECT vl.ledger,
         SUM(CASE WHEN v.base IN ('Sales','Debit Note') THEN 1 ELSE 0 END) s,
         SUM(CASE WHEN v.base IN ('Purchase','Credit Note') THEN 1 ELSE 0 END) p

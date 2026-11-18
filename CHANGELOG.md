@@ -2,6 +2,13 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.36.0 (18 November 2026)
+
+- **GSTR-3B tables 5 and 6.1:**
+  - **5, exempt, nil rated and non-GST inward supplies:** (1) from composition dealers, and exempt and nil rated items; (2) non-GST. Each is split inter-state and intra-state, from the purchase bills.
+  - **6.1, interest, late fee, penalty and other charges:** paid on the GST ledgers, by tax head.
+  - Interest and late fee ledgers are no longer counted as tax anywhere in GSTR-1 or GSTR-3B. Each row compares with Tally's GSTR-3B export.
+
 ## 3.35.0 (18 November 2026)
 
 - **GSTR-3B, the rest of table 4:** 4(B) ITC reversed, (1) as per rules 38, 42 and 43 and section 17(5), (2) others, from the Stat Adjustment journals that reverse credit; 4(C) net ITC available, (A) less (B); 4(D)(1) ITC reclaimed that was reversed under 4(B)(2) earlier, and 4(D)(2) ineligible ITC under section 16(4) and restricted by place of supply rules. Each row lists its journals and compares with Tally's GSTR-3B export.

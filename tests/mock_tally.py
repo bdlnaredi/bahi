@@ -36,6 +36,8 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
     "Cartage & Loading": ("Indirect Incomes", 0), "Packing Charges": ("Indirect Expenses", 0), "Labour Charges": ("Direct Expenses", 0),
     "TDS on Contract 194C": ("Duties & Taxes", 0), "Labour Charges": ("Direct Expenses", 0),
+    "Purchase Exempt": ("Purchase Accounts", 0), "GST Late Fee CGST": ("Duties & Taxes", 0), "GST Late Fee SGST": ("Duties & Taxes", 0),
+    "Interest on GST IGST": ("Duties & Taxes", 0),
     "Tax Paid on RCM": ("Current Assets", 0), "Sales Exempt": ("Sales Accounts", 0), "Advance GST Adjustment": ("Current Assets", 0),
     "CGST INPUT 2.5%": ("Duties & Taxes", 0), "SGST INPUT 2.5%": ("Duties & Taxes", 0), "CGST OUTPUT 2.5%": ("Duties & Taxes", 0),
     "SGST OUTPUT 2.5%": ("Duties & Taxes", 0), "IGST 5%": ("Duties & Taxes", 0), "Sharma Transport": ("Sundry Creditors", 0),
@@ -140,6 +142,12 @@ def make_vouchers():
                        "narration": "Input credit on freight", "stat": ("Increase of Input Tax Credit", "Purchase Under Reverse Charge")})
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"RP{d.month}", "party": "Output CGST",
                        "ledgers": [("Output CGST", 125.0), ("Output SGST", 125.0), ("HDFC Bank", -250.0)], "narration": "Stat payment, RCM"})
+        if d.day == 12 and d.month == 9:     # an exempt purchase, and late fee and interest paid on GST
+            vs.append({"kind": "acct", "date": d, "type": "Purchase", "no": "PX1", "party": "Supreme Pipes Ltd",
+                       "ledgers": [("Purchase Exempt", 3000.0), ("Supreme Pipes Ltd", -3000.0)], "narration": "Exempt goods"})
+            vs.append({"kind": "acct", "date": d, "type": "Payment", "no": "LF1", "party": "GST Late Fee CGST",
+                       "ledgers": [("GST Late Fee CGST", 50.0), ("GST Late Fee SGST", 50.0), ("Interest on GST IGST", 120.0), ("HDFC Bank", -220.0)],
+                       "narration": "Late fee and interest, GSTR-3B August"})
         if d.day == 22 and d.month == 9:     # input credit reversed: rule 42, and "others" (reclaimed next month)
             vs.append({"kind": "acct", "date": d, "type": "Journal", "no": "RV1", "party": "Purchase GST 18%",
                        "ledgers": [("Purchase GST 18%", 120.0), ("Input CGST", -60.0), ("Input SGST", -60.0)],
