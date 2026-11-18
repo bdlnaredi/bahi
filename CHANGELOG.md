@@ -2,6 +2,14 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.27.1 (18 November 2026)
+
+- **GSTR-3B, reverse charge in one journal:** Tally's single Stat Adjustment journal, "Increase in Tax Liability & Input Tax Credit", is now fully counted.
+  - It covers both "Purchase Under Reverse Charge from Registered Dealer" and "Purchase from Unregistered Dealer".
+  - When it debits and credits the same IGST ledger, that IGST used to net to zero and disappear. It's now counted in both 3.1(d) and 4(A)(3).
+  - Ledger balances aren't affected.
+- **Re-read once:** the Tally PC reads all vouchers again once more, to keep these lines.
+
 ## 3.27.0 (18 November 2026)
 
 - **Reverse charge entries now picked up** (GSTR-3B), the way TallyPrime records them:

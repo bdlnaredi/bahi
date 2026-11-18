@@ -36,7 +36,9 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
     "Cartage & Loading": ("Indirect Incomes", 0), "Packing Charges": ("Indirect Expenses", 0), "Labour Charges": ("Direct Expenses", 0),
     "TDS on Contract 194C": ("Duties & Taxes", 0), "Labour Charges": ("Direct Expenses", 0),
-    "Tax Paid on RCM": ("Current Assets", 0), "Sharma Transport": ("Sundry Creditors", 0),
+    "Tax Paid on RCM": ("Current Assets", 0),
+    "CGST INPUT 2.5%": ("Duties & Taxes", 0), "SGST INPUT 2.5%": ("Duties & Taxes", 0), "CGST OUTPUT 2.5%": ("Duties & Taxes", 0),
+    "SGST OUTPUT 2.5%": ("Duties & Taxes", 0), "IGST 5%": ("Duties & Taxes", 0), "Sharma Transport": ("Sundry Creditors", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
     "Discount Received": ("Indirect Incomes", 0), "Capital": ("Capital Account", 0),
     "Commission Received": ("Commission Earned", 0),
@@ -291,6 +293,17 @@ def amt(x):  # Tally writes debits negative
 
 GST_RATES = {}        # item: (HSN, GST rate) as Tally keeps it on each stock line (all 18% unless listed)
 WANT_RATES = [False]  # the request asks for the GST rate details (only then are they sent, as in Tally)
+
+
+def extra_vch(f, t):
+    """EXTRA_VCH=a.xml:b.xml - vouchers exported from a real Tally, added to the Day Book of their dates"""
+    out = ""
+    for path in filter(None, os.environ.get("EXTRA_VCH", "").split(":")):
+        for m in re.finditer(r"<VOUCHER .*?</VOUCHER>", open(path, encoding="utf-8").read(), re.S):
+            d = re.search(r"<DATE>(\d{8})</DATE>", m.group(0)).group(1)
+            if f <= date(int(d[:4]), int(d[4:6]), int(d[6:])) <= t:
+                out += '<TALLYMESSAGE xmlns:UDF="TallyUDF">' + m.group(0) + "</TALLYMESSAGE>"
+    return out
 
 
 def xml_voucher(v):
@@ -605,7 +618,7 @@ class H(BaseHTTPRequestHandler):
             WANT_RATES[0] = True          # the Day Book has every field
             if DAYBOOK_BUG:
                 f = t = m_today = max(v["date"] for v in VOUCHERS)
-            vs = "".join(xml_voucher(v) for v in VOUCHERS if f <= v["date"] <= t and not hidden(v))
+            vs = "".join(xml_voucher(v) for v in VOUCHERS if f <= v["date"] <= t and not hidden(v)) + extra_vch(f, t)
             out = f"<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC></DESC><DATA>{vs}</DATA></BODY></ENVELOPE>"
         else:
             ctype = re.search(r"<COLLECTION[^>]*>.*?<TYPE>(.*?)</TYPE>", req, re.S).group(1)

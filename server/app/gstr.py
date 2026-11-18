@@ -166,12 +166,16 @@ def _tax_3b(c, cid, f, t, led, tax):
         if n not in tax and RCM_NAME.search(n):
             rcm_led.add(n)
     for v in vs:
-        lines = c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],)).fetchall()
-        tl = [(tax[x["ledger"]][0], x["amount"]) for x in lines if x["ledger"] in tax]
+        lines = [dict(x) for x in c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],))]
         try:
-            rcm = bool(json.loads(v["extra"] or "{}").get("rcm"))
+            vx = json.loads(v["extra"] or "{}")
         except ValueError:
-            rcm = False
+            vx = {}
+        rcm = bool(vx.get("rcm"))
+        if vx.get("gross"):          # a ledger both debited and credited: its separate lines, not the net
+            g = {ln for ln, _ in vx["gross"]}
+            lines = [x for x in lines if x["ledger"] not in g] + [{"ledger": ln, "amount": a} for ln, a in vx["gross"]]
+        tl = [(tax[x["ledger"]][0], x["amount"]) for x in lines if x["ledger"] in tax]
         base = v["base"]
         if tl and not rcm and base not in ("Sales", "Purchase", "Credit Note", "Debit Note") and \
                 any(x["ledger"] in rcm_led for x in lines):

@@ -135,7 +135,7 @@ def company_id(c, name):
     return c.execute("INSERT INTO company(name) VALUES(?)", (name,)).lastrowid
 
 
-ONCE = ("items_once", "bills_once", "rcm_once", "cheq_once", "vchx_once")      # see plan(): one full re-read of the vouchers after each such fix
+ONCE = ("items_once", "bills_once", "rcm_once", "cheq_once", "vchx_once", "gross_once")      # see plan(): one full re-read of the vouchers after each such fix
 
 
 # A sync in progress on the Tally PC (kept in memory: only for showing "syncing now" in the app)
@@ -603,6 +603,23 @@ def merge_gst(company, rates):
     return n
 
 
+def _with_gross(v):
+    """A ledger both debited and credited in one voucher (Tally's GST journal for reverse charge, "Increase in Tax
+    Liability & Input Tax Credit", can debit and credit the same IGST ledger) nets to nothing in the ledger
+    lines. Its separate lines are kept in the voucher's details for the GST returns."""
+    x = dict(v.get("extra") or {})
+    sides = {}
+    for ln, a in v["lines"]:
+        if abs(a) > 0.004:
+            sides.setdefault(ln, set()).add(a > 0)
+    both = {ln for ln, s_ in sides.items() if len(s_) == 2}
+    if both:
+        x["gross"] = [[ln, round(a, 2)] for ln, a in v["lines"] if ln in both]
+    else:
+        x.pop("gross", None)
+    return x
+
+
 def merge_einv(company, einv):
     """e-invoice / e-way bill details of vouchers already stored (an e-way bill made after the invoice was
     synced, or a month kept as it was). Only adds to the voucher's printing details; nothing else changes."""
@@ -718,7 +735,7 @@ def ingest(company, d_from, d_to, alt_vch, alt_mst, groups, vtypes, ledgers, sto
                 "reference,party_gstin,extra,posting,imbalance,status,alterid) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, v["guid"], v["date"], v["vtype"], base, v["number"],
                  v["party"], v["narration"], v["amount"], 1 if (v["balanced"] or not posting) else 0,
-                 v.get("reference", ""), v.get("party_gstin", ""), json.dumps(v.get("extra", {})),
+                 v.get("reference", ""), v.get("party_gstin", ""), json.dumps(_with_gross(v)),
                  1 if posting else 0, v.get("imbalance", 0), status, v.get("alterid", 0))).lastrowid
             agg = {}
             for ln, a in v["lines"]:
