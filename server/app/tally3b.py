@@ -58,6 +58,11 @@ def interpret(rows):
         lab = r["label"]
         m = re.match(r"^(3\.1|3\.2|4|5|6\.1|[ABCD]\.)\s", lab + " ")
         sub = re.match(r"^\(?([a-e1-5])\)?[\s.]", lab + " ")
+        m31 = re.match(r"^3\.1\s*\(?([a-e])\)?[\s.]", lab + " ")      # Tally: "3.1a. Outward Taxable Supplies ..."
+        if m31:
+            out["sub31"][m31.group(1)] = {**_amt(r, 1), "label": lab}
+            sec = "s31"
+            continue
         if m:
             k = m.group(1)
             sec = {"3.1": "s31", "3.2": "s32", "4": "s4", "5": "s5", "6.1": "s61", "A.": "s4a", "B.": "s4b", "C.": "s4c", "D.": "s4d"}[k]

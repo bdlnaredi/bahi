@@ -620,8 +620,15 @@ class H(BaseHTTPRequestHandler):
                 out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>0</STATUS></HEADER><BODY><DATA><LINEERROR>Could not find Report &apos;" + escape(rid) + "&apos;!</LINEERROR></DATA></BODY></ENVELOPE>"
             else:
                 rows = [("3.1 Tax on Outward and Reverse Charge Inward Supplies", 1000000, 0, 50360.28, 50360.28, 100720.56),
+                        ("3.1a. Outward Taxable Supplies (other than Zero Rated, Nil Rated, and Exempted Supplies)", 998500, 0, 50235.28, 50235.28, 100470.56),
+                        ("3.1b. Outward Taxable Supplies (Zero Rated)", None, None, None, None, None),
+                        ("3.1c. Other Outward Supplies (Nil Rated and Exempted)", 1500, None, None, None, None),
+                        ("3.1d. Inward Supplies (applicable for Reverse Charge)", 5000, 0, 125, 125, 250),
+                        ("3.1e. Non-GST Outward Supplies", None, None, None, None, None),
                         ("3.2 Interstate Supplies", None, None, None, None, None), ("4 Eligible for Input Tax Credit", None, None, None, None, None),
                         ("A. Input Tax Credit Available (either in part or in full)", None, 0, -18204.02, -18204.02, -36408.04),
+                        ("3. Inward Supplies applicable for Reverse Charge (other than lines 1 &amp; 2)", None, 0, -125, -125, -250),
+                        ("5. All other Input Tax Credit", None, 0, -18079.02, -18079.02, -36158.04),
                         ("B. Input Tax Credit Reversed", None, None, None, None, None),
                         ("C. Net Input Tax Credit Available (A) - (B)", None, 0, -18204.02, -18204.02, -36408.04),
                         ("5 Exempt, Nil Rated, and Non-GST Inward Supplies", -1500, None, None, None, None),
@@ -630,7 +637,7 @@ class H(BaseHTTPRequestHandler):
                     rows = [(r[0], None, None, None, None, None) for r in rows]
                 fmt = lambda x: "" if x is None else f"{x:.2f}"
                 out = "<ENVELOPE>" + "".join(
-                    f"<GSTRRETVIEWPARTICULARS>{escape(lab)}</GSTRRETVIEWPARTICULARS><GSTRTAXABLEAMOUNT>{fmt(tx)}</GSTRTAXABLEAMOUNT>"
+                    f"<GSTRRETVIEWPARTICULARS>{lab if '&amp;' in lab else escape(lab)}</GSTRRETVIEWPARTICULARS><GSTRTAXABLEAMOUNT>{fmt(tx)}</GSTRTAXABLEAMOUNT>"
                     f"<GSTRIGSTAMOUNT>{fmt(i)}</GSTRIGSTAMOUNT><GSTRCGSTAMOUNT>{fmt(c_)}</GSTRCGSTAMOUNT><GSTRSGSTAMOUNT>{fmt(s_)}</GSTRSGSTAMOUNT>"
                     f"<GSTRCESSAMOUNT></GSTRCESSAMOUNT><GSTRTAXAMOUNT>{fmt(tt)}</GSTRTAXAMOUNT>" for lab, tx, i, c_, s_, tt in rows) + "</ENVELOPE>"
         elif typ == "Data" and rid == "Day Book":

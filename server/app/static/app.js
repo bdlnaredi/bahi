@@ -786,10 +786,14 @@ async function vGstr(which, month) {
     const g1diff = d.out_g1 && !d.tally ? H.filter((x) => Math.abs((d.out[x] || 0) - (d.out_g1[x] || 0)) > 1) : [];
     const T = d.tally, when = T ? new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
     const trow = (k, lab) => T[k] ? `<div class="g3head">${lab}</div>${heads(T[k]).map(([a, v]) => line(a, rupees(v))).join("")}` : "";
+    // Tally's detail lines (3.1a ... e, 4(A) 1 ... 5), only those with an amount
+    const subs = (o, pre) => Object.keys(o || {}).sort().filter((k) => sum(o[k]) || o[k].taxable).map((k) =>
+      `<div class="g3head" style="text-transform:none;letter-spacing:0">${h(o[k].label)}</div>${o[k].taxable ? line("Value", rupees(o[k].taxable)) : ""}${heads(o[k]).filter(([, v]) => Math.abs(v) > 0.004).map(([a, v]) => line(a, rupees(v))).join("")}`).join("");
     const calcDiff = T ? ["out", "itc"].filter((k) => H.some((x) => Math.abs((d.calc[k][x] || 0) - (d[k][x] || 0)) > 1)) : [];
     const tallyCard = T ? `<section class="page g3"><div class="g3h"><b>Tally's GSTR-3B, as exported</b><span>${T.source === "upload" ? "Uploaded" : "Read from Tally"} ${when}</span></div>
-        ${trow("s31", "3.1 Outward and reverse-charge inward supplies")}${T.s31 && T.s31.taxable ? line("Taxable value", rupees(T.s31.taxable)) : ""}
-        ${trow("s4a", "4(A) ITC available")}${trow("s4b", "4(B) ITC reversed")}${trow("s4c", "4(C) Net ITC")}
+        ${trow("s31", "3.1 Outward and reverse-charge inward supplies (total of a to e)")}${T.s31 && T.s31.taxable ? line("Taxable value", rupees(T.s31.taxable)) : ""}
+        ${subs(T.sub31, "3.1")}
+        ${trow("s4a", "4(A) ITC available")}${subs(T.sub4a, "4(A)")}${trow("s4b", "4(B) ITC reversed")}${subs(T.sub4b, "4(B)")}${trow("s4c", "4(C) Net ITC")}
         ${T.s5 && T.s5.taxable ? `<div class="g3head">5 Exempt, nil-rated and non-GST inward</div>${line("Value", rupees(T.s5.taxable))}` : ""}
         ${T.s61 && sum(T.s61) ? trow("s61", "6.1 Interest, late fee and others") : ""}
         ${d.split.length ? `<p class="hint" style="margin:6px 0 4px">Tally's export has only section totals, so ${d.split.join(" and ")} ${d.split.length > 1 ? "are" : "is"} worked out: 3.1(a) is 3.1 less 3.1(d), and 4(A)(5) is 4(C) less 4(A)(3), with reverse charge from your reverse-charge journals.</p>` : ""}

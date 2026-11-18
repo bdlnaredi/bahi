@@ -314,17 +314,23 @@ def gstr3b(cid, month, use_bf=True):
             itc_rcm = {h: s4["3"][h] for h in HEADS}
         net = t3.get("s4c") or t3.get("s4a") or {h: 0.0 for h in HEADS}
         itc = {h: round(net[h] - itc_rcm[h], 2) for h in HEADS}
-        if "5" not in s4:
+        if "5" in s4 and not t3.get("s4b", {}).get("CGST") and not t3.get("s4b", {}).get("IGST"):
+            itc = {h: s4["5"][h] for h in HEADS}      # Tally's 4(A)(5) line itself (nothing reversed in 4(B))
+        elif "5" not in s4:
             split.append("4(A)(5)")
+    sub31 = (t3 or {}).get("sub31") or {}
+    t3_taxable = sub31["a"]["taxable"] if "a" in sub31 else None
+    t3_nil = sub31["c"]["taxable"] if "c" in sub31 else None
     bf_all = {h: max(0.0, start[h]) for h in HEADS}      # a debit balance at the start is credit not used yet
     bf = bf_all if use_bf else _z()
     credit = {h: itc[h] + itc_rcm[h] + bf[h] for h in HEADS}
     so = _setoff(out, credit)
     cash = {h: round(so["cash"][h] + max(0.0, out_rcm[h]), 2) for h in HEADS}   # reverse charge is paid in cash only
     return {"month": month, "from": f, "to": t, "company": g1["company"],
-            "out": {"taxable": round(g1["total"]["taxable"] - g1["nil"], 2), **out}, "out_total": round(sum(out.values()), 2),
+            "out": {"taxable": t3_taxable if t3_taxable is not None else round(g1["total"]["taxable"] - g1["nil"], 2), **out},
+            "out_total": round(sum(out.values()), 2),
             "rcm": out_rcm, "rcm_total": round(sum(out_rcm.values()), 2), "rcm_untaxed": rcm_untaxed,
-            "nil": g1["nil"],
+            "nil": t3_nil if t3_nil is not None else g1["nil"],
             "itc": itc, "itc_rcm": itc_rcm, "itc_total": round(sum(itc.values()) + sum(itc_rcm.values()), 2),
             "bf": _r(bf), "bf_total": round(sum(bf.values()), 2), "bf_all": _r(bf_all),
             "bf_avail": round(sum(bf_all.values()), 2), "bf_used": bool(use_bf), "start": start if known else None, "end": end,
@@ -332,7 +338,7 @@ def gstr3b(cid, month, use_bf=True):
             "left": so["left"], "left_total": round(sum(so["left"].values()), 2),
             "purchases": round(abs(pur), 2), "no_tax_ledgers": g1["no_tax_ledgers"], "detail": detail,
             "calc": calc, "split": split,
-            "tally": {k: t3[k] for k in ("s31", "s4a", "s4b", "s4c", "s5", "s61", "at", "source") if k in t3} if t3 else None,
+            "tally": {k: t3[k] for k in ("s31", "s4a", "s4b", "s4c", "s5", "s61", "sub31", "sub4a", "sub4b", "at", "source") if k in t3} if t3 else None,
             "out_g1": {h: round(g1["total"].get(h, 0), 2) for h in HEADS}}
 
 

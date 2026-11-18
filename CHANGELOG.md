@@ -2,6 +2,11 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.28.1 (18 November 2026)
+
+- **GSTR-3B reads Tally's own lines:** 3.1a to 3.1e and 4(A) lines 1 to 5, exactly as Tally labels them in its detailed export (for example "3.1a. Outward Taxable Supplies"). 3.1(a), 3.1(c), 3.1(d), 4(A)(3) and 4(A)(5), with their values and tax, now come straight from those lines, never from the 3.1 heading total. Nothing is worked out where Tally has the line.
+- The "Tally's GSTR-3B" card shows Tally's detail lines.
+
 ## 3.28.0 (18 November 2026)
 
 - **GSTR-3B uses Tally's own figures.** The Tally PC (version 3.22) now reads Tally's GSTR-3B report for each month: this month and last month after every change, and every month of the year on a full sync. The 3B screen shows Tally's figures, marked "Figures from Tally's own GSTR-3B".
