@@ -2,6 +2,12 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.38.0 (18 November 2026)
+
+- **Search everything:** a magnifier at the top of every screen finds parties, items, vouchers (by number, party, amount or narration) and screens as you type, grouped, one tap to open.
+- **Recently opened:** the last parties and items you opened are on the home screen, one tap away, and on the search screen before you type.
+- **Home opens instantly:** it shows the figures from your last visit at once and swaps in the fresh ones when they arrive, keeping your place if you've scrolled.
+
 ## 3.37.1 (18 November 2026)
 
 - **Bahi Sync on Windows: Settings and Companies show everything, down to the last line.** Their pages now lay out each line themselves and scroll to the very end. The message line and buttons at the bottom take the height they need, at any window size or Windows scaling. Before, the last line could stay hidden under the bottom edge.

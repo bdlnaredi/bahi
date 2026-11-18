@@ -765,3 +765,13 @@ details.addq > summary { list-style: none; cursor: pointer; padding: 14px 0; } d
 .g1empty .name { color: var(--ink-3); }
 .g1empty button[disabled] { opacity: 1; cursor: default; color: inherit; }
 .g1t td, .g1t th { white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* recently opened: one tap back to a party or item */
+.recent { margin: 2px 0 12px; }
+.recent .rlabel { font-size: .78rem; color: var(--ink-3); margin: 0 4px 6px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.recent .rchips { display: flex; gap: 8px; overflow-x: auto; padding: 0 2px 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.recent .rchips::-webkit-scrollbar { display: none; }
+.recent .rchip { flex: none; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 8px 14px; border-radius: 999px;
+  background: var(--paper); box-shadow: var(--shadow); color: var(--ink); text-decoration: none; font-weight: 500; font-size: .92rem; }
+.recent .rchip .rk { color: var(--ink-3); margin-right: 6px; }
+#fres .row b { font-weight: 700; color: var(--ink); }

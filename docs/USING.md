@@ -18,6 +18,14 @@ The bar at the bottom has six sections: **Home, Sales, Ledgers, Vouchers, Dues a
 - On a **phone** the sections are tabs along the bottom. Even if Chrome's *Desktop site* is switched on, Bahi shows its phone layout.
 - On a **computer** the sections, and the main reports, are in a menu down the left. Home shows its cards in two columns.
 
+## Search everything
+
+The **magnifier** at the top of every screen searches the whole app at once. Type part of a party or item name, a voucher number, an amount, or a screen name ("cheques", "GSTR"). Results come as you type, as Ledgers, Items, Vouchers and Screens. Before you type, it shows what you opened recently.
+
+**Recently opened:** the last parties and items you opened appear on the home screen under Cash, Bank and Stock, one tap away. The list is kept on each phone.
+
+The home screen also shows the figures from your last visit at once, and the fresh ones replace them as soon as they arrive.
+
 ## Home
 
 *After Bahi is updated, a "Bahi has been updated" card at the top opens **What's new** (also in Reports), which lists the changes in every version.*

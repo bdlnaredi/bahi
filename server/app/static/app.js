@@ -374,11 +374,100 @@ function setTitle(back) {
 }
 
 /* ---------------------------------------------------------------- views */
+/* ---------------------------------------------------------------- search everything
+   One box for parties, items, vouchers and screens: each part asks the search the app already has. */
+let findTimer, findSeq = 0;
+async function vFind() {
+  setTitle(true);
+  if (!$("#fq")) {
+    view.innerHTML = `<input class="search" id="fq" type="search" inputmode="search" autocomplete="off" placeholder="Party, item, voucher no., amount or a screen" aria-label="Search everything" value="${h(S.fq || "")}">
+      <div id="fres"></div>`;
+    $("#fq").oninput = (e) => { S.fq = e.target.value; clearTimeout(findTimer); findTimer = setTimeout(() => findRun().catch(fail), 220); };
+    setTimeout(() => { const x = $("#fq"); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }, 50);
+  }
+  await findRun();
+}
+async function findRun() {
+  const q = (S.fq || "").trim(), out = $("#fres"), seq = ++findSeq;
+  if (!out) return;
+  if (q.length < 2) {
+    const rec = recentList();
+    out.innerHTML = rec.length ? `<section class="page"><div class="block-title">Recently opened</div>${rec.map(recentRow).join("")}</section>`
+      : '<div class="empty">Type at least 2 letters or digits: a party or item name, a voucher number, an amount, or a screen such as "cheques".</div>';
+    return;
+  }
+  out.innerHTML = '<div class="empty">Searching…</div>';
+  const ql = q.toLowerCase();
+  // screens: a word of the name starting with what was typed comes first, then a word of the description
+  const starts = (t) => t.toLowerCase().split(/[^a-z0-9]+/).some((w) => w.startsWith(ql));
+  const screens = [...reportItems().filter(([, name]) => starts(name)), ...reportItems().filter(([, name, meta]) => !starts(name) && starts(meta))].slice(0, 4);
+  const none = () => Promise.resolve(null), safe = (p) => p.catch(() => null);
+  const [L, I, V] = await Promise.all([
+    canLedgers() ? safe(api(cpath("ledgers", { q }))) : none(),
+    can("stock") ? safe(api(cpath("stock", { q }))) : none(),
+    can("vouchers") ? safe(api(cpath("vouchers", { q, from: "2000-01-01", to: "2099-12-31" }))) : none(),
+  ]);
+  if (seq !== findSeq || !$("#fres")) return;            // a newer search has started
+  const parts = [];
+  const screenCard = screens.length ? `<section class="page"><div class="block-title">Screens</div>
+    ${screens.map(([href, name, meta]) => `<a class="row" href="${href}"><div class="main"><div class="name">${hl(name, q)}</div><div class="meta">${meta}</div></div><span class="chev"></span></a>`).join("")}</section>` : "";
+  if (screens.length && starts(screens[0][1])) parts.push(screenCard);          // "cheq" is most likely the screen
+  const ls = (L && L.ledgers || []).slice(0, 8);
+  if (ls.length) parts.push(`<section class="page"><div class="block-title">Ledgers${L.ledgers.length > 8 ? ` <a href="#/parties">All ${L.ledgers.length}</a>` : ""}</div>
+    ${ls.map((l) => `<a class="row" href="#/ledger/${enc(l.name)}"><div class="main"><div class="name">${hl(l.name, q)}</div><div class="meta">${h(l.parent || "")}</div></div><div class="end">${drcr(l.closing)}</div><span class="chev"></span></a>`).join("")}</section>`);
+  const is = (I && I.items || []).slice(0, 8);
+  if (is.length) parts.push(`<section class="page"><div class="block-title">Items</div>
+    ${is.map((i) => `<a class="row" href="#/item/${enc(i.name)}"><div class="main"><div class="name">${hl(i.name, q)}</div><div class="meta">${h(i.parent || "")}</div></div><div class="end">${qty(i.close_qty ?? i.closing_qty, i.unit)}</div><span class="chev"></span></a>`).join("")}</section>`);
+  const vs = (V && V.vouchers || []).slice(0, 10);
+  if (vs.length) parts.push(`<section class="page"><div class="block-title">Vouchers${(V.vouchers.length > 10 || V.more) ? ` <a href="#/vouchers" id="fallv">More</a>` : ""}</div>${vs.map(vrow).join("")}</section>`);
+  if (screens.length && !starts(screens[0][1])) parts.push(screenCard);
+  out.innerHTML = parts.join("") || `<div class="empty">Nothing matches “${h(q)}”.</div>`;
+  const more = $("#fallv"); if (more) more.onclick = () => { S.vq = q; S.period = null; };
+}
+/* the matched letters in bold */
+function hl(text, q) {
+  const t = String(text || ""), i = t.toLowerCase().indexOf(q.toLowerCase());
+  return i < 0 ? h(t) : `${h(t.slice(0, i))}<b>${h(t.slice(i, i + q.length))}</b>${h(t.slice(i + q.length))}`;
+}
+
+/* ---------------------------------------------------------------- recently opened parties and items (this phone) */
+function recentKey() { return `bahi-recent-${S.cid}`; }
+function recentList() { try { return JSON.parse(localStorage.getItem(recentKey()) || "[]"); } catch (e) { return []; } }
+function remember(kind, name) {
+  if (!name) return;
+  try {
+    const list = [{ k: kind, n: name }, ...recentList().filter((r) => !(r.k === kind && r.n === name))].slice(0, 8);
+    localStorage.setItem(recentKey(), JSON.stringify(list));
+  } catch (e) {}
+}
+function recentRow(r) {
+  return `<a class="row" href="#/${r.k === "item" ? "item" : "ledger"}/${enc(r.n)}"><div class="main"><div class="name">${h(r.n)}</div><div class="meta">${r.k === "item" ? "Stock item" : "Ledger"}</div></div><span class="chev"></span></a>`;
+}
+function recentChips() {
+  const rec = recentList().filter((r) => r.k === "item" ? can("stock") : canLedgers()).slice(0, 6);
+  if (!rec.length) return "";
+  return `<section class="recent"><div class="rlabel">Recently opened</div><div class="rchips">${rec.map((r) =>
+    `<a class="rchip" href="#/${r.k === "item" ? "item" : "ledger"}/${enc(r.n)}">${r.k === "item" ? '<span class="rk">▦</span>' : ""}${h(r.n)}</a>`).join("")}</div></section>`;
+}
+
+/* ---------------------------------------------------------------- home */
 async function vHome() {
   setTitle(false);
   if (!can("accounts")) return vStaffHome();
+  // the figures shown last time appear at once; the fresh ones replace them as soon as they come
+  const key = `bahi-home-${S.cid}-${JSON.stringify(periodParams())}`, at = location.hash;
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) {}
+  if (old) homeDraw(old, true);
   const d = await api(cpath("dashboard", periodParams()));
+  try { localStorage.setItem(key, JSON.stringify(d)); } catch (e) {}
+  if (location.hash !== at) return;                      // moved on to another screen meanwhile
+  homeDraw(d, false);
+}
+
+function homeDraw(d, early) {
   const thisMonth = new Date().toISOString().slice(0, 7);
+  const scroll = window.scrollY;
   view.innerHTML = `${updatedCard()}<div id="remhome"></div><div id="stmthome"></div>${entryBar()}<div id="tgthome"></div>
   <section class="herocards">
     <a class="bold in" href="#/dues/receivable"><div class="label">You will receive</div><div class="big">${short(d.receivable)}</div><div class="go">See dues</div></a>
@@ -389,6 +478,7 @@ async function vHome() {
     <a href="#/group/${enc("Bank Accounts")}"><div class="label">Bank</div><div class="val ${d.bank_total < -0.5 ? "neg" : ""}">${short(d.bank_total)}</div></a>
     <a href="#/stock"><div class="label">Stock</div><div class="val">${short(d.stock_value)}</div></a>
   </section>
+  ${recentChips()}
 
   <section class="page">
     <div class="block-title">Sales <a href="#/sales">Sales by day</a></div>
@@ -416,6 +506,9 @@ async function vHome() {
   </section>
   ${d.company.unbalanced ? `<p class="note warn">${d.company.unbalanced} vouchers didn't add up during the last sync, so some figures may be off.</p>` : ""}`;
   drawSales($("#chart"), d.monthly_sales, thisMonth);
+  wireEntryBar();
+  if (early) return;                                     // the rest once the fresh figures are in
+  if (scroll) { window.scrollTo(0, scroll); S.keepScroll = true; }   // the reader scrolled down meanwhile: stay there
   // the Android home-screen widget gets the latest figures
   if (window.BahiAndroid && typeof BahiAndroid.widget === "function") api(`/api/widget?cid=${S.cid}`).then((w) => { try { BahiAndroid.widget(JSON.stringify(w), String(S.cid)); } catch (e) {} }).catch(() => {});
   if (can("sales")) api(cpath("target")).then((t) => { const el = $("#tgthome"); if (el) el.innerHTML = targetCard(t); }).catch(() => {});
@@ -1557,6 +1650,7 @@ function groupBy(list, grain, dateOf) {
 
 async function vLedger(name) {
   setTitle(true);
+  remember("ledger", name);
   const d = await api(cpath("ledger", { name, ...ledgerParams() }));
   const L = d.ledger, phone = digits(L.mobile || L.phone);
   const co = S.companies.find((c) => c.id === S.cid)?.name || "";
@@ -1867,6 +1961,7 @@ async function vStock(q = "") {
 
 async function vItem(name) {
   setTitle(true);
+  remember("item", name);
   const d = await api(cpath("stock_item", { name, ...periodParams() }));
   const I = d.item;
   view.innerHTML = `
@@ -2046,10 +2141,9 @@ async function syncNow() {
   }, 10000);
 }
 
-function vReports() {
-  setTitle(false);
-  const c = S.companies.find((x) => x.id === S.cid);
-  const R = [
+/* every screen under Reports that this login may open: [link, name, what it shows] */
+function reportItems() {
+  return [
     ["#/entries", "Entries from phone", "Receipts, payments and orders made in the app, and their status", entryKinds().length || S.me.owner],
     ["#/vouchers", "Vouchers", "Search and open any voucher", can("vouchers")],
     ["#/daybook", "Day Book", "Every voucher by date", can("vouchers")],
@@ -2079,6 +2173,12 @@ function vReports() {
     ["#/dues/receivable", "Outstanding", "Bill-wise dues with ageing", can("dues")],
     ["#/stock", "Stock summary", "Quantity and value of every item", can("stock")],
   ].filter((r) => r[3] && S.cid);
+}
+
+function vReports() {
+  setTitle(false);
+  const c = S.companies.find((x) => x.id === S.cid);
+  const R = reportItems();
   view.innerHTML = `${S.me.owner ? "" : `<p class="subtitle" style="margin-top:4px">Logged in as ${h(S.me.name)}</p>`}
   ${S.sync.mode !== "paused" ? `<section class="page"><button class="row" id="syncrow"><div class="main"><div class="name">Sync now</div><div class="meta">${S.sync.mode === "manual" ? "Sync is manual. " : ""}Get the latest from Tally (the Tally PC must be on with Tally open)</div></div></button></section>` : ""}
   ${S.cid ? "" : '<section class="page"><div class="empty">No Tally data yet. Reports appear after the first sync from the Tally PC. Settings below work already.</div></section>'}
@@ -3461,7 +3561,7 @@ async function vCollect() {
 
 /* ---------------------------------------------------------------- login, errors, router */
 function showLogin(msg = "") {
-  $("#tabs").hidden = true; $("#status").innerHTML = ""; $("#company").textContent = "Bahi"; $("#back").hidden = true; $("#account").hidden = true;
+  $("#tabs").hidden = true; $("#status").innerHTML = ""; $("#company").textContent = "Bahi"; $("#back").hidden = true; $("#account").hidden = true; $("#find").hidden = true;
   view.innerHTML = `<div class="login"><form id="lf"><h1>Open your books</h1><p>Enter the app password you set on the server.</p>
     <input type="text" id="lname" autocomplete="username" aria-label="Your name" placeholder="Your name (staff only)">
     <input type="password" id="pw" autocomplete="current-password" aria-label="Password" placeholder="Password" required>
@@ -3506,6 +3606,7 @@ async function route() {
   try {
     switch (parts[0]) {
       case "": case undefined: await vHome(); break;
+      case "find": await vFind(); break;
       case "parties": await vParties(); break;
       case "ledger": await vLedger(parts[1]); break;
       case "group": await vGroup(parts[1]); break;
@@ -3554,7 +3655,8 @@ async function route() {
     }
     wireEntryBar();
     $("#offline").hidden = !offlineSeen;
-    window.scrollTo(0, 0);
+    if (!S.keepScroll) window.scrollTo(0, 0);
+    S.keepScroll = false;
   } catch (e) { fail(e); }
 }
 
@@ -3589,6 +3691,7 @@ async function logOut() {
 }
 function renderAccount() {
   const b = $("#account");
+  $("#find").hidden = !S.me;
   if (!S.me) { b.hidden = true; return; }
   b.hidden = false;
   b.textContent = ((S.me.name || "").trim()[0] || (S.me.owner ? "O" : "?")).toUpperCase();   // the owner has no name: O
@@ -3605,6 +3708,7 @@ $("#account").onclick = () => {
   if (h3) h3.insertAdjacentHTML("beforeend", `<div class="hint" style="font-weight:500;margin-top:2px">${S.me.owner ? "Owner" : "Staff login"} · Bahi ${h(S.me.version || "")}</div>`);
 };
 
+$("#find").onclick = () => { if (location.hash !== "#/find") location.hash = "#/find"; };
 $("#refresh").onclick = async () => { try { await loadCompanies(); } catch (e) {} route(); };
 $("#company").onclick = pickCompany;
 document.addEventListener("visibilitychange", () => { if (!document.hidden) loadCompanies().then(renderCover).catch(() => {}); });
