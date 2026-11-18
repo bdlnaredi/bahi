@@ -147,16 +147,29 @@ def _r(d):
 
 
 def _tax_3b(c, cid, f, t, led, tax):
-    """Every tax line of the month, sorted by what the voucher is, not by the ledger's name, so one GST ledger used
-    for both sales and purchases works too. Amounts are Tally's own (debit +, credit -)."""
+    """Every GST line of the month, put in its GSTR-3B box. Sales and purchase invoices (and their notes) go by
+    the invoice; other vouchers (journals, payments, receipts) go by the GST ledger's side, as Tally does:
+    - an OUTPUT ledger credited is tax payable; debited (tax paid, set off, moved to the electronic cash ledger)
+      it is settling tax, not a supply, and is left out;
+    - an INPUT ledger debited is credit taken; credited in a set-off (an output ledger debited in the same
+      voucher) it is credit used and left out, otherwise it is credit reversed.
+    Reverse charge (Tally's mark, or your RCM ledger in the journal): credited lines are 3.1(d), debited 4(A)(3).
+    Amounts are Tally's own (debit +, credit -). Each voucher's share is listed for checking (detail)."""
     out, out_rcm, itc, itc_rcm = _z(), _z(), _z(), _z()
+    detail = {"out": {}, "rcm": {}, "itc": {}, "itc_rcm": {}, "left": {}}
     rcm_untaxed = {"count": 0, "value": 0.0}
-    vs = store._rows(c, """SELECT id, base, party, extra, amount FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
-        AND posting=1 AND status=''""", (cid, f, t))
+    vs = store._rows(c, """SELECT id, date, vtype, number, base, party, extra, amount FROM voucher WHERE company_id=?
+        AND date BETWEEN ? AND ? AND posting=1 AND status='' ORDER BY date, id""", (cid, f, t))
     is_cb = lambda n: any(g in ((led.get(n) or {"chain": ""})["chain"] or "") for g in CASHBANK)
-    # the ledgers your reverse-charge journals post against ("Tax paid on RCM", "RCM Payable" ...): a journal that
-    # uses one of them with GST ledgers is reverse charge too (the Increase of Input Tax Credit journal often
-    # carries no reverse-charge mark of its own)
+
+    def side(n):
+        low = n.lower()
+        if "input" in low or "itc" in low:
+            return "input"
+        if "output" in low or "payable" in low:
+            return "output"
+        return tax[n][1]                     # one ledger for both: the side it is mostly used on
+
     rcm_led = set()
     for r in c.execute("""SELECT vl.ledger FROM vline vl JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=?
             AND v.extra LIKE '%"rcm": true%' AND v.base NOT IN ('Sales','Purchase','Credit Note','Debit Note')""", (cid,)):
@@ -165,6 +178,13 @@ def _tax_3b(c, cid, f, t, led, tax):
     for n in led:
         if n not in tax and RCM_NAME.search(n):
             rcm_led.add(n)
+
+    def put(box, tot, v, h, a):
+        tot[h] += a
+        d = detail[box].setdefault(v["id"], {"id": v["id"], "date": v["date"], "vtype": v["vtype"], "number": v["number"],
+                                            "party": v["party"] or "", **{x: 0.0 for x in HEADS}})
+        d[h] += a
+    left = _z()
     for v in vs:
         lines = [dict(x) for x in c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],))]
         try:
@@ -175,10 +195,10 @@ def _tax_3b(c, cid, f, t, led, tax):
         if vx.get("gross"):          # a ledger both debited and credited: its separate lines, not the net
             g = {ln for ln, _ in vx["gross"]}
             lines = [x for x in lines if x["ledger"] not in g] + [{"ledger": ln, "amount": a} for ln, a in vx["gross"]]
-        tl = [(tax[x["ledger"]][0], x["amount"]) for x in lines if x["ledger"] in tax]
+        tl = [(x["ledger"], tax[x["ledger"]][0], x["amount"]) for x in lines if x["ledger"] in tax and abs(x["amount"]) > 0.004]
         base = v["base"]
-        if tl and not rcm and base not in ("Sales", "Purchase", "Credit Note", "Debit Note") and \
-                any(x["ledger"] in rcm_led for x in lines):
+        invoice = base in ("Sales", "Purchase", "Credit Note", "Debit Note")
+        if tl and not rcm and not invoice and any(x["ledger"] in rcm_led for x in lines):
             rcm = True
         if not tl:
             if rcm and base == "Purchase":       # Tally adds this tax with its reverse-charge journal
@@ -190,24 +210,36 @@ def _tax_3b(c, cid, f, t, led, tax):
             outward = "|Sundry Debtors|" in pchain or ("|Sundry Creditors|" not in pchain and base == "Credit Note")
         else:
             outward = base == "Sales"
-        others = [x["ledger"] for x in lines if x["ledger"] not in tax]
-        only_tax = all(any(g in ((led.get(o) or {"chain": ""})["chain"] or "") for g in CASHBANK) for o in others)
-        for h, a in tl:
+        out_debited = any(side(n) == "output" and a > 0 for n, _, a in tl)
+        for n, h, a in tl:
             if outward:                                   # sales (and notes to customers): tax on what you sold
-                out[h] += -a
-            elif base in ("Purchase", "Credit Note", "Debit Note"):
+                put("out", out, v, h, -a)
+            elif invoice:
                 if a > 0 or base != "Purchase":           # tax paid on purchases (a purchase return takes it back)
-                    (itc_rcm if rcm else itc)[h] += a
+                    put("itc_rcm" if rcm else "itc", itc_rcm if rcm else itc, v, h, a)
                 else:                                     # tax credited on a purchase: payable under reverse charge
-                    out_rcm[h] += -a
-            elif only_tax and not rcm:
-                continue                                  # set-off or tax paid to the government: not a supply
-            elif a > 0:                                   # journals, payments: tax debited is credit taken
-                (itc_rcm if rcm else itc)[h] += a
-            else:                                         # tax credited is tax payable
-                (out_rcm if rcm else out)[h] += -a
+                    put("rcm", out_rcm, v, h, -a)
+            elif rcm:                                     # reverse-charge journal: credited payable, debited credit
+                if a < 0:
+                    put("rcm", out_rcm, v, h, -a)
+                else:
+                    put("itc_rcm", itc_rcm, v, h, a)
+            elif side(n) == "output":
+                if a < 0:
+                    put("out", out, v, h, -a)             # more tax payable (an advance received, say)
+                else:
+                    put("left", left, v, h, a)            # tax paid or set off: not a supply
+            else:
+                if a > 0:
+                    put("itc", itc, v, h, a)              # credit taken (import of services, a missed bill ...)
+                elif out_debited:
+                    put("left", left, v, h, -a)           # credit used in a set-off
+                else:
+                    put("itc", itc, v, h, a)              # credit reversed
     rcm_untaxed["value"] = round(rcm_untaxed["value"], 2)
-    return _r(out), _r(out_rcm), _r(itc), _r(itc_rcm), rcm_untaxed
+    det = {k: [{**x, **{h: round(x[h], 2) for h in HEADS}} for x in d.values() if any(abs(x[h]) > 0.004 for h in HEADS)]
+           for k, d in detail.items()}
+    return _r(out), _r(out_rcm), _r(itc), _r(itc_rcm), rcm_untaxed, det
 
 
 def _setoff(liab, credit):
@@ -242,12 +274,12 @@ def _setoff(liab, credit):
     return {"used": {k: _r(v) for k, v in used.items()}, "cash": _r(L), "left": _r(A)}
 
 
-def gstr3b(cid, month):
+def gstr3b(cid, month, use_bf=True):
     f, t = _month_range(month)
     g1 = gstr1(cid, month)
     with store.conn() as c:
         tax, led = _tax_side(c, cid)
-        out, out_rcm, itc, itc_rcm, rcm_untaxed = _tax_3b(c, cid, f, t, led, tax)
+        out, out_rcm, itc, itc_rcm, rcm_untaxed, detail = _tax_3b(c, cid, f, t, led, tax)
         pur = c.execute("""SELECT COALESCE(SUM(amount),0) FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
             AND posting=1 AND status='' AND base='Purchase'""", (cid, f, t)).fetchone()[0]
         comp = c.execute("SELECT from_date FROM company WHERE id=?", (cid,)).fetchone()
@@ -262,7 +294,8 @@ def gstr3b(cid, month):
                 start[h] += store._opening_at(c, cid, n, l["closing"], sync_from, f)
             end[h] += store._opening_at(c, cid, n, l["closing"], sync_from, nxt)
     start, end = _r(start), _r(end)
-    bf = {h: max(0.0, start[h]) for h in HEADS}          # a debit balance at the start is credit not used yet
+    bf_all = {h: max(0.0, start[h]) for h in HEADS}      # a debit balance at the start is credit not used yet
+    bf = bf_all if use_bf else _z()
     credit = {h: itc[h] + itc_rcm[h] + bf[h] for h in HEADS}
     so = _setoff(out, credit)
     cash = {h: round(so["cash"][h] + max(0.0, out_rcm[h]), 2) for h in HEADS}   # reverse charge is paid in cash only
@@ -271,10 +304,12 @@ def gstr3b(cid, month):
             "rcm": out_rcm, "rcm_total": round(sum(out_rcm.values()), 2), "rcm_untaxed": rcm_untaxed,
             "nil": g1["nil"],
             "itc": itc, "itc_rcm": itc_rcm, "itc_total": round(sum(itc.values()) + sum(itc_rcm.values()), 2),
-            "bf": _r(bf), "bf_total": round(sum(bf.values()), 2), "start": start if known else None, "end": end,
+            "bf": _r(bf), "bf_total": round(sum(bf.values()), 2), "bf_all": _r(bf_all),
+            "bf_avail": round(sum(bf_all.values()), 2), "bf_used": bool(use_bf), "start": start if known else None, "end": end,
             "used": so["used"], "cash": cash, "cash_total": round(sum(cash.values()), 2),
             "left": so["left"], "left_total": round(sum(so["left"].values()), 2),
-            "purchases": round(abs(pur), 2), "no_tax_ledgers": g1["no_tax_ledgers"]}
+            "purchases": round(abs(pur), 2), "no_tax_ledgers": g1["no_tax_ledgers"], "detail": detail,
+            "out_g1": {h: round(g1["total"].get(h, 0), 2) for h in HEADS}}
 
 
 def einvoice_status(cid, month, ewb_limit=50000):

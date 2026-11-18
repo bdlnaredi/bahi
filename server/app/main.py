@@ -54,7 +54,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.27.1"
+APP_VERSION = "3.27.2"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -1370,7 +1370,7 @@ document.getElementById("a").addEventListener("change", function () {{
             m = q.get("month", "") or time.strftime("%Y-%m")
             if not re.match(r"^\d{4}-\d{2}$", m):
                 return ({"error": "Choose a month."}, 400)
-            return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m)
+            return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m, q.get("bf", "1") != "0")
         if what == "reorder":
             return insights.reorder(cid)
         if what == "tds":

@@ -2,6 +2,15 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.27.2 (18 November 2026)
+
+- **GSTR-3B, journals and payments:** these are now sorted by the GST ledger's side, as Tally does, not only by debit or credit:
+  - **OUTPUT ledger:** credited, it is tax payable. Debited (tax paid, set off, or moved to an electronic cash ledger), it is left out.
+  - **INPUT ledger:** debited, it is credit taken. Credited in a set-off, it is left out; credited otherwise, it is credit reversed.
+  - Before this, GST paid or set off through a journal could show up as input credit, and credit reversed could show up as tax on sales.
+- **Check every figure:** each 3.1 and 4 box lists the vouchers that make it, with their amounts, plus a list of what was left out. 3.1(a) also says when its tax differs from GSTR-1's, and why.
+- **Credit brought forward:** a switch chooses whether to use it in the set-off.
+
 ## 3.27.1 (18 November 2026)
 
 - **GSTR-3B, reverse charge in one journal:** Tally's single Stat Adjustment journal, "Increase in Tax Liability & Input Tax Credit", is now fully counted.

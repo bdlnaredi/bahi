@@ -727,7 +727,8 @@ async function vGstr(which, month) {
   setTitle(true);
   which = which === "3b" ? "3b" : "1";
   if (!month) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
-  const d = await api(cpath(which === "1" ? "gstr_one" : "gstr_threeb", { month }));
+  let bfOn = "1"; try { bfOn = localStorage.getItem("g3bf") || "1"; } catch (e) {}
+  const d = await api(cpath(which === "1" ? "gstr_one" : "gstr_threeb", which === "1" ? { month } : { month, bf: bfOn }));
   const n2 = (x) => nf2.format(x || 0);
   const taxCells = (r) => `<td>${n2(r.IGST)}</td><td>${n2(r.CGST)}</td><td>${n2(r.SGST)}</td>${r.Cess ? `<td>${n2(r.Cess)}</td>` : ""}`;
   const head = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-${which === "1" ? "1" : "3B"}</h1>
@@ -773,18 +774,35 @@ async function vGstr(which, month) {
         ${line("Cash to pay", rupees(d.cash[x]), "g3t")}`;
     }).join("");
     const unpaid = d.start ? H.filter((x) => d.start[x] < -0.005) : [];
+    // which vouchers make each figure, to check against Tally
+    const vlist = (k, title) => {
+      const rows = (d.detail && d.detail[k]) || [];
+      if (!rows.length) return "";
+      return `<section class="page gsec g3v"><button class="row" data-open="v_${k}" aria-expanded="false"><div class="main"><div class="name">${title} <span class="cnt2">${rows.length}</span></div></div><span class="chev"></span></button>
+        <div id="g_v_${k}" hidden>${rows.map((r) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.party || r.vtype)}</div>
+          <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}</div></div>
+          <div class="end meta">${H.filter((x) => Math.abs(r[x]) > 0.004).map((x) => `${HN[x].split(" ")[0]} ${rupees(r[x])}`).join("<br>")}</div></a>`).join("")}</div></section>`;
+    };
+    const g1diff = d.out_g1 ? H.filter((x) => Math.abs((d.out[x] || 0) - (d.out_g1[x] || 0)) > 1) : [];
     body = `<section class="herocards">
         <div class="bold ${d.cash_total > 0.005 ? "out" : "in"}"><div class="label">Cash to pay</div><div class="big">${short(d.cash_total)}</div><div class="go">after using your input credit</div></div>
         <div class="bold in"><div class="label">Credit carried forward</div><div class="big">${short(d.left_total)}</div><div class="go">unused input credit, for next month</div></div></section>
       ${card("3.1(a) Outward taxable supplies", "Sales with tax, less credit notes", [["Taxable value", d.out.taxable], ...heads(d.out)], d.out_total, "Total tax")}
+      ${g1diff.length ? `<p class="hint" style="margin:-4px 4px 8px">The tax here differs from GSTR-1's (${g1diff.map((x) => `${HN[x]} ${rupees(d.out_g1[x])}`).join(", ")}) because of journals or receipts that credit an output GST ledger: see the list below.</p>` : ""}
+      ${vlist("out", "Vouchers in 3.1(a) tax")}
       ${card("3.1(c) Nil-rated and exempt", "Sales with no GST", [["Value", d.nil]])}
       ${card("3.1(d) Reverse charge (incl. URD purchases)", "Tax you pay yourself on purchases under reverse charge, paid in cash", heads(d.rcm), d.rcm_total, "Total")}
+      ${vlist("rcm", "Vouchers in 3.1(d)")}
       ${d.rcm_untaxed.count && d.rcm_total < 0.005 ? `<p class="hint" style="margin:-4px 4px 12px">${d.rcm_untaxed.count} reverse-charge purchase${d.rcm_untaxed.count > 1 ? "s" : ""} worth ${rupees(d.rcm_untaxed.value)} this month, but no reverse-charge tax journal yet. Record it in Tally: Journal (F7), Alt+J Stat Adjustment, GST, Increase of Tax Liability, Purchase Under Reverse Charge.</p>` : ""}
       <section class="page g3"><div class="g3h"><b>4. Input tax credit (ITC)</b><span>GST on purchases and expenses this month</span></div>
         <div class="g3head">4(A)(3) Reverse charge</div>${heads(d.itc_rcm).map(([k, v]) => line(k, rupees(v))).join("")}
         <div class="g3head">4(A)(5) All other ITC</div>${heads(d.itc).map(([k, v]) => line(k, rupees(v))).join("")}
         ${line("Total credit this month", rupees(d.itc_total), "g3t")}</section>
-      ${d.bf_total > 0.005 ? card("Credit brought forward", "Unused credit from earlier months: the debit balance of your GST ledgers in Tally at the start of the month", heads(d.bf), d.bf_total, "Total") : ""}
+      ${vlist("itc_rcm", "Vouchers in 4(A)(3)")}${vlist("itc", "Vouchers in 4(A)(5)")}
+      ${vlist("left", "Left out: GST paid, set off or moved (not a supply)")}
+      ${d.bf_avail > 0.005 ? `<section class="page g3"><div class="g3h"><b>Credit brought forward</b><span>Unused credit from earlier months: the debit balance of your GST ledgers in Tally at the start of the month</span></div>
+        ${heads(d.bf_all).map(([k, v]) => line(k, rupees(v))).join("")}${line("Total", rupees(d.bf_avail), "g3t")}
+        <label class="g3r" style="justify-content:flex-start;gap:10px"><input type="checkbox" id="g3bf" ${d.bf_used ? "checked" : ""}> Use it in the set-off below</label></section>` : ""}
       <section class="page g3"><div class="g3h"><b>Set-off and cash to pay</b><span>As the GST portal does it: IGST credit first (on IGST, then CGST and SGST), then CGST credit (on CGST, then IGST) and SGST credit (on SGST, then IGST). CGST and SGST credit never cross.</span></div>
         ${setoff}${line("Total cash to pay", rupees(d.cash_total), "g3t")}</section>
       ${card("Credit carried forward", "Input credit left after the set-off, for next month", heads(d.left), d.left_total, "Total")}
@@ -797,6 +815,7 @@ async function vGstr(which, month) {
   $("#mprev").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, -1)}`; };
   $("#mnext").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, 1)}`; };
   view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+  if ($("#g3bf")) $("#g3bf").onchange = (e) => { try { localStorage.setItem("g3bf", e.target.checked ? "1" : "0"); } catch (x) {} route(); };
 }
 
 /* ---------------------------------------------------------------- reorder list */
