@@ -30,11 +30,12 @@ namespace BahiSync
             this.cfg = cfg;
             Text = "Bahi Sync - companies";
             Font = new Font("Segoe UI", 10f);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false; MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterParent;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(700, 520);
+            AutoScaleMode = AutoScaleMode.None;
+            k = Ui.K(this);
+            Ui.Fit(this, 720, 560, 520, 360);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             DateTime d;
@@ -45,32 +46,34 @@ namespace BahiSync
             general = d;
 
             var t = new FlowLayoutPanel();
-            t.Dock = DockStyle.Fill; t.Padding = new Padding(18); t.FlowDirection = FlowDirection.TopDown; t.WrapContents = false; t.AutoScroll = true;
-            Controls.Add(t);
+            t.Dock = DockStyle.Fill; t.Padding = new Padding(Ui.S(k, 18)); t.FlowDirection = FlowDirection.TopDown; t.WrapContents = false; t.AutoScroll = true;
+            page = t;
 
             var head = new Label(); head.Text = "Companies to sync"; head.AutoSize = true; head.Font = new Font(Font, FontStyle.Bold);
             t.Controls.Add(head);
-            var hint = new Label(); hint.AutoSize = true; hint.ForeColor = Color.DimGray; hint.MaximumSize = new Size(660, 0); hint.Margin = new Padding(0, 4, 0, 8);
+            var hint = new Label(); hint.AutoSize = true; hint.ForeColor = Color.DimGray; hint.Margin = new Padding(0, Ui.S(k, 4), 0, Ui.S(k, 8));
+            this.hint = hint;
             hint.Text = "Tick every company you want in the Bahi app. Each one becomes its own company there: tap the company name at the top of the app to switch.\n\n" +
                         "Tally only lets Bahi read companies that are open in it. Open all of them together (Alt+F3, Select Company, pick each one), " +
                         "or have TallyPrime open them when it starts (F1 > Settings > Startup). A company not open in Tally keeps what it last synced " +
                         "and catches up when it is opened again.\n\nTick \"From\" to give a company its own start date; otherwise it starts from the general date (" + general.ToString("d MMM yyyy") + ", in Settings).";
             t.Controls.Add(hint);
 
-            grid.AutoSize = true; grid.ColumnCount = 3; grid.Width = 660;
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+            grid.AutoSize = true; grid.ColumnCount = 3;
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Ui.S(k, 300)));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Ui.S(k, 170)));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             t.Controls.Add(grid);
 
-            status.AutoSize = true; status.ForeColor = Color.DimGray; status.MaximumSize = new Size(660, 0); status.Margin = new Padding(0, 10, 0, 0);
-            t.Controls.Add(status);
-
-            var b = new FlowLayoutPanel(); b.FlowDirection = FlowDirection.RightToLeft; b.Width = 660; b.AutoSize = true; b.Margin = new Padding(0, 12, 0, 0);
+            // the message line and the buttons stay at the bottom, in view however many companies there are
+            status.ForeColor = Color.DimGray;
             save.Text = "Save"; cancel.Text = "Cancel"; refresh.Text = "Look in Tally again";
-            foreach (var x in new[] { save, cancel, refresh }) { x.AutoSize = true; b.Controls.Add(x); }
-            t.Controls.Add(b);
+            bar = Ui.Bar(k, status, new Control[] { save, cancel, refresh }, out buttons);
+            Controls.Add(t); Controls.Add(bar);
+            t.BringToFront();
             AcceptButton = save; CancelButton = cancel;
+            Resize += delegate { Relayout(); };
+            Shown += delegate { Relayout(); };
             save.Click += delegate { Save(); };
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             refresh.Click += delegate { AskTally(); };
@@ -85,6 +88,22 @@ namespace BahiSync
             foreach (var kv in Engine.CompanySettings(cfg)) Add(kv.Key);
             ShowStates();
             AskTally();
+        }
+
+        float k = 1f;
+        FlowLayoutPanel page, bar, buttons;
+        Label hint;
+
+        /// <summary>Long text wrapped to the window's width; the buttons across the bottom.</summary>
+        void Relayout()
+        {
+            if (page == null || bar == null) return;
+            int w = page.ClientSize.Width - page.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - Ui.S(k, 4);
+            if (w < Ui.S(k, 240)) w = Ui.S(k, 240);
+            if (hint != null) hint.MaximumSize = new Size(w, 0);
+            int bw = Math.Max(Ui.S(k, 240), bar.ClientSize.Width - bar.Padding.Horizontal);
+            status.MaximumSize = new Size(bw, 0);
+            buttons.MinimumSize = new Size(bw, 0);
         }
 
         protected override void OnShown(EventArgs e)
@@ -103,10 +122,10 @@ namespace BahiSync
             var set = Engine.CompanySettings(cfg);
             Dictionary<string, object> mine;
             set.TryGetValue(name, out mine);
-            r.On = new CheckBox(); r.On.Text = name; r.On.AutoSize = false; r.On.Width = 292; r.On.Height = 28;
+            r.On = new CheckBox(); r.On.Text = name; r.On.AutoSize = false; r.On.Width = Ui.S(k, 292); r.On.Height = Ui.S(k, 28);
             r.On.Checked = mine == null || Engine.Get(mine, "Sync", "True") != "False";
             r.From = new DateTimePicker(); r.From.Format = DateTimePickerFormat.Custom; r.From.CustomFormat = "d MMM yyyy";
-            r.From.Width = 120; r.From.Margin = new Padding(0, 2, 0, 0);
+            r.From.Width = Ui.S(k, 130); r.From.Margin = new Padding(0, Ui.S(k, 2), 0, 0);
             r.Own = new CheckBox(); r.Own.AutoSize = true; r.Own.Margin = new Padding(0, 5, 2, 0);
             DateTime d;
             string f = mine == null ? "" : Engine.Get(mine, "From", "");

@@ -15,23 +15,29 @@ namespace BahiSync
         readonly DateTimePicker from = new DateTimePicker();
         readonly CheckBox showToken = new CheckBox(), startup = new CheckBox();
         readonly Label result = new Label();
-        readonly Button test = new Button(), save = new Button(), cancel = new Button();
+        readonly Button test = new Button(), save = new Button(), cancel = new Button(), browse = new Button();
+        // laid out to the window's width (see Relayout), so nothing is cut off at any size or Windows scaling
+        readonly System.Collections.Generic.List<TextBox> wide = new System.Collections.Generic.List<TextBox>();
+        readonly System.Collections.Generic.List<Label> wraps = new System.Collections.Generic.List<Label>();
+        FlowLayoutPanel page, bar, buttons;
+        float k = 1f;
 
         public SettingsForm(Dictionary<string, object> cfg)
         {
             this.cfg = cfg;
             Text = "Bahi Sync - settings";
             Font = new Font("Segoe UI", 10f);
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false; MinimizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(580, 720);
+            AutoScaleMode = AutoScaleMode.None;
+            k = Ui.K(this);
+            Ui.Fit(this, 600, 760, 460, 380);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             var t = new FlowLayoutPanel();
-            t.Dock = DockStyle.Fill; t.Padding = new Padding(18); t.FlowDirection = FlowDirection.TopDown; t.WrapContents = false; t.AutoScroll = true;
-            Controls.Add(t);
+            t.Dock = DockStyle.Fill; t.Padding = new Padding(Ui.S(k, 18)); t.FlowDirection = FlowDirection.TopDown; t.WrapContents = false; t.AutoScroll = true;
+            page = t;
 
             AddField(t, "Bahi server address", "The address you open the app with, for example https://books.yourdomain.com", server);
             server.Text = Engine.Get(cfg, "ServerUrl", "");
@@ -45,9 +51,9 @@ namespace BahiSync
             tally.Text = Engine.Get(cfg, "TallyUrl", "http://localhost:9000");
 
             AddField(t, "Tally backup folder (optional)", "The folder TallyPrime's Schedule Backup saves to (Alt+Y > Backup & Restore > Schedule Backup > Backup Data Path). Bahi copies each new backup file from it to the Bahi server, so you can download it and restore it in Tally. It only reads the folder.", tbk);
-            tbk.Width = 420;
+            wide.Remove(tbk);
             tbk.Text = Engine.Get(cfg, "TallyBackupDir", "");
-            var browse = new Button(); browse.Text = "Browse ..."; browse.AutoSize = true;
+            browse.Text = "Browse ..."; browse.AutoSize = true;
             browse.Click += delegate
             {
                 using (var fb = new FolderBrowserDialog())
@@ -61,18 +67,18 @@ namespace BahiSync
             t.Controls.Remove(tbk); row.Controls.Add(tbk); row.Controls.Add(browse);
             t.Controls.Add(row);
 
-            var lf = new Label(); lf.Text = "Sync vouchers from"; lf.AutoSize = true; lf.Font = new Font(Font, FontStyle.Bold); lf.Margin = new Padding(0, 10, 0, 2);
+            var lf = new Label(); lf.Text = "Sync vouchers from"; lf.AutoSize = true; lf.Font = new Font(Font, FontStyle.Bold); lf.Margin = new Padding(0, Ui.S(k, 10), 0, Ui.S(k, 2));
             t.Controls.Add(lf);
-            from.Format = DateTimePickerFormat.Custom; from.CustomFormat = "d MMM yyyy"; from.Width = 200;
+            from.Format = DateTimePickerFormat.Custom; from.CustomFormat = "d MMM yyyy"; from.Width = Ui.S(k, 200);
             DateTime d;
             string fd = Engine.Get(cfg, "FromDate", "");
             if (DateTime.TryParseExact(fd, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) from.Value = d;
             else { var now = DateTime.Today; from.Value = new DateTime(now.Month >= 4 ? now.Year : now.Year - 1, 4, 1); }
             t.Controls.Add(from);
 
-            var l2 = new Label(); l2.Text = "Also sync to (optional)"; l2.AutoSize = true; l2.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold); l2.Margin = new Padding(0, 18, 0, 0);
+            var l2 = new Label(); l2.Text = "Also sync to (optional)"; l2.AutoSize = true; l2.Font = new Font(Font.FontFamily, 11f, FontStyle.Bold); l2.Margin = new Padding(0, Ui.S(k, 18), 0, 0);
             t.Controls.Add(l2);
-            var h2 = new Label(); h2.AutoSize = true; h2.ForeColor = Color.DimGray; h2.MaximumSize = new Size(520, 0);
+            var h2 = new Label(); h2.AutoSize = true; h2.ForeColor = Color.DimGray; wraps.Add(h2);
             h2.Text = "A second Bahi server (for example the cloud one while you try it, besides Unraid). After each sync to the server above, the same sync goes to this one. Tally does the work twice, so each sync takes about twice as long. Leave empty for one server.";
             t.Controls.Add(h2);
             AddField(t, "Second server address", "e.g. https://140-245-2-139.sslip.io", server2);
@@ -83,18 +89,19 @@ namespace BahiSync
             showToken.CheckedChanged += delegate { token2.UseSystemPasswordChar = !showToken.Checked; };
 
             startup.Text = "Start with Windows (syncs whenever this PC is on)";
-            startup.AutoSize = true; startup.Margin = new Padding(0, 12, 0, 0);
+            startup.AutoSize = true; startup.Margin = new Padding(0, Ui.S(k, 12), 0, Ui.S(k, 4));
             startup.Checked = !Engine.Configured(cfg) || Engine.StartsWithWindows();
             t.Controls.Add(startup);
 
-            result.AutoSize = true; result.MaximumSize = new Size(520, 0); result.Margin = new Padding(0, 10, 0, 0);
-            t.Controls.Add(result);
-
-            var b = new FlowLayoutPanel(); b.FlowDirection = FlowDirection.RightToLeft; b.Width = 520; b.AutoSize = true; b.Margin = new Padding(0, 12, 0, 0);
-            save.Text = "Save"; save.AutoSize = true; cancel.Text = "Cancel"; cancel.AutoSize = true; test.Text = "Test connection"; test.AutoSize = true;
-            b.Controls.Add(save); b.Controls.Add(cancel); b.Controls.Add(test);
-            t.Controls.Add(b);
+            // the message line and the buttons stay at the bottom, in view however far the page is scrolled
+            save.Text = "Save"; cancel.Text = "Cancel"; test.Text = "Test connection";
+            bar = Ui.Bar(k, result, new Control[] { save, cancel, test }, out buttons);
+            Controls.Add(t); Controls.Add(bar);
+            t.BringToFront();                       // the page fills what the bar leaves
             AcceptButton = save; CancelButton = cancel;
+            Resize += delegate { Relayout(); };
+            Shown += delegate { Relayout(); };
+            Relayout();
 
             test.Click += delegate { RunTest(); };
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
@@ -103,10 +110,26 @@ namespace BahiSync
 
         void AddField(FlowLayoutPanel t, string label, string hint, TextBox box)
         {
-            var l = new Label(); l.Text = label; l.AutoSize = true; l.Font = new Font(Font, FontStyle.Bold); l.Margin = new Padding(0, 10, 0, 2);
-            var h = new Label(); h.Text = hint; h.AutoSize = true; h.ForeColor = Color.DimGray; h.MaximumSize = new Size(520, 0);
-            box.Width = 520;
+            var l = new Label(); l.Text = label; l.AutoSize = true; l.Font = new Font(Font, FontStyle.Bold); l.Margin = new Padding(0, Ui.S(k, 10), 0, Ui.S(k, 2));
+            var h = new Label(); h.Text = hint; h.AutoSize = true; h.ForeColor = Color.DimGray; h.Margin = new Padding(0, 0, 0, Ui.S(k, 3));
+            wraps.Add(h); wide.Add(box);
             t.Controls.Add(l); t.Controls.Add(h); t.Controls.Add(box);
+        }
+
+        /// <summary>Text boxes as wide as the window, and long hints wrapped to it.</summary>
+        void Relayout()
+        {
+            if (page == null || bar == null) return;
+            int w = page.ClientSize.Width - page.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - Ui.S(k, 4);
+            if (w < Ui.S(k, 240)) w = Ui.S(k, 240);
+            page.SuspendLayout();
+            foreach (var b in wide) b.Width = w;
+            foreach (var l in wraps) l.MaximumSize = new Size(w, 0);
+            tbk.Width = Math.Max(Ui.S(k, 120), w - browse.Width - browse.Margin.Horizontal - tbk.Margin.Horizontal);
+            page.ResumeLayout();
+            int bw = Math.Max(Ui.S(k, 240), bar.ClientSize.Width - bar.Padding.Horizontal);
+            result.MaximumSize = new Size(bw, 0);
+            buttons.MinimumSize = new Size(bw, 0);
         }
 
         string Server() { return server.Text.Trim().TrimEnd('/'); }

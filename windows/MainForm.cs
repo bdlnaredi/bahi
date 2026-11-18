@@ -40,9 +40,8 @@ namespace BahiSync
             startHidden = tray;
             Text = "Bahi Sync";
             Font = new Font("Segoe UI", 10f);
-            AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(820, 560);
-            MinimumSize = new Size(640, 420);
+            AutoScaleMode = AutoScaleMode.None;
+            Ui.Fit(this, 820, 560, 640, 420);       // fits the screen at any Windows scaling
             StartPosition = FormStartPosition.CenterScreen;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 

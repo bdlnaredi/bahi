@@ -2,6 +2,14 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.30.1 (18 November 2026)
+
+- **Bahi Sync on Windows: windows fit the screen.**
+  - Settings, Companies and the main window now size themselves to the Windows scaling in use (100%, 125%, 150% ...) and never open larger than the screen, for example a 1366 x 768 laptop.
+  - Settings and Companies can be resized and maximised.
+  - Text boxes and long hints follow the window's width.
+  - Save, Cancel and Test connection stay at the bottom, always in view.
+
 ## 3.30.0 (18 November 2026)
 
 - **Removed, to be built again from scratch later:** the GST summary, GSTR-1 and GSTR-3B. This covers their screens, the server code, and the Tally PC's reading of Tally's GSTR-3B (Tally PC version 3.24).
