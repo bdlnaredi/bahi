@@ -38,7 +38,6 @@ import tallybk  # noqa: E402
 import activity
 import cheques
 import stockcount
-import tally3b
 import gstr2b
 import insights  # noqa: E402
 import gstr  # noqa: E402
@@ -55,7 +54,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.29.0"
+APP_VERSION = "3.30.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -292,9 +291,9 @@ class Handler(BaseHTTPRequestHandler):
             return False
         need = {"dashboard": "accounts", "daily": "sales", "group": "accounts", "stock": "stock", "stock_item": "stock", "godowns": "stock",
                 "outstanding": "dues", "collections": "dues", "followup": "dues", "vouchers": "vouchers", "daybook": "vouchers",
-                "gst": "accounts", "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
+                "pl": "accounts", "bs": "accounts", "cashbank": "accounts", "a_parties": "accounts",
                 "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
-                "duedates": "dues", "reminders": "dues", "gstr_one": "accounts", "gstr_threeb": "accounts", "compare": "accounts",
+                "duedates": "dues", "reminders": "dues", "compare": "accounts",
                 "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
                 "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts", "gstr_twob": "accounts",
                 "einvoice": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
@@ -540,15 +539,6 @@ document.getElementById("a").addEventListener("change", function () {{
             entries.result(int(r.get("id", 0)), bool(r.get("ok")), str(r.get("error") or ""), bool(r.get("retry")))
             return self.send_json({"ok": True})
         # TallyPrime's own backup files, copied from the Tally PC's backup folder (read there, never changed)
-        if path == "/agent/tally3b" and method == "POST":
-            # Tally's own GSTR-3B report for one month, as the Tally PC got it from Tally
-            co = next((c for c in store.companies() if c["name"] == q.get("company", "")), None)
-            if not co:
-                return self.send_json({"error": "unknown company"}, 404)
-            try:
-                return self.send_json(tally3b.save(co["id"], q.get("month", ""), self.body(8 * 1024 * 1024), "tally"))
-            except ValueError as e:
-                return self.send_json({"error": str(e)}, 400)
         if path == "/agent/tallybackup" and method == "GET":
             return self.send_json(tallybk.index())
         if path == "/agent/tallybackup" and method == "POST":
@@ -1190,23 +1180,6 @@ document.getElementById("a").addEventListener("change", function () {{
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
 
-        mp = re.match(r"^/api/c/(\d+)/tally3b/(\d{4}-\d{2})/ask$", path)
-        if mp and method == "POST":             # ask the Tally PC for Tally's GSTR-3B of this month at its next sync
-            if not self.allowed(int(mp.group(1)), "gstr_threeb", q, None):
-                return self.send_json({"error": "You don't have access to this."}, 403)
-            return self.send_json(tally3b.ask(int(mp.group(1)), mp.group(2)))
-        mp = re.match(r"^/api/c/(\d+)/tally3b/(\d{4}-\d{2})(/delete)?$", path)
-        if mp and method == "POST":             # Tally's GSTR-3B exported from Tally (Alt+E, XML), uploaded for a month
-            cid = int(mp.group(1))
-            if not self.allowed(cid, "gstr_threeb", q, None):
-                return self.send_json({"error": "You don't have access to this."}, 403)
-            try:
-                if mp.group(3):
-                    return self.send_json(tally3b.remove(cid, mp.group(2)))
-                return self.send_json(tally3b.save(cid, mp.group(2), self.body(8 * 1024 * 1024), "upload"))
-            except ValueError as e:
-                return self.send_json({"error": str(e)}, 400)
-
         mp = re.match(r"^/api/c/(\d+)/cheques(?:/(\d+)/(status))?$", path)
         if mp and method == "POST":             # post-dated cheques written down in Bahi (not in Tally)
             cid = int(mp.group(1))
@@ -1393,11 +1366,6 @@ document.getElementById("a").addEventListener("change", function () {{
             return insights.due_dates(cid, q.get("kind", "receivable"))
         if what == "reminders":
             return insights.reminders(cid)
-        if what in ("gstr_one", "gstr_threeb"):
-            m = q.get("month", "") or time.strftime("%Y-%m")
-            if not re.match(r"^\d{4}-\d{2}$", m):
-                return ({"error": "Choose a month."}, 400)
-            return gstr.gstr1(cid, m) if what == "gstr_one" else gstr.gstr3b(cid, m, q.get("bf", "1") != "0")
         if what == "reorder":
             return insights.reorder(cid)
         if what == "tds":
@@ -1472,8 +1440,6 @@ document.getElementById("a").addEventListener("change", function () {{
             out = store.outstanding(cid, q.get("kind", "receivable"))
         elif what == "vouchers":
             out = store.vouchers(cid, q.get("q", ""), f, t, q.get("type", ""), q.get("offset", 0), unquote(q.get("sub", "")))
-        elif what == "gst":
-            out = store.gst(cid, f, t)
         elif what == "daybook":
             out = store.daybook(cid, f, t, q.get("type", ""), q.get("offset", 0), unquote(q.get("sub", "")))
         elif what == "voucher" and arg:

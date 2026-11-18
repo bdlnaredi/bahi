@@ -2,6 +2,12 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.30.0 (18 November 2026)
+
+- **Removed, to be built again from scratch later:** the GST summary, GSTR-1 and GSTR-3B. This covers their screens, the server code, and the Tally PC's reading of Tally's GSTR-3B (Tally PC version 3.24).
+- GSTR-2B matching and the e-invoice and e-way bill check stay.
+- Backups made with 3.28 or 3.29 still restore. Their GSTR-3B files are skipped.
+
 ## 3.29.0 (18 November 2026)
 
 - **Tally's GSTR-3B for every month:** the Tally PC (version 3.23) now reads Tally's GSTR-3B for every month of the financial year, even when nothing changed in Tally.

@@ -164,7 +164,7 @@ async function downloadOffline(onProgress = () => {}) {
       add("ledgers", ["name", "balance", "recent"].map((sort) => ({ sort })));
       ["sales", "purchase"].forEach((kind) => add("daily", periods.map((p) => ({ kind, ...p }))));
       add("outstanding", [{ kind: "receivable" }, { kind: "payable" }]);
-      add("stock", periods); add("godowns", [{}]); add("gst", periods); add("pl", periods); add("bs", [{}]);
+      add("stock", periods); add("godowns", [{}]); add("pl", periods); add("bs", [{}]);
       add("cashbank", periods); add("collections", [{}]); add("check", [{}]); add("group", [{}]);
       ["sales", "purchase"].forEach((kind) => add("a_parties", periods.map((p) => ({ kind, ...p }))));
       add("a_items", periods); add("a_years", [{}]); add("a_slow", [30, 60, 90, 180].map((days) => ({ days })));
@@ -720,149 +720,9 @@ async function vDueDates(kind) {
   const a = $("#allday"); if (a) a.onclick = (e) => { e.preventDefault(); S.dueDay = ""; vDueDates(kind).catch(fail); };
 }
 
-/* ---------------------------------------------------------------- GSTR-1 and GSTR-3B */
+/* ---------------------------------------------------------------- months */
 function monthShift(m, by) { const [y, mm] = m.split("-").map(Number); const d = new Date(y, mm - 1 + by, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
 function monthName(m) { const [y, mm] = m.split("-").map(Number); return `${["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][mm - 1]} ${y}`; }
-async function vGstr(which, month) {
-  setTitle(true);
-  which = which === "3b" ? "3b" : "1";
-  if (!month) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; }
-  let bfOn = "1"; try { bfOn = localStorage.getItem("g3bf") || "1"; } catch (e) {}
-  const d = await api(cpath(which === "1" ? "gstr_one" : "gstr_threeb", which === "1" ? { month } : { month, bf: bfOn }));
-  const n2 = (x) => nf2.format(x || 0);
-  const taxCells = (r) => `<td>${n2(r.IGST)}</td><td>${n2(r.CGST)}</td><td>${n2(r.SGST)}</td>${r.Cess ? `<td>${n2(r.Cess)}</td>` : ""}`;
-  const head = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-${which === "1" ? "1" : "3B"}</h1>
-    <div class="seg" role="tablist"><button data-w="1" aria-selected="${which === "1"}">GSTR-1 (sales)</button><button data-w="3b" aria-selected="${which === "3b"}">GSTR-3B (summary)</button></div>
-    <div class="monthnav"><button class="btn ic" id="mprev" aria-label="Previous month">‹</button><b>${monthName(month)}</b><button class="btn ic" id="mnext" aria-label="Next month">›</button></div>`;
-  let body = "";
-  if (d.no_tax_ledgers) body = '<section class="page"><div class="empty">No GST ledgers found under Duties &amp; Taxes in Tally.</div></section>';
-  else if (which === "1") {
-    const S1 = d.sections;
-    const sec = (k, title, sub) => `<section class="page gsec"><button class="row" data-open="${k}" aria-expanded="false"><div class="main"><div class="name">${title} <span class="cnt2">${S1[k].count}</span></div><div class="meta">${sub}</div></div>
-      <div class="end"><div>${rupees(S1[k].taxable)}</div><div class="meta">tax ${rupees(S1[k].IGST + S1[k].CGST + S1[k].SGST + S1[k].Cess)}</div></div><span class="chev down"></span></button>
-      <div class="gdet" id="g_${k}" hidden>${k === "B2CS" ? `<div class="tscroll"><table class="gt"><tr><th>Rate</th><th>Supply</th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
-          ${S1.B2CS.rows.map((r) => `<tr><td>${r.rate}%</td><td>${r.supply}</td><td>${n2(r.taxable)}</td>${taxCells({ ...r, Cess: 0 })}</tr>`).join("")}</table></div>`
-        : (S1[k].invoices.map((v) => `<a class="row" href="#/voucher/${v.id}"><div class="main"><div class="name">${h(v.party)}</div><div class="meta">${h(v.number)}, ${fdate(v.date)}${v.gstin ? ` · ${h(v.gstin)}` : ""} · ${v.rates.map((r) => r.rate + "%").join(", ")}</div></div><div class="end"><div>${rupees(v.taxable)}</div><div class="meta">tax ${rupees(v.IGST + v.CGST + v.SGST + v.Cess)}</div></div></a>`).join("") || '<div class="empty">None this month.</div>')}</div></section>`;
-    body = `<section class="herocards">
-        <div class="bold in"><div class="label">Taxable value</div><div class="big">${short(d.total.taxable)}</div><div class="go">${d.total.count} invoices and notes</div></div>
-        <div class="bold nil"><div class="label">Tax on them</div><div class="big">${short(d.total.IGST + d.total.CGST + d.total.SGST + d.total.Cess)}</div><div class="go">IGST ${short(d.total.IGST)} · CGST ${short(d.total.CGST)} · SGST ${short(d.total.SGST)}</div></div></section>
-      ${sec("B2B", "B2B invoices", "To customers with a GSTIN")}
-      ${sec("B2CL", "B2C (Large)", "Other state, no GSTIN, over ₹1 lakh")}
-      ${sec("B2CS", "B2C (Small)", "Everything else without a GSTIN, by rate")}
-      ${sec("CDNR", "Credit / debit notes (registered)", "Notes to customers with a GSTIN")}
-      ${sec("CDNUR", "Credit / debit notes (unregistered)", "Notes to customers without a GSTIN")}
-      ${d.nil ? `<p class="subtitle">Nil-rated or exempt sales: ${rupees(d.nil)}</p>` : ""}
-      <div class="setgroup">HSN summary</div>
-      <section class="page"><div class="tscroll"><table class="gt"><tr><th>HSN</th><th>Rate</th><th>Qty</th><th>Taxable</th><th>IGST</th><th>CGST</th><th>SGST</th></tr>
-        ${d.hsn.map((r) => `<tr><td>${h(r.hsn)}</td><td>${r.rate ?? "?"}%</td><td>${nf2.format(r.qty)} ${h(r.unit)}</td><td>${n2(r.taxable)}</td>${taxCells({ ...r, Cess: 0 })}</tr>`).join("") || '<tr><td colspan="7">No stock lines this month.</td></tr>'}</table></div></section>`;
-  } else {
-    const H = ["IGST", "CGST", "SGST", "Cess"], HN = { IGST: "IGST", CGST: "CGST", SGST: "SGST / UTGST", Cess: "Cess" };
-    const sum = (r) => H.reduce((a, x) => a + (r[x] || 0), 0);
-    const heads = (r) => H.filter((x) => x !== "Cess" || r.Cess).map((x) => [HN[x], r[x]]);
-    const add = (a, b) => Object.fromEntries(H.map((x) => [x, (a[x] || 0) + (b[x] || 0)]));
-    const drcr = (v) => Math.abs(v) < 0.005 ? "₹0.00" : `${rupees(v)} ${v > 0 ? "Dr" : "Cr"}`;
-    const line = (k, v, cls = "") => `<div class="g3r ${cls}"><span>${k}</span><span>${v}</span></div>`;
-    const card = (title, sub, rows, total, tlabel) => `<section class="page g3"><div class="g3h"><b>${title}</b><span>${sub}</span></div>
-      ${rows.map(([k, v]) => line(k, rupees(v || 0))).join("")}
-      ${total !== undefined ? line(tlabel, rupees(total || 0), "g3t") : ""}</section>`;
-    // set-off, one block per tax head: the liability, what each credit paid, the cash left to pay
-    const liab = add(d.out, {}), shown = H.filter((x) => x !== "Cess" || liab.Cess || d.rcm.Cess || d.cash.Cess);
-    const setoff = shown.map((x) => {
-      const by = H.filter((c) => d.used[c][x] > 0.005).map((c) => line(`Paid with ${HN[c]} credit`, "− " + rupees(d.used[c][x])));
-      return `<div class="g3head">${HN[x]}</div>${line("Tax on sales (3.1a)", rupees(liab[x]))}${by.join("")}
-        ${d.rcm[x] > 0.005 ? line("Reverse charge (3.1d), cash only", "+ " + rupees(d.rcm[x])) : ""}
-        ${line("Cash to pay", rupees(d.cash[x]), "g3t")}`;
-    }).join("");
-    const unpaid = d.start ? H.filter((x) => d.start[x] < -0.005) : [];
-    // which vouchers make each figure, to check against Tally
-    const vlist = (k, title) => {
-      const rows = (d.detail && d.detail[k]) || [];
-      if (!rows.length) return "";
-      return `<section class="page gsec g3v"><button class="row" data-open="v_${k}" aria-expanded="false"><div class="main"><div class="name">${title} <span class="cnt2">${rows.length}</span></div></div><span class="chev"></span></button>
-        <div id="g_v_${k}" hidden>${rows.map((r) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.party || r.vtype)}</div>
-          <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}</div></div>
-          <div class="end meta">${H.filter((x) => Math.abs(r[x]) > 0.004).map((x) => `${HN[x].split(" ")[0]} ${rupees(r[x])}`).join("<br>")}</div></a>`).join("")}</div></section>`;
-    };
-    const g1diff = d.out_g1 && !d.tally ? H.filter((x) => Math.abs((d.out[x] || 0) - (d.out_g1[x] || 0)) > 1) : [];
-    const T = d.tally, when = T ? new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "";
-    const trow = (k, lab) => T[k] ? `<div class="g3head">${lab}</div>${heads(T[k]).map(([a, v]) => line(a, rupees(v))).join("")}` : "";
-    // Tally's detail lines (3.1a ... e, 4(A) 1 ... 5), only those with an amount
-    const subs = (o, pre) => Object.keys(o || {}).sort().filter((k) => sum(o[k]) || o[k].taxable).map((k) =>
-      `<div class="g3head" style="text-transform:none;letter-spacing:0">${h(o[k].label)}</div>${o[k].taxable ? line("Value", rupees(o[k].taxable)) : ""}${heads(o[k]).filter(([, v]) => Math.abs(v) > 0.004).map(([a, v]) => line(a, rupees(v))).join("")}`).join("");
-    const calcDiff = T ? ["out", "itc"].filter((k) => H.some((x) => Math.abs((d.calc[k][x] || 0) - (d[k][x] || 0)) > 1)) : [];
-    const tallyCard = T ? `<section class="page g3"><div class="g3h"><b>Tally's GSTR-3B, as exported</b><span>${T.source === "upload" ? "Uploaded" : "Read from Tally"} ${when}</span></div>
-        ${trow("s31", "3.1 Outward and reverse-charge inward supplies (total of a to e)")}${T.s31 && T.s31.taxable ? line("Taxable value", rupees(T.s31.taxable)) : ""}
-        ${subs(T.sub31, "3.1")}
-        ${trow("s4a", "4(A) ITC available")}${subs(T.sub4a, "4(A)")}${trow("s4b", "4(B) ITC reversed")}${subs(T.sub4b, "4(B)")}${trow("s4c", "4(C) Net ITC")}
-        ${T.s5 && T.s5.taxable ? `<div class="g3head">5 Exempt, nil-rated and non-GST inward</div>${line("Value", rupees(T.s5.taxable))}` : ""}
-        ${T.s61 && sum(T.s61) ? trow("s61", "6.1 Interest, late fee and others") : ""}
-        ${d.split.length ? `<p class="hint" style="margin:6px 0 4px">Tally's export has only section totals, so ${d.split.join(" and ")} ${d.split.length > 1 ? "are" : "is"} worked out: 3.1(a) is 3.1 less 3.1(d), and 4(A)(5) is 4(C) less 4(A)(3), with reverse charge from your reverse-charge journals.</p>` : ""}
-        ${calcDiff.length ? `<p class="hint" style="margin:6px 0 4px">Bahi's own working from the vouchers differs (${calcDiff.map((k) => k === "out" ? `3.1(a) CGST ${rupees(d.calc.out.CGST)}` : `4(A)(5) CGST ${rupees(d.calc.itc.CGST)}`).join(", ")}): Tally's figures are used.</p>` : ""}
-        <div class="actions" style="padding:4px 0 10px"><button class="btn small" id="t3del">${T.source === "upload" ? "Remove this file" : "Use Bahi's own working instead"}</button></div></section>` : "";
-    const upload3b = `<details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Upload Tally's GSTR-3B again" : "Use Tally's own GSTR-3B figures"}</b></summary>
-      <form class="form" id="t3f" style="padding:0 0 12px"><p class="hint" style="margin:0">${T ? "" : "The Tally PC reads Tally's GSTR-3B by itself after each sync where Tally allows it. If it isn't here, "}In Tally open GSTR-3B for ${monthName(month)}, press Alt+E, choose XML (Data Interchange), and upload the file here.</p>
-      <input type="file" id="t3file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload</button><p class="hint" id="t3msg"></p></form></details>`;
-    body = `${T ? `<p class="hint" style="margin:0 4px 12px">✅ <b>Figures from Tally's own GSTR-3B</b> (${T.source === "upload" ? "uploaded" : "read from Tally"} ${when}). The vouchers lists show Bahi's own working.</p>`
-      : `<section class="page g3 notally"><div class="g3h"><b>⚠️ Not Tally's GSTR-3B yet</b><span>These figures are Bahi's own working from the vouchers and can differ from Tally. The Tally PC reads Tally's GSTR-3B for every month by itself (Tally must be open).</span></div>
-        <div class="actions" style="padding:8px 0 12px"><button class="btn primary" id="t3ask">Get Tally's figures for ${monthName(month)}</button></div>
-        <p class="hint" id="t3askmsg" style="margin:0 0 10px">Or upload it yourself at the bottom of this page.</p></section>`}
-      <section class="herocards">
-        <div class="bold ${d.cash_total > 0.005 ? "out" : "in"}"><div class="label">Cash to pay</div><div class="big">${short(d.cash_total)}</div><div class="go">after using your input credit</div></div>
-        <div class="bold in"><div class="label">Credit carried forward</div><div class="big">${short(d.left_total)}</div><div class="go">unused input credit, for next month</div></div></section>
-      ${card("3.1(a) Outward taxable supplies", "Sales with tax, less credit notes", [["Taxable value", d.out.taxable], ...heads(d.out)], d.out_total, "Total tax")}
-      ${g1diff.length ? `<p class="hint" style="margin:-4px 4px 8px">The tax here differs from GSTR-1's (${g1diff.map((x) => `${HN[x]} ${rupees(d.out_g1[x])}`).join(", ")}) because of journals or receipts that credit an output GST ledger: see the list below.</p>` : ""}
-      ${vlist("out", "Vouchers in 3.1(a) tax")}
-      ${card("3.1(c) Nil-rated and exempt", "Sales with no GST", [["Value", d.nil]])}
-      ${card("3.1(d) Reverse charge (incl. URD purchases)", "Tax you pay yourself on purchases under reverse charge, paid in cash", heads(d.rcm), d.rcm_total, "Total")}
-      ${vlist("rcm", "Vouchers in 3.1(d)")}
-      ${d.rcm_untaxed.count && d.rcm_total < 0.005 ? `<p class="hint" style="margin:-4px 4px 12px">${d.rcm_untaxed.count} reverse-charge purchase${d.rcm_untaxed.count > 1 ? "s" : ""} worth ${rupees(d.rcm_untaxed.value)} this month, but no reverse-charge tax journal yet. Record it in Tally: Journal (F7), Alt+J Stat Adjustment, GST, Increase of Tax Liability, Purchase Under Reverse Charge.</p>` : ""}
-      <section class="page g3"><div class="g3h"><b>4. Input tax credit (ITC)</b><span>GST on purchases and expenses this month</span></div>
-        <div class="g3head">4(A)(3) Reverse charge</div>${heads(d.itc_rcm).map(([k, v]) => line(k, rupees(v))).join("")}
-        <div class="g3head">4(A)(5) All other ITC</div>${heads(d.itc).map(([k, v]) => line(k, rupees(v))).join("")}
-        ${line("Total credit this month", rupees(d.itc_total), "g3t")}</section>
-      ${vlist("itc_rcm", "Vouchers in 4(A)(3)")}${vlist("itc", "Vouchers in 4(A)(5)")}
-      ${vlist("left", "Left out: GST paid, set off or moved (not a supply)")}
-      ${tallyCard}
-      ${d.bf_avail > 0.005 ? `<section class="page g3"><div class="g3h"><b>Credit brought forward</b><span>Unused credit from earlier months: the debit balance of your GST ledgers in Tally at the start of the month</span></div>
-        ${heads(d.bf_all).map(([k, v]) => line(k, rupees(v))).join("")}${line("Total", rupees(d.bf_avail), "g3t")}
-        <label class="g3r" style="justify-content:flex-start;gap:10px"><input type="checkbox" id="g3bf" ${d.bf_used ? "checked" : ""}> Use it in the set-off below</label></section>` : ""}
-      <section class="page g3"><div class="g3h"><b>Set-off and cash to pay</b><span>As the GST portal does it: IGST credit first (on IGST, then CGST and SGST), then CGST credit (on CGST, then IGST) and SGST credit (on SGST, then IGST). CGST and SGST credit never cross.</span></div>
-        ${setoff}${line("Total cash to pay", rupees(d.cash_total), "g3t")}</section>
-      ${card("Credit carried forward", "Input credit left after the set-off, for next month", heads(d.left), d.left_total, "Total")}
-      <section class="page g3"><div class="g3h"><b>Your GST ledgers in Tally</b><span>Net balance of each head, as it is in Tally. Dr is credit in your favour, Cr is tax payable.</span></div>
-        ${shown.map((x) => `<div class="g3head">${HN[x]}</div>${d.start ? line("Start of the month", drcr(d.start[x])) : ""}${line("End of the month", drcr(d.end[x]))}`).join("")}
-        <p class="hint" style="margin:6px 0 4px">${unpaid.length ? ` ${unpaid.map((x) => HN[x]).join(", ")} had tax payable (Cr) at the start of the month, from earlier months; it isn't part of this month's figures.` : ""}</p></section>
-      ${upload3b}`;
-  }
-  view.innerHTML = head + body + `<p class="hint" style="margin:0 4px 14px">Put together from the vouchers synced from Tally: tax as posted on Tally's GST ledgers, rates as Tally gave each line. Use it to check, then file from Tally's own GSTR reports or with your CA.${which === "1" ? "" : " Interest, late fee, amendments and blocked credit aren't covered."}</p>`;
-  view.querySelectorAll("[data-w]").forEach((b) => b.onclick = () => { location.hash = `#/gstr/${b.dataset.w}/${month}`; });
-  $("#mprev").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, -1)}`; };
-  $("#mnext").onclick = () => { location.hash = `#/gstr/${which}/${monthShift(month, 1)}`; };
-  view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
-  if ($("#t3f")) $("#t3f").onsubmit = async (e) => {
-    e.preventDefault();
-    const file = $("#t3file").files[0]; if (!file) return;
-    $("#t3msg").textContent = "Reading the file…";
-    try {
-      const r = await fetch(cpath(`tally3b/${month}`), { method: "POST", body: file });
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
-      route();
-    } catch (err) { $("#t3msg").textContent = err.message; }
-  };
-  if ($("#t3ask")) $("#t3ask").onclick = async () => {
-    try {
-      await api(cpath(`tally3b/${month}/ask`), { method: "POST", body: "{}" });
-      $("#t3askmsg").textContent = "Asked. The Tally PC reads it at its next sync, within a few minutes while Tally is open. Then pull down to refresh this page.";
-      $("#t3ask").disabled = true;
-    } catch (err) { toast(err.message); }
-  };
-  if ($("#t3del")) $("#t3del").onclick = async () => {
-    if (!confirm("Stop using Tally's GSTR-3B for this month? (The Tally PC reads it again after the next change in Tally.)")) return;
-    await api(cpath(`tally3b/${month}/delete`), { method: "POST", body: "{}" }); route();
-  };
-  if ($("#g3bf")) $("#g3bf").onchange = (e) => { try { localStorage.setItem("g3bf", e.target.checked ? "1" : "0"); } catch (x) {} route(); };
-}
-
 /* ---------------------------------------------------------------- reorder list */
 async function vReorder() {
   setTitle(true);
@@ -2081,8 +1941,6 @@ function vReports() {
     ["#/cashbook", "Cash and bank book", "Money in and out each day, with opening and closing balances", can("accounts")],
     ["#/brs", "Bank reconciliation", "Match your bank statement with the bank ledger in Tally", can("accounts")],
     ["#/collect", "Follow-up list", "Who should pay you: overdue, due this week, promises", can("dues")],
-    ["#/gst", "GST summary", "Output tax, input credit and net payable by month", can("accounts")],
-    ["#/gstr", "GSTR-1 and GSTR-3B", "The month's returns in summary, from your Tally vouchers, to check before filing", can("accounts")],
     ["#/compare", "Compare periods", "This month, quarter or year against the last one and a year ago", can("accounts")],
     ["#/profit", "Item profit", "Profit on each item and each customer, at Tally's purchase cost", can("accounts")],
     ["#/reorder", "Reorder list", "Items to buy now, by supplier, ready to send", can("stock")],
@@ -2128,27 +1986,6 @@ function toggleTheme() {
   const next = (document.documentElement.dataset.theme || "light") === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("theme", next); } catch (e) {}
-}
-
-async function vGST() {
-  setTitle(true);
-  const d = await api(cpath("gst", periodParams()));
-  const heads = ["IGST", "CGST", "SGST", "Cess"];
-  const used = d.total ? heads.filter((k) => Math.abs(d.total.output[k]) > 0.005 || Math.abs(d.total.input[k]) > 0.005) : [];
-  const mname = (m) => { const [y, mm] = m.split("-"); return `${MON[+mm - 1]} ${y}`; };
-  const block = (title, x, open) => `<section class="page">
-      <div class="block-title">${title}</div>
-      <div class="gst-net"><div><div class="label">${x.net >= 0 ? "Net GST payable" : "Credit carried forward"}</div><div class="big ${x.net >= 0 ? "owe" : ""}">${rupees(x.net)}</div></div></div>
-      <div class="gst-grid"><div></div><div class="label">Output</div><div class="label">Input</div>
-        ${used.map((k) => `<div>${k}</div>${money(x.output[k])}${money(x.input[k])}`).join("")}
-        <div><b>Total</b></div><b>${money(x.output_total)}</b><b>${money(x.input_total)}</b></div>
-      ${x.sales !== undefined ? `<div class="note">Sales ${rupees(x.sales, false)}, purchases ${rupees(x.purchase, false)} before tax</div>` : ""}
-    </section>`;
-  view.innerHTML = `<h1 class="title">GST summary</h1>${periodBar(d.from, d.to)}
-    ${!d.total ? '<div class="empty">No GST ledgers found under Duties &amp; Taxes.</div>' :
-      block("Whole period", d.total) + d.months.map((m) => block(mname(m.month), m)).join("") +
-      `<p class="note" style="border:0">Worked out from your vouchers, leaving out GST payments to the government and set-off entries. It's a quick check only. File your returns from Tally or the GST portal.<br>Counted: ${d.ledgers.map((l) => `${h(l.name)} (${l.side})`).join(", ")}.</p>`}`;
-  wirePeriod(d.from, d.to);
 }
 
 function voucherRows(rows, narr) {
@@ -3568,7 +3405,6 @@ async function route() {
       case "collect": await vCollect(); break;
       case "entries": await vEntries(); break;
       case "new": await vNewEntry(parts[1]); break;
-      case "gst": await vGST(); break;
       case "check": await vCheck(); break;
       case "analysis": await vAnalysis(parts[1]); break;
       case "settings": await vSettings(parts[1]); break;
@@ -3577,7 +3413,6 @@ async function route() {
       case "vouchers": await vVouchers(); break;
       case "whatsnew": await vWhatsNew(); break;
       case "duedates": await vDueDates(parts[1]); break;
-      case "gstr": await vGstr(parts[1], parts[2]); break;
       case "reorder": await vReorder(); break;
       case "cashflow": await vCashflow(); break;
       case "twob": await vTwoB(parts[1]); break;

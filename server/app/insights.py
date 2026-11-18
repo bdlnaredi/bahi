@@ -597,7 +597,7 @@ def yearend(cid):
             tax[h] = tax.get(h, 0) + l["closing"]
     tax_rows = [{"name": h, "value": round(v, 2), "note": "credit not used" if v > 0 else "payable"} for h, v in sorted(tax.items()) if abs(v) > 0.5]
     add("gst", "GST ledger balances", "info" if tax_rows else "ok",
-        "Check these against the GST portal's credit and cash ledgers." if tax_rows else "GST ledgers are at zero.", "#/gstr", tax_rows)
+        "Check these against the GST portal's credit and cash ledgers." if tax_rows else "GST ledgers are at zero.", "#/groups", tax_rows)
     add("hsn", "Items without HSN or GST rate", "info" if nohsn else "ok",
         "Set them on the item in Tally: GSTR-1's HSN table needs them." if nohsn else "Every item has HSN and GST.", "#/stock",
         [{"name": n, "value": ""} for n in nohsn])

@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.23"
+$AgentVersion = "3.24"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -353,44 +353,6 @@ function Send-Vchx($run, [string]$company, [datetime]$from, [datetime]$to, [stri
     catch { if ($Verbose) { Log ("Cheque details not read: " + $_.Exception.Message) "Gray" } }
 }
 
-# Tally's own GSTR-3B report for a month, so the app shows Tally's figures. The report's name for an XML request
-# isn't documented and differs between releases: the names below are tried once, and the one that answers is
-# remembered (TallySync.gstr3b). When none does, it is tried again the next day. Read-only, like everything here.
-$R3bNames = @("GSTR-3B", "GSTR3B", "GSTR 3B", "GSTR3B Report", "GSTR-3B Report", "GST GSTR3B")
-function R3b-Xml([string]$company, [datetime]$from, [datetime]$to, [string]$id) {
-    $sv = Static-Vars $company $from $to
-    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Data</TYPE><ID>" + (Esc $id) + "</ID></HEADER>" +
-           "<BODY><DESC><STATICVARIABLES>$sv<EXPLODEFLAG>Yes</EXPLODEFLAG></STATICVARIABLES></DESC></BODY></ENVELOPE>"
-}
-function Send-Gstr3b([string]$company, [datetime[]]$months) {
-    $known = ""; try { if (Test-Path $R3bFile) { $known = (Get-Content $R3bFile -Raw).Trim() } } catch {}
-    if ($known -like "none:*") {
-        if ($known -eq ("none:" + (Get-Date).ToString("yyyy-MM-dd"))) { return }
-        $known = ""
-    }
-    $names = if ($known) { @($known) } else { $R3bNames }
-    $got = 0
-    foreach ($m in $months) {
-        $a = Get-Date -Year $m.Year -Month $m.Month -Day 1
-        $b = $a.AddMonths(1).AddDays(-1)
-        foreach ($id in $names) {
-            try { $raw = Tally-Raw (R3b-Xml $company $a $b $id) } catch { continue }
-            if ([System.Text.Encoding]::UTF8.GetString($raw) -notmatch "GSTRRETVIEWPARTICULARS") { continue }
-            try {
-                $wc = Server-Client
-                $wc.Headers.Add("Content-Type", "application/xml")
-                [void]$wc.UploadData("$Server/agent/tally3b?company=" + [uri]::EscapeDataString($company) + "&month=" + $a.ToString("yyyy-MM"), "POST", $raw)
-                $got++
-            } catch { if ($Verbose) { Log ("Tally's GSTR-3B not sent: " + $_.Exception.Message) "Gray" } }
-            if ($id -ne $known) { try { Set-Content $R3bFile $id } catch {} ; $known = $id; $names = @($id) }
-            break
-        }
-        if (-not $known) { break }        # this Tally answers to none of the names: not every month again
-    }
-    if (-not $known) { try { Set-Content $R3bFile ("none:" + (Get-Date).ToString("yyyy-MM-dd")) } catch {} }
-    elseif ($got) { Log ("Tally's GSTR-3B read for " + $got + " month(s)") }
-}
-
 # Every stock item's (or ledger's) balance as Tally has it at the end of one day. The period starts at the
 # company's books beginning, so Tally counts everything up to that day. For the day before the books begin,
 # Tally's own opening balance is the figure (a period ending before it starts gives wrong numbers).
@@ -706,7 +668,6 @@ try {
 $BaseFrom = $FromDate
 $exitCode = 0
 $MethodFile = Join-Path $Here "TallySync.method"
-$R3bFile = Join-Path $Here "TallySync.gstr3b"
 $script:VchMethod = "daybook"
 try { if ((Test-Path $MethodFile) -and ((Get-Content $MethodFile -Raw).Trim() -eq "collection")) { $script:VchMethod = "collection" } } catch {}
 
@@ -778,12 +739,6 @@ foreach ($co in $companies) {
         $deep = @{}
         try { if (Test-Path $deepFile) { (Get-Content $deepFile -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $deep[$_.Name] = $_.Value } } } catch {}
         $deepCheck = $false
-        # Tally's own GSTR-3B for the months the server lists (missing, old, or asked for in the app): read even when
-        # nothing else changed in Tally
-        if ($state.need_3b) {
-            $r3 = @(); foreach ($ym in @($state.need_3b)) { try { $r3 += [datetime]::ParseExact(([string]$ym + "-01"), "yyyy-MM-dd", $null) } catch {} }
-            if ($r3.Count) { try { Send-Gstr3b $co.Name $r3 } catch { if ($Verbose) { Log ("Tally's GSTR-3B not read: " + $_.Exception.Message) "Gray" } } }
-        }
         if ($unchanged -and -not $Force) {
             $last = 0; try { $last = [double]$deep[$deepKey] } catch {}
             $nowSec = [double](Get-Date -UFormat %s)
@@ -1001,14 +956,6 @@ foreach ($co in $companies) {
         # so the last 15 days' details are read every time (only those fields; the server adds them to its copy)
         $eFrom = $today.Date.AddDays(-15); if ($eFrom -lt $FromDate) { $eFrom = $FromDate }
         if ($eFrom -le $ToDate) { Send-Einv $run $co.Name $eFrom $ToDate $null }
-        # Tally's own GSTR-3B: this month and last month again after a change (the server lists the rest)
-        if ($sentTotal -gt 0 -or $sentByVch) {
-            $r3 = @(); $m = $today.Date.AddDays(1 - $today.Day).AddMonths(-1)
-            if ($m -lt $FromDate.AddDays(1 - $FromDate.Day)) { $m = $FromDate.AddDays(1 - $FromDate.Day) }
-            while ($m -le $ToDate -and $m -le $today) { $r3 += $m; $m = $m.AddMonths(1) }
-            if ($r3.Count -gt 15) { $r3 = $r3[($r3.Count - 15)..($r3.Count - 1)] }
-            try { Send-Gstr3b $co.Name $r3 } catch { if ($Verbose) { Log ("Tally's GSTR-3B not read: " + $_.Exception.Message) "Gray" } }
-        }
         # the GST rate of every stock line, once for all months (asked for by the server when it has none yet)
         if ($state.need_gst -and -not $full) {
             $m = Get-Date -Year $FromDate.Year -Month $FromDate.Month -Day 1

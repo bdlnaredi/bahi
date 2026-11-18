@@ -306,11 +306,6 @@ def get_alt(name):
         r = c.execute("""SELECT co.id, (SELECT COUNT(*) FROM vitem i JOIN voucher v ON v.id=i.voucher_id WHERE v.company_id=co.id) n,
                 (SELECT COUNT(*) FROM vitem i JOIN voucher v ON v.id=i.voucher_id WHERE v.company_id=co.id AND i.gst IS NOT NULL) g
                 FROM company co WHERE co.name=?""", (name,)).fetchone()
-        # Tally's own GSTR-3B: the months the Tally PC should read (see tally3b.wanted)
-        r3 = c.execute("SELECT id, from_date FROM company WHERE name=?", (name,)).fetchone()
-        if r3:
-            import tally3b
-            out["need_3b"] = tally3b.wanted(r3["id"], r3["from_date"] or "")
         out["need_gst"] = False
         if r and r["n"] and not r["g"]:
             key = f"gst_ask:{r['id']}"
@@ -1503,69 +1498,6 @@ def _gst_head(l):
         return "SGST"
     return "Cess"
 
-
-def gst(cid, d_from=None, d_to=None):
-    with conn() as c:
-        f, t = period(c, cid, d_from, d_to)
-        led = {r["name"]: r for r in c.execute(
-            "SELECT name, chain, taxtype, gst_head, closing FROM ledger WHERE company_id=?", (cid,))}
-        tax = {n: l for n, l in led.items() if _is_tax(l)}
-        if not tax:
-            return {"from": f, "to": t, "months": [], "total": None, "ledgers": []}
-        # which side is each tax ledger on?
-        use = {r["ledger"]: (r["s"], r["p"]) for r in c.execute("""SELECT vl.ledger,
-            SUM(CASE WHEN v.base IN ('Sales','Debit Note') THEN 1 ELSE 0 END) s,
-            SUM(CASE WHEN v.base IN ('Purchase','Credit Note') THEN 1 ELSE 0 END) p
-            FROM vline vl JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=? GROUP BY vl.ledger""", (cid,))}
-        side = {}
-        for n, l in tax.items():
-            low = n.lower()
-            if "input" in low or "itc" in low:
-                side[n] = "input"
-            elif "output" in low:
-                side[n] = "output"
-            else:
-                s_, p_ = use.get(n, (0, 0))
-                side[n] = "output" if s_ > p_ else "input" if p_ > s_ else ("output" if l["closing"] < 0 else "input")
-        cashbank = {n for n, l in led.items() if any(g in (l["chain"] or "") for g in
-                    ("|Bank Accounts|", "|Cash-in-Hand|", "|Bank OD A/c|"))}
-        months = {}
-        vids = c.execute("""SELECT DISTINCT v.id, v.date, v.base FROM voucher v JOIN vline vl ON vl.voucher_id=v.id
-            WHERE v.company_id=? AND v.date BETWEEN ? AND ? AND vl.ledger IN (%s)""" % ",".join("?" * len(tax)),
-                         [cid, f, t, *tax.keys()]).fetchall()
-        for v in vids:
-            lines = c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],)).fetchall()
-            others = [x["ledger"] for x in lines if x["ledger"] not in tax]
-            if not others:
-                continue  # set-off between tax ledgers
-            if v["base"] in ("Payment", "Receipt", "Journal", "Contra") and all(o in cashbank for o in others):
-                continue  # tax paid to / refunded by the government
-            m = months.setdefault(v["date"][:7], {"month": v["date"][:7], "output": {h: 0.0 for h in GST_HEADS},
-                                                  "input": {h: 0.0 for h in GST_HEADS}})
-            for x in lines:
-                if x["ledger"] in tax:
-                    sd = side[x["ledger"]]
-                    m[sd][_gst_head(tax[x["ledger"]])] += -x["amount"] if sd == "output" else x["amount"]
-        for m in months.values():
-            for sd in ("output", "input"):
-                m[sd] = {h: round(x, 2) for h, x in m[sd].items()}
-            m["output_total"] = round(sum(m["output"].values()), 2)
-            m["input_total"] = round(sum(m["input"].values()), 2)
-            m["net"] = round(m["output_total"] - m["input_total"], 2)
-            m["sales"] = -_sum_group(c, cid, "Sales Accounts", m["month"] + "-01", m["month"] + "-31")
-            m["purchase"] = _sum_group(c, cid, "Purchase Accounts", m["month"] + "-01", m["month"] + "-31")
-        ms = sorted(months.values(), key=lambda m: m["month"], reverse=True)
-        total = {"output": {h: round(sum(m["output"][h] for m in ms), 2) for h in GST_HEADS},
-                 "input": {h: round(sum(m["input"][h] for m in ms), 2) for h in GST_HEADS}}
-        total["output_total"] = round(sum(total["output"].values()), 2)
-        total["input_total"] = round(sum(total["input"].values()), 2)
-        total["net"] = round(total["output_total"] - total["input_total"], 2)
-        return {"from": f, "to": t, "months": ms, "total": total,
-                "ledgers": [{"name": n, "side": side[n], "head": _gst_head(l)} for n, l in sorted(tax.items())]}
-
-
-PL_SECTIONS = [("Sales Accounts", -1), ("Direct Incomes", -1), ("Purchase Accounts", 1),
-               ("Direct Expenses", 1), ("Indirect Incomes", -1), ("Indirect Expenses", 1)]
 
 
 def profit_loss(cid, d_from=None, d_to=None):

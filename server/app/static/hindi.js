@@ -19,8 +19,6 @@ const HI = {
   "Cash and bank book": "कैश और बैंक बुक", "Cash and bank": "कैश और बैंक", "Money in and out each day, with opening and closing balances": "हर दिन आया-गया पैसा, शुरुआती और अंतिम बैलेंस के साथ",
   "Bank reconciliation": "बैंक मिलान", "Match your bank statement with the bank ledger in Tally": "बैंक स्टेटमेंट को Tally के बैंक लेजर से मिलाएँ",
   "Follow-up list": "फ़ॉलो-अप सूची", "Who should pay you: overdue, due this week, promises": "किसे भुगतान करना है: बकाया, इस हफ़्ते देय, वादे",
-  "GST summary": "GST सारांश", "Output tax, input credit and net payable by month": "महीने के हिसाब से आउटपुट टैक्स, इनपुट क्रेडिट और देय राशि",
-  "GSTR-1 and GSTR-3B": "GSTR-1 और GSTR-3B", "The month's returns in summary, from your Tally vouchers, to check before filing": "फ़ाइल करने से पहले जाँचने के लिए, Tally वाउचर से महीने के रिटर्न का सारांश",
   "Compare periods": "अवधि की तुलना", "This month, quarter or year against the last one and a year ago": "यह महीना, तिमाही या साल, पिछले और एक साल पहले से तुलना",
   "Item profit": "आइटम पर मुनाफ़ा", "Profit on each item and each customer, at Tally's purchase cost": "Tally की खरीद लागत पर हर आइटम और हर ग्राहक पर मुनाफ़ा",
   "Reorder list": "दोबारा मँगाने की सूची", "Items to buy now, by supplier, ready to send": "अभी खरीदने वाले आइटम, सप्लायर के हिसाब से, भेजने को तैयार",

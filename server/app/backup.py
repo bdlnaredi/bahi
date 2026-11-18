@@ -21,8 +21,8 @@ EXTRA = ["telegram.json", "followups.json", "app_password.json", "users.json", "
 DBS = ["tally.db", "entries.db"]          # copied with sqlite's own backup, safe while the app is running
 NAME = re.compile(r"^bahi-\d{4}-\d{2}-\d{2}(-before-restore-\d{6})?\.zip$")
 BANKREC = re.compile(r"^bankrec/[0-9a-f]{16}\.json$")
-FOLDERS = {"bankrec": BANKREC, "gstr2b": re.compile(r"^gstr2b/\d+\.json$"), "photos": re.compile(r"^photos/[0-9a-f]{32}\.jpg$"),
-           "tally3b": re.compile(r"^tally3b/\d+\.json$")}      # bank statements, GSTR-2B files
+FOLDERS = {"bankrec": BANKREC, "gstr2b": re.compile(r"^gstr2b/\d+\.json$"), "photos": re.compile(r"^photos/[0-9a-f]{32}\.jpg$")}
+OLD = re.compile(r"^tally3b/")     # in backups from 3.28-3.29 (GSTR-3B, since removed): accepted, not restored
 _lock = threading.Lock()
 
 
@@ -105,7 +105,7 @@ def check(raw):
     names = list(m)
     if "tally.db" not in names:
         raise ValueError("That isn't a Bahi backup: there's no tally.db inside.")
-    bad = [n for n in names if n not in DBS + EXTRA and not any(p.match(n) for p in FOLDERS.values())]
+    bad = [n for n in names if n not in DBS + EXTRA and not any(p.match(n) for p in FOLDERS.values()) and not OLD.match(n)]
     if bad:
         raise ValueError("That zip has files a Bahi backup never has: " + ", ".join(bad[:3]))
     read = lambda n: z.read(m[n])

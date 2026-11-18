@@ -152,7 +152,6 @@ Opening and closing stock, quantity and value, are **Tally's own figures** for w
 | **Cash and bank book** | Money in and out each day, with opening and closing balances |
 | **Follow-up list** | Who should pay you, with your notes and promised dates |
 | **Profit & Loss** | Sales, purchases, stock, expenses, gross and net profit. Tap a line to see its ledgers. |
-| **GST summary** | Output tax, input credit and net GST payable, month by month |
 | **Group summary** | Balances by Tally group. Tap to drill down. |
 | **Outstanding** | Same as Dues |
 | **Stock summary** | Same as Stock |
@@ -162,13 +161,11 @@ The **Sync** box shows the synced date range, the number of ledgers and vouchers
 <br clear="right">
 
 <table><tr>
-<td><img src="images/gst.png" width="230" alt="GST summary"></td>
 <td><img src="images/pl.png" width="230" alt="Profit and Loss"></td>
 <td><img src="images/groups.png" width="230" alt="Group summary"></td>
 <td><img src="images/daybook.png" width="230" alt="Day Book"></td>
 </tr></table>
 
-> **GST summary** is a quick check worked out from your vouchers. GST payments to the government and set-off entries are left out. File your returns from Tally or the GST portal.
 
 ## Balance Sheet and Profit & Loss
 
@@ -466,23 +463,6 @@ When you make a sales invoice or order and choose a customer who is over the cre
 - **Dues, Due dates** shows bills by the day they fall due (the bill date plus the credit period in Tally). You get a strip of the next 14 days with the amount on each day, everything due in the next month, and what is already overdue. It covers both money to receive and money to pay.
 - **Dues, Reminders** lists every customer with overdue bills, newest overdue first. *Send reminder* opens WhatsApp with the overdue bills, the customer's link and a UPI payment link, and marks that customer as reminded for 7 days. Staff see the mark too.
 - **Home** shows "N customers to remind today". The morning Telegram summary includes the bills falling due that day.
-
-## GSTR-1 and GSTR-3B
-
-**Reports, GSTR-1 / GSTR-3B** shows a month's returns in summary, put together from your Tally vouchers, so you can check them before filing.
-
-- **GSTR-1:** B2B (with GSTINs), B2C Large, B2C Small by rate, credit and debit notes, nil-rated sales and the HSN summary.
-- **GSTR-3B:** outward supplies and tax, input tax credit, and what is left to pay.
-
-The tax figures are the amounts posted on Tally's GST ledgers. Bahi doesn't file anything.
-
-**GSTR-3B comes from Tally's own report.** After each sync the Tally PC reads Tally's GSTR-3B for the month, and the screen shows Tally's figures. If your Tally doesn't allow this, open GSTR-3B in Tally, press Alt+F5 (Detailed) so the lines 3.1a to 3.1e and 4(A) 1 to 5 show, then press Alt+E, choose XML (Data Interchange), and upload the file on that month's 3B screen. Without Tally's report, Bahi works the figures out from the vouchers, as below.
-
-How GSTR-3B is worked out:
-- **Reverse charge:** purchases under reverse charge, including those from unregistered dealers (URD), go in 3.1(d) for the tax payable and 4(A)(3) for the matching credit. The usual TallyPrime way is picked up: the purchase without GST, a Stat Adjustment journal (Alt+J) for Increase of Tax Liability with Purchase Under Reverse Charge, a second one for Increase of Input Tax Credit, and a Stat Payment. A journal that uses your RCM ledger (such as Tax Paid on RCM) counts as reverse charge. Bahi goes by Tally's own reverse-charge marks on the voucher or on the GST adjustment journal. If a reverse-charge purchase has no GST posted yet, the screen says so. Tally adds that tax when you record the reverse-charge journal (Journal, Stat Adjustment).
-- **Set-off:** done the way the GST portal does it. IGST credit is used first, on IGST, then on CGST and SGST. Then CGST credit is used on CGST and then IGST, and SGST credit on SGST and then IGST. Reverse-charge tax is always paid in cash.
-- **Credit brought forward:** a debit balance on your GST ledgers in Tally at the start of the month counts as earlier unused credit.
-- **Results:** the screen shows the **Cash to pay** and the **Credit carried forward** for each head. It also shows your GST ledger balances in Tally (Dr or Cr) at the start and end of the month, so you can match them.
 
 ## Compare periods
 

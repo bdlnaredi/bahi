@@ -47,7 +47,6 @@ To reach Bahi away from home, use Cloudflare Tunnel or Tailscale. The **[install
 - **Reports:**
   - Balance Sheet and Profit & Loss in Tally's own layout;
   - Day Book;
-  - GST summary (output tax, input credit and net payable by month);
   - group summary;
   - cash and bank book.
 - **Bank reconciliation:** upload a bank statement (Excel or CSV) to see what matches, what the bank hasn't shown yet, and what's missing in Tally.
