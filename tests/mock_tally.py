@@ -133,7 +133,8 @@ def make_vouchers():
                        "ledgers": [("Freight Inward", 5000.0), ("Sharma Transport", -5000.0)], "narration": "Freight, GTA under RCM"})
             vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RJ{d.month}", "party": "Tax Paid on RCM",
                        "ledgers": [("Tax Paid on RCM", 250.0), ("Output CGST", -125.0), ("Output SGST", -125.0)],
-                       "narration": "GST on freight", "stat": ("Increase of Tax Liability", "Purchase Under Reverse Charge")})
+                       "narration": "GST on freight", "stat": ("Increase of Tax Liability", "Purchase Under Reverse Charge"),
+                       "gstl": {"Output CGST": (-5000.0, 2.5), "Output SGST": (-5000.0, 2.5)}})
             vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RI{d.month}", "party": "Input CGST",
                        "ledgers": [("Input CGST", 125.0), ("Input SGST", 125.0), ("Tax Paid on RCM", -250.0)],
                        "narration": "Input credit on freight", "stat": ("Increase of Input Tax Credit", "")})

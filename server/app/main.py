@@ -39,6 +39,7 @@ import activity
 import cheques
 import stockcount
 import gstr1
+import gstr3b
 import insights  # noqa: E402
 import gstr  # noqa: E402
 import quotes  # noqa: E402
@@ -54,7 +55,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.32.0"
+APP_VERSION = "3.33.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -296,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
                 "duedates": "dues", "reminders": "dues", "compare": "accounts",
                 "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
                 "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts",
-                "einvoice": "accounts", "gstr_one": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
+                "einvoice": "accounts", "gstr_one": "accounts", "gstr_three": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -1195,6 +1196,20 @@ document.getElementById("a").addEventListener("change", function () {{
             except ValueError as e:
                 return self.send_json({"error": str(e)}, 400)
 
+        mp = re.match(r"^/api/c/(\d+)/gstr_three_tally/(\d{4}-\d{2})(/delete)?$", path)
+        if mp and method == "POST":             # Tally's GSTR-3B export, to compare with
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "gstr_three", q, None):
+                return self.send_json({"error": "You don't have access to this."}, 403)
+            try:
+                if mp.group(3):
+                    return self.send_json(gstr3b.tally_remove(cid, mp.group(2)))
+                if int(self.headers.get("Content-Length") or 0) > 40 * 1024 * 1024:
+                    return self.send_json({"error": "The file is too big. Export GSTR-3B for one month only."}, 400)
+                return self.send_json(gstr3b.tally_save(cid, mp.group(2), self.body(40 * 1024 * 1024)))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+
         mp = re.match(r"^/api/c/(\d+)/cheques(?:/(\d+)/(status))?$", path)
         if mp and method == "POST":             # post-dated cheques written down in Bahi (not in Tally)
             cid = int(mp.group(1))
@@ -1388,6 +1403,11 @@ document.getElementById("a").addEventListener("change", function () {{
             if not re.match(r"^\d{4}-\d{2}$", m):
                 return ({"error": "Choose a month."}, 400)
             return gstr1.with_tally(cid, m)
+        if what == "gstr_three":
+            m = q.get("month", "") or time.strftime("%Y-%m")
+            if not re.match(r"^\d{4}-\d{2}$", m):
+                return ({"error": "Choose a month."}, 400)
+            return gstr3b.with_tally(cid, m)
         if what == "einvoice":
             m = q.get("month", "") or time.strftime("%Y-%m")
             if not re.match(r"^\d{4}-\d{2}$", m):

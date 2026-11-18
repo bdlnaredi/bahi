@@ -2,6 +2,13 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.33.0 (18 November 2026)
+
+- **GSTR-3B, rebuilt from scratch** (Reports, GSTR-3B), table by table as in Tally. Tables 3.1 and 3.2 first; the ITC tables come next.
+  - **3.1(a) to (e):** outward taxable, zero rated, nil rated and exempted, and non-GST supplies, taken from the GSTR-1 tables of the month. Reverse charge inward supplies (d) come from the Stat Adjustment journals in Tally that raise the tax liability.
+  - **3.2:** inter-state supplies to unregistered persons, composition dealers and UIN holders, by place of supply.
+  - **Checks:** a ✓ when 3.1's tax agrees with GSTR-1's sales tables. Upload Tally's GSTR-3B export (XML) to see ✓ or ✗ on each row against Tally.
+
 ## 3.32.0 (18 November 2026)
 
 - **GSTR-2B matching removed** (Reports): the screen, its upload and its files in new backups. Older backups that have GSTR-2B files still restore; those files are skipped.

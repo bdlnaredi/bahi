@@ -822,6 +822,70 @@ async function vGstr1(month) {
   if ($("#g1del")) $("#g1del").onclick = async () => { await api(cpath(`gstr_one_tally/${month}/delete`), { method: "POST", body: "{}" }); route(); };
 }
 
+/* ---------------------------------------------------------------- GSTR-3B (table 3.1 and 3.2 for now) */
+async function vGstr3b(month) {
+  setTitle(true);
+  if (!month) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); month = d.toISOString().slice(0, 7); }
+  const d = await api(cpath("gstr_three", { month }));
+  const H = ["IGST", "CGST", "SGST", "Cess"], R = d.t31, T = d.tally;
+  const money = (v) => rupees(v || 0);
+  const line = (k, v, cls = "") => `<div class="g3r ${cls}"><span>${k}</span><span>${v}</span></div>`;
+  const figs = (x, heads = H) => `${line("Taxable value", money(x.taxable))}${heads.filter((h) => h !== "Cess" || Math.abs(x[h] || 0) > 0.004).map((h) => line(h === "SGST" ? "SGST / UTGST" : h, money(x[h]))).join("")}`;
+  const badge = (x) => !x.vs_tally ? "" : x.vs_tally.ok ? '<span class="g1ok">✓ matches Tally</span>'
+    : `<span class="g1bad">✗ differs from Tally: ${x.vs_tally.diffs.map((f) => `${f} ${rupees(x.vs_tally[f] || 0)}`).join(", ")}</span>`;
+  const table = (rows, cols) => rows.length ? `<div class="tscroll"><table class="gt g1t"><tr>${cols.map(([, lab]) => `<th>${lab}</th>`).join("")}</tr>
+    ${rows.map((r) => `<tr>${cols.map(([k, , f]) => `<td>${f ? f(r[k], r) : h(String(r[k] ?? ""))}</td>`).join("")}</tr>`).join("")}</table></div>` : "";
+  const sec = (key, title, x, body, meta) => {
+    const empty = !Math.abs(x.taxable || 0) && !H.some((h) => Math.abs(x[h] || 0) > 0.004);
+    return `<section class="page gsec g1 ${empty ? "g1empty" : ""}"><button class="row" data-open="${key}" aria-expanded="false" ${empty && !body ? "disabled" : ""}>
+      <div class="main"><div class="name">${title}</div>
+      <div class="meta">${empty ? "Nothing this month" : meta || `Taxable ${money(x.taxable)}${x.tax ? ` · tax ${money(x.tax)}` : ""}`}</div>${badge(x)}</div>${empty && !body ? "" : '<span class="chev"></span>'}</button>
+      <div id="g_${key}" hidden><div class="g3" style="padding:0 16px 8px">${figs(x, x.heads || H)}</div>${body || ""}</div></section>`;
+  };
+  const partsOf = (x) => x.parts.length ? `<div class="setgroup" style="margin:4px 16px">Made up of</div>${table(x.parts, [["label", "From GSTR-1"], ["taxable", "Taxable", money], ["IGST", "IGST", money], ["CGST", "CGST", money], ["SGST", "SGST", money]])}
+    <p class="hint" style="margin:4px 16px 10px"><a href="#/gstr1/${month}">Open GSTR-1 for ${monthName(month)}</a> to see the invoices.</p>` : "";
+  const jrow = (r) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.nature || r.vtype)}</div>
+    <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}${r.party ? " · " + h(r.party) : ""}</div><div class="meta">Taxable ${money(r.taxable)}</div></div>
+    <div class="end"><b>${money(r.tax)}</b><div class="meta">${H.filter((x) => Math.abs(r[x]) > 0.004).map((x) => `${x} ${money(r[x])}`).join("<br>")}</div></div></a>`;
+  const t32 = (k) => { const x = d.t32[k]; return sec("32" + k, x.label, { ...x, heads: ["IGST"] },
+    table(x.rows, [["pos", "Place of supply"], ["taxable", "Taxable", money], ["IGST", "IGST", money]]), x.rows.length ? `Taxable ${money(x.taxable)} · IGST ${money(x.IGST)} · ${x.rows.length} state${x.rows.length === 1 ? "" : "s"}` : ""); };
+  const liab = H.reduce((a, x) => a + (R.a[x] || 0) + (R.b[x] || 0) + (R.d[x] || 0), 0);
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-3B</h1>
+    <div class="monthnav"><button class="btn ic" id="mprev" aria-label="Previous month">‹</button><b>${monthName(month)}</b><button class="btn ic" id="mnext" aria-label="Next month">›</button></div>
+    <section class="herocards">
+      <div class="bold nil"><div class="label">3.1 Supplies</div><div class="big">${short(d.total31.taxable)}</div><div class="go">taxable value, (a) to (e)</div></div>
+      <div class="bold out"><div class="label">Tax payable in 3.1</div><div class="big">${short(liab)}</div><div class="go">${H.filter((x) => d.total31[x]).map((x) => `${x} ${short(d.total31[x])}`).join(" · ") || "no tax"}</div></div></section>
+    ${T ? `<p class="hint" style="margin:0 4px 10px">Compared with Tally's GSTR-3B uploaded ${new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}. Each row shows ✓ when its taxable value and tax agree with Tally's.${T.detailed ? "" : " That file has only the 3.1 total: in Tally open 3.1 in detail (Alt+F5) before exporting, to compare each row."}</p>` : ""}
+    <div class="setgroup">3.1 Tax on outward and reverse charge inward supplies</div>
+    <p class="hint" style="margin:0 4px 8px">${d.vs_gstr1.ok ? '<span class="g1ok">✓ tax agrees with GSTR-1</span>' : `<span class="g1bad">✗ tax differs from GSTR-1: ${H.filter((x) => d.vs_gstr1[x]).map((x) => `${x} ${money(d.vs_gstr1[x])}`).join(", ")}</span>`} (3.1(a) and (b), less advances, against the sales tables of <a href="#/gstr1/${month}">GSTR-1</a>)${d.total31.vs_tally ? ` · 3.1 in total: ${badge(d.total31)}` : ""}</p>
+    ${sec("a", "(a) " + R.a.label, R.a, partsOf(R.a))}
+    ${sec("b", "(b) " + R.b.label, R.b, partsOf(R.b))}
+    ${sec("c", "(c) " + R.c.label, R.c, partsOf(R.c), R.c.taxable ? `Value ${money(R.c.taxable)}` : "")}
+    ${sec("d", "(d) " + R.d.label, R.d, R.d.list.length ? `<div class="setgroup" style="margin:4px 16px">The tax liability journals in Tally</div>${R.d.list.map(jrow).join("")}` : "", R.d.count ? `Taxable ${money(R.d.taxable)} · tax ${money(R.d.tax)} · ${R.d.count} journal${R.d.count === 1 ? "" : "s"}` : "")}
+    ${sec("e", "(e) " + R.e.label, R.e, partsOf(R.e), R.e.taxable ? `Value ${money(R.e.taxable)}` : "")}
+    <div class="setgroup">3.2 Of the supplies in 3.1(a), inter-state supplies</div>
+    ${t32("unreg")}${t32("comp")}${t32("uin")}
+    <details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Compare with Tally again" : "Compare with Tally's GSTR-3B"}</b></summary>
+      <form class="form" id="g3f" style="padding:0 0 12px"><p class="hint" style="margin:0">In Tally open GSTR-3B for ${monthName(month)}, press Alt+F5 for the detailed view, then Alt+E, choose XML (Data Interchange), and upload the file here. Each row then shows whether it matches Tally.</p>
+      <input type="file" id="g3file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload and compare</button>${T ? ' <button class="btn" type="button" id="g3del">Remove Tally\'s file</button>' : ""}<p class="hint" id="g3msg"></p></form></details>
+    <p class="hint" style="margin:0 4px 14px">3.1(a), (b), (c), (e) and 3.2 come from the GSTR-1 tables of the month. 3.1(d) is the liability side of the Stat Adjustment journals in Tally (Increase of Tax Liability, for purchases under reverse charge or from unregistered dealers). 3.2 counts buyers by their registration type in Tally (Unregistered, Composition, UIN Holders). The ITC tables come next. Check, then file from Tally or the GST portal.</p>`;
+  view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); if (!x) return; x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+  $("#mprev").onclick = () => { location.hash = `#/gstr3b/${monthShift(month, -1)}`; };
+  $("#mnext").onclick = () => { location.hash = `#/gstr3b/${monthShift(month, 1)}`; };
+  $("#g3f").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = $("#g3file").files[0]; if (!file) return;
+    $("#g3msg").textContent = "Reading the file…";
+    try {
+      const r = await fetch(cpath(`gstr_three_tally/${month}`), { method: "POST", body: file, credentials: "same-origin" });
+      let j = {}; try { j = await r.json(); } catch (_) { j = { error: `The server didn't take the file (error ${r.status}). Try again, or send me the file.` }; }
+      if (!r.ok || j.error) throw new Error(j.error || "Couldn't read the file.");
+      route();
+    } catch (err) { $("#g3msg").textContent = err.message; }
+  };
+  if ($("#g3del")) $("#g3del").onclick = async () => { await api(cpath(`gstr_three_tally/${month}/delete`), { method: "POST", body: "{}" }); route(); };
+}
+
 /* ---------------------------------------------------------------- e-invoice and e-way bill status */
 async function vEinvoice(month) {
   setTitle(true);
@@ -1970,6 +2034,7 @@ function vReports() {
     ["#/statements", "Month-end statements", "Send every customer their statement on WhatsApp, one tap each", can("dues")],
     ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
     ["#/gstr1", "GSTR-1", "Sales return, table by table as in Tally and on the GST portal: B2B, B2C, notes, nil-rated, advances, HSN and documents", can("accounts")],
+    ["#/gstr3b", "GSTR-3B", "Monthly return, table by table as in Tally: 3.1 outward and reverse charge supplies, 3.2 inter-state supplies (ITC to follow)", can("accounts")],
     ["#/einvoice", "E-invoice and e-way bills", "Sales that seem to need an e-invoice or e-way bill but have none", can("accounts")],
     ["#/tds", "TDS and TCS", "Deducted each month by section and party, paid, and due dates", can("accounts")],
     ["#/cheques", "Cheque register", "Post-dated and uncleared cheques, received and issued, with reminders", can("accounts")],
@@ -3436,6 +3501,7 @@ async function route() {
       case "duedates": await vDueDates(parts[1]); break;
       case "reorder": await vReorder(); break;
       case "cashflow": await vCashflow(); break;
+      case "gstr3b": await vGstr3b(parts[1]); break;
       case "gstr1": await vGstr1(parts[1]); break;
       case "einvoice": await vEinvoice(parts[1]); break;
       case "yearend": await vYearEnd(); break;

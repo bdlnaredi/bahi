@@ -542,6 +542,18 @@ Tap a table to see its invoices or rows.
 
 **Compare with Tally:** in Tally open GSTR-1 for the month, press Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the GSTR-1 screen. Each table then shows ✓ when its vouchers, taxable value and tax agree with Tally's, or ✗ with the figure Tally has.
 
+## GSTR-3B
+
+**Reports, GSTR-3B** shows a month's GSTR-3B, table by table as Tally has it. Tables 3.1 and 3.2 are ready; the ITC tables come next.
+
+- **3.1(a) Outward taxable supplies:** from the GSTR-1 tables: B2B (taxable sales, not SEZ), B2C (Large), B2C (Small), credit and debit notes, and tax on advances (11A less 11B).
+- **3.1(b) Zero rated:** exports and supplies to SEZ.
+- **3.1(c) Nil rated and exempted** and **3.1(e) Non-GST:** from GSTR-1 table 8.
+- **3.1(d) Inward supplies liable to reverse charge:** the liability side of the Stat Adjustment journals in Tally (Increase of Tax Liability, for purchases under reverse charge or from unregistered dealers). Tap it to see the journals.
+- **3.2 Inter-state supplies** to unregistered persons, composition dealers and UIN holders, by place of supply, from the buyer's registration type in Tally.
+
+**Checks:** a line at the top shows ✓ when the tax in 3.1(a) and (b) agrees with GSTR-1's sales tables. To compare with Tally, open GSTR-3B for the month in Tally, press Alt+F5 for the detailed view, then Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the screen. Each row then shows ✓ or ✗ with Tally's figure.
+
 ## E-invoice and e-way bills
 
 **Reports, E-invoice and e-way bills** lists the month's sales that seem to need one but have none in Tally.

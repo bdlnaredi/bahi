@@ -242,7 +242,8 @@ def build(cid, month):
             split = _split(a, a["by_rate"], a["heads"])
             row = {"id": a["id"], "date": a["date"], "vtype": a["vtype"], "number": a["number"], "party": a["party"], "gstin": a["gstin"],
                    "pos": a["pos"], "value": a["value"], "taxable": round(taxable, 2), **{h: round(a["heads"][h], 2) for h in HEADS},
-                   "rates": [{"rate": r, "taxable": round(x_, 2)} for r, x_ in sorted(a["by_rate"].items())], "rcm": a["rcm"]}
+                   "rates": [{"rate": r, "taxable": round(x_, 2)} for r, x_ in sorted(a["by_rate"].items())], "rcm": a["rcm"],
+                   "reg_type": a["reg_type"]}
             nsum = sum(a["nil"].values())
             note = base != "Sales"
             nsign = -1 if base == "Credit Note" else 1

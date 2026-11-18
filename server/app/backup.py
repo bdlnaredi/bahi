@@ -22,7 +22,7 @@ DBS = ["tally.db", "entries.db"]          # copied with sqlite's own backup, saf
 NAME = re.compile(r"^bahi-\d{4}-\d{2}-\d{2}(-before-restore-\d{6})?\.zip$")
 BANKREC = re.compile(r"^bankrec/[0-9a-f]{16}\.json$")
 FOLDERS = {"bankrec": BANKREC, "photos": re.compile(r"^photos/[0-9a-f]{32}\.jpg$"),
-           "gstr1tally": re.compile(r"^gstr1tally/\d+\.json$")}
+           "gstr1tally": re.compile(r"^gstr1tally/\d+\.json$"), "gstr3btally": re.compile(r"^gstr3btally/\d+\.json$")}
 OLD = re.compile(r"^(tally3b|gstr2b)/")   # in older backups (GSTR-3B and GSTR-2B, since removed): accepted, not restored
 _lock = threading.Lock()
 
