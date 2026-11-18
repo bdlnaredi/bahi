@@ -46,7 +46,7 @@ def describe(path, data, companies):
             return f"Marked a quotation {d.get('status', '')}", co
         return "Saved a quotation" + (f" for {party}" if party else "") , co
     simple = {"followup": f"Noted a follow-up for {party}", "barcodes": "Changed item barcodes",
-              "stock_min": "Changed minimum stock levels", "brs": "Worked on bank reconciliation", "gstr_twob": "Uploaded a GSTR-2B file"}
+              "stock_min": "Changed minimum stock levels", "brs": "Worked on bank reconciliation"}
     if rest == "entry_photo":
         return None                              # the entry it belongs to is logged
     if rest.startswith("gstr_one_tally/"):
@@ -61,8 +61,6 @@ def describe(path, data, companies):
         if rest.endswith("/status"):
             return f"Stock count: {'finished' if d.get('status') == 'done' else d.get('status', '')}", co
         return None                              # each item counted isn't worth a line
-    if rest.startswith("gstr_twob/"):
-        return "Removed a GSTR-2B file", co
     if rest in simple:
         return simple[rest], co
     top = {"/api/statement_sent": f"Sent month-end statement to {party}", "/api/reminded": f"Sent payment reminder to {party}",

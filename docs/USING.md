@@ -542,19 +542,6 @@ Tap a table to see its invoices or rows.
 
 **Compare with Tally:** in Tally open GSTR-1 for the month, press Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the GSTR-1 screen. Each table then shows ✓ when its vouchers, taxable value and tax agree with Tally's, or ✗ with the figure Tally has.
 
-## GSTR-2B matching
-
-1. On the GST portal, open **Returns, GSTR-2B**, choose the month and tap **Download JSON**.
-2. In Bahi, open **Reports, GSTR-2B matching** and upload that file (the zip works too).
-
-Bahi matches each supplier bill with your purchase bills in Tally using the supplier's GSTIN and bill number (the Supplier Invoice No. in Tally). It shows:
-- **Matched:** the bill and its tax agree.
-- **Tax differs:** the tax in Tally isn't what the supplier filed.
-- **In 2B, not in Tally:** enter the bill in Tally, or check its number.
-- **In Tally, not in 2B:** the supplier hasn't filed it yet. Ask them, because that credit is at risk.
-
-The files are kept by Bahi month by month and included in backups. Nothing goes into Tally.
-
 ## E-invoice and e-way bills
 
 **Reports, E-invoice and e-way bills** lists the month's sales that seem to need one but have none in Tally.

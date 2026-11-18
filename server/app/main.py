@@ -39,7 +39,6 @@ import activity
 import cheques
 import stockcount
 import gstr1
-import gstr2b
 import insights  # noqa: E402
 import gstr  # noqa: E402
 import quotes  # noqa: E402
@@ -55,7 +54,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.31.1"
+APP_VERSION = "3.32.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -296,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
                 "a_items": "accounts", "a_years": "accounts", "a_slow": "accounts", "brs": "accounts", "voucher_ids": "vouchers",
                 "duedates": "dues", "reminders": "dues", "compare": "accounts",
                 "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
-                "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts", "gstr_twob": "accounts",
+                "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts",
                 "einvoice": "accounts", "gstr_one": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
         if what == "export":
             w = q.get("what", "")
@@ -1226,19 +1225,6 @@ document.getElementById("a").addEventListener("change", function () {{
             except (TypeError, ValueError) as e:
                 return self.send_json({"error": str(e) if isinstance(e, ValueError) and str(e)[:1].isupper() else "Check the quantity."}, 400)
 
-        mp = re.match(r"^/api/c/(\d+)/gstr_twob(?:/(\d{4}-\d{2})/delete)?$", path)
-        if mp and method == "POST":             # GSTR-2B file from the GST portal (kept beside Tally, never in it)
-            cid = int(mp.group(1))
-            if not self.allowed(cid, "gstr_twob", q, None):
-                return self.send_json({"error": "You don't have access to this."}, 403)
-            if mp.group(2):
-                return self.send_json(gstr2b.remove(cid, mp.group(2)))
-            try:
-                period = gstr2b.upload(cid, self.body(40 * 1024 * 1024), unquote(self.headers.get("X-Filename") or ""))
-            except ValueError as e:
-                return self.send_json({"error": str(e)}, 400)
-            return self.send_json(gstr2b.match(cid, period))
-
         mp = re.match(r"^/api/c/(\d+)/quotes(?:/(\d+)(?:/(status|delete))?)?$", path)
         if mp and method == "POST":
             cid = int(mp.group(1))
@@ -1397,12 +1383,6 @@ document.getElementById("a").addEventListener("change", function () {{
                 return ({"error": str(e)}, 404)
         if what == "yearend":
             return insights.yearend(cid)
-        if what == "gstr_twob":
-            p = q.get("period", "")
-            if not re.match(r"^\d{4}-\d{2}$", p):
-                ps = gstr2b.periods(cid)
-                p = ps[0]["period"] if ps else time.strftime("%Y-%m")
-            return gstr2b.match(cid, p)
         if what == "gstr_one":
             m = q.get("month", "") or time.strftime("%Y-%m")
             if not re.match(r"^\d{4}-\d{2}$", m):

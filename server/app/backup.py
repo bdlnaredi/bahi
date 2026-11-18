@@ -21,9 +21,9 @@ EXTRA = ["telegram.json", "followups.json", "app_password.json", "users.json", "
 DBS = ["tally.db", "entries.db"]          # copied with sqlite's own backup, safe while the app is running
 NAME = re.compile(r"^bahi-\d{4}-\d{2}-\d{2}(-before-restore-\d{6})?\.zip$")
 BANKREC = re.compile(r"^bankrec/[0-9a-f]{16}\.json$")
-FOLDERS = {"bankrec": BANKREC, "gstr2b": re.compile(r"^gstr2b/\d+\.json$"), "photos": re.compile(r"^photos/[0-9a-f]{32}\.jpg$"),
+FOLDERS = {"bankrec": BANKREC, "photos": re.compile(r"^photos/[0-9a-f]{32}\.jpg$"),
            "gstr1tally": re.compile(r"^gstr1tally/\d+\.json$")}
-OLD = re.compile(r"^tally3b/")     # in backups from 3.28-3.29 (GSTR-3B, since removed): accepted, not restored
+OLD = re.compile(r"^(tally3b|gstr2b)/")   # in older backups (GSTR-3B and GSTR-2B, since removed): accepted, not restored
 _lock = threading.Lock()
 
 

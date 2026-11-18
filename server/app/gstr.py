@@ -1,6 +1,6 @@
-"""GST helpers for GSTR-2B matching and the e-invoice / e-way bill check: which ledgers are GST ledgers and
-their side (input or output), and a month's dates. (GSTR-1, GSTR-3B and the GST summary were removed, to be
-built again from scratch.)"""
+"""GST helpers for GSTR-1 and the e-invoice / e-way bill check: which ledgers are GST ledgers and
+their side (input or output), and a month's dates. (GSTR-3B and the GST summary were removed, to be built again from
+scratch; GSTR-2B matching was removed.)"""
 import json
 import re
 from datetime import date

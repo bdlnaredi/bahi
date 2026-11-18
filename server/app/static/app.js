@@ -822,57 +822,6 @@ async function vGstr1(month) {
   if ($("#g1del")) $("#g1del").onclick = async () => { await api(cpath(`gstr_one_tally/${month}/delete`), { method: "POST", body: "{}" }); route(); };
 }
 
-/* ---------------------------------------------------------------- GSTR-2B matching */
-async function vTwoB(period) {
-  setTitle(true);
-  const d = await api(cpath("gstr_twob", period ? { period } : {}));
-  const tax = (x) => (x.IGST || 0) + (x.CGST || 0) + (x.SGST || 0) + (x.Cess || 0);
-  const head = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-2B matching</h1>
-    ${d.periods.length ? `<div class="seg" role="tablist" style="overflow-x:auto">${d.periods.slice(0, 6).map((p) => `<button data-p="${p.period}" aria-selected="${p.period === d.period}">${monthName(p.period).replace(/ (\d{4})$/, " ’$1").replace("’20", "’")}</button>`).join("")}</div>` : ""}`;
-  const upload = `<section class="page g3"><div class="g3h"><b>${d.have ? "Upload another month" : "Upload your GSTR-2B"}</b><span>On the GST portal: Returns, GSTR-2B, choose the month, Download JSON. Upload that file (or the zip) here.</span></div>
-    <form class="form" id="tbf" style="padding:8px 0 4px"><input type="file" id="tbfile" accept=".json,.zip,application/json,application/zip" required>
-    <button class="btn primary" type="submit">Upload and match</button><p class="hint" id="tbmsg"></p></form></section>`;
-  if (!d.have) {
-    view.innerHTML = head + upload + `<p class="hint" style="margin:0 4px 14px">Bahi matches each supplier bill in GSTR-2B with your purchase bills in Tally by the supplier's GSTIN and bill number, and compares the tax. The file stays with Bahi; nothing goes into Tally.</p>`;
-  } else {
-    const T = d.totals;
-    const row = (x, extra = "") => `<div class="row"><div class="main"><div class="name">${h(x.supplier || x.party || x.gstin)}</div>
-      <div class="meta">${h(x.kind || x.vtype || "")} ${h(x.number || x.ref)}${x.date ? ", " + fdate(x.date) : ""}${x.gstin ? " · " + h(x.gstin) : ""}</div>${extra}</div>
-      <div class="end"><b>${rupees(Math.abs(x.tax ?? tax(x)))}</b><div class="meta">tax</div></div></div>`;
-    const sec = (k, title, sub, rows, cls = "") => `<section class="page gsec"><button class="row" data-open="${k}" aria-expanded="false"><div class="main"><div class="name ${cls}">${title} <span class="cnt2">${rows.length}</span></div><div class="meta">${sub}</div></div><span class="chev"></span></button>
-      <div id="tb_${k}" hidden>${rows.join("") || '<div class="empty">None.</div>'}</div></section>`;
-    view.innerHTML = head + `<p class="subtitle">${d.count} supplier documents in GSTR-2B for ${monthName(d.period)}</p>
-      <section class="herocards">
-        <div class="bold in"><div class="label">Matched with Tally</div><div class="big">${short(T.matched)}</div><div class="go">${d.matched.length} bills, tax agrees</div></div>
-        <div class="bold ${d.not_in.length ? "out" : "nil"}"><div class="label">Credit at risk</div><div class="big">${short(T.at_risk)}</div><div class="go">${d.not_in.length} bill${d.not_in.length === 1 ? "" : "s"} in Tally, not in 2B</div></div></section>
-      ${sec("differ", "Tax differs", "In both, but the tax in Tally isn't what the supplier filed", d.differ.map((r) => row({ ...r.doc, tax: r.tax_2b },
-        `<div class="meta od">Tally ${rupees(Math.abs(r.tax_tally))} (${h(r.tally.vtype)} ${h(r.tally.ref || r.tally.number)}, ${fdate(r.tally.date)}), difference ${rupees(Math.abs(r.diff))}</div>`)), d.differ.length ? "od" : "")}
-      ${sec("missing", "In 2B, not in Tally", "The supplier filed it: enter the bill in Tally, or check the bill number", d.missing.map((x) => row(x, x.itc ? "" : '<div class="meta od">ITC not available</div>')))}
-      ${sec("not_in", "In Tally, not in 2B", "The supplier hasn't filed it yet: ask them, or the credit can't be taken", d.not_in.map((v) => row(v, `<a class="meta" href="#/voucher/${v.id}">Open the bill</a>`)), d.not_in.length ? "od" : "")}
-      ${d.no_gstin.length ? sec("nogstin", "Bills with GST but no supplier GSTIN", "Add the GSTIN on the supplier's ledger in Tally to match them", d.no_gstin.map((v) => row(v, `<a class="meta" href="#/voucher/${v.id}">Open the bill</a>`))) : ""}
-      ${sec("matched", "Matched", "Same bill, same tax", d.matched.map((r) => row({ ...r.doc, tax: r.tax_2b })))}
-      <p class="hint" style="margin:0 4px 10px">Uploaded ${new Date(d.uploaded * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}${d.file ? ` from ${h(d.file)}` : ""}. <button class="linkbtn" id="tbdel">Remove this month's file</button></p>
-      ${upload}<p class="hint" style="margin:0 4px 14px">Matched on the supplier's GSTIN and their bill number (the Supplier Invoice No. in Tally; the voucher number when that's empty), looking at Tally bills from six months before to a month after. Tax agrees within ₹1.</p>`;
-    view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#tb_" + b.dataset.open); x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
-    $("#tbdel").onclick = async () => {
-      if (!confirm(`Remove the GSTR-2B file for ${monthName(d.period)}?`)) return;
-      await api(cpath(`gstr_twob/${d.period}/delete`), { method: "POST", body: "{}" }); location.hash = "#/twob";
-    };
-  }
-  view.querySelectorAll("[data-p]").forEach((b) => b.onclick = () => { location.hash = "#/twob/" + b.dataset.p; });
-  $("#tbf").onsubmit = async (e) => {
-    e.preventDefault();
-    const file = $("#tbfile").files[0]; if (!file) return;
-    $("#tbmsg").textContent = "Reading the file…";
-    try {
-      const r = await fetch(cpath("gstr_twob"), { method: "POST", headers: { "X-Filename": encodeURIComponent(file.name) }, body: file });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
-      location.hash = "#/twob/" + j.period; if (period === j.period) route();
-    } catch (err) { $("#tbmsg").textContent = err.message; }
-  };
-}
-
 /* ---------------------------------------------------------------- e-invoice and e-way bill status */
 async function vEinvoice(month) {
   setTitle(true);
@@ -2021,7 +1970,6 @@ function vReports() {
     ["#/statements", "Month-end statements", "Send every customer their statement on WhatsApp, one tap each", can("dues")],
     ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
     ["#/gstr1", "GSTR-1", "Sales return, table by table as in Tally and on the GST portal: B2B, B2C, notes, nil-rated, advances, HSN and documents", can("accounts")],
-    ["#/twob", "GSTR-2B matching", "Upload the GSTR-2B from the GST portal and match it with your purchase bills", can("accounts")],
     ["#/einvoice", "E-invoice and e-way bills", "Sales that seem to need an e-invoice or e-way bill but have none", can("accounts")],
     ["#/tds", "TDS and TCS", "Deducted each month by section and party, paid, and due dates", can("accounts")],
     ["#/cheques", "Cheque register", "Post-dated and uncleared cheques, received and issued, with reminders", can("accounts")],
@@ -3488,7 +3436,6 @@ async function route() {
       case "duedates": await vDueDates(parts[1]); break;
       case "reorder": await vReorder(); break;
       case "cashflow": await vCashflow(); break;
-      case "twob": await vTwoB(parts[1]); break;
       case "gstr1": await vGstr1(parts[1]); break;
       case "einvoice": await vEinvoice(parts[1]); break;
       case "yearend": await vYearEnd(); break;
