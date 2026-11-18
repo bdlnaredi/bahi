@@ -2,6 +2,24 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.31.0 (18 November 2026)
+
+- **GSTR-1, rebuilt from scratch** (Reports, GSTR-1): every table, in the order and with the rows of Tally's GSTR-1:
+  - **B2B (4A, 4B, 4C, 6B, 6C):** with taxable sales and reverse-charge supplies.
+  - **B2C:** B2C (Large) (5A, 5B) and B2C (Small) by place of supply and rate (7).
+  - **Exports (6A).**
+  - **Credit and debit notes (9B):** registered and unregistered.
+  - **Nil rated, exempt and non-GST (8A to 8D).**
+  - **Advances:** tax on advances received (11A) and advances adjusted (11B).
+  - **Summaries:** HSN summary (12, B2B and B2C) and the document summary (13: series, from–to, total, cancelled).
+  - **Amendment tables:** shown, and empty, because amendments are made with fresh vouchers and notes in Tally.
+- **How the figures are worked out:** tax is the amount on Tally's GST ledgers. The taxable value per rate is Tally's own assessable value on the GST lines where it is there, otherwise the stock lines at their GST rate.
+  - **Registered buyers:** the buyer's GSTIN and Tally's registration type decide this.
+  - **Inter-state:** IGST on the voucher or the place of supply decides this.
+- **Check every figure:** each table opens to its invoices or rows.
+- **Compare with Tally:** upload Tally's GSTR-1 export (Alt+E, XML), and every table shows ✓ or ✗ against Tally's vouchers, taxable value and tax.
+- The Tally PC reads all vouchers again once, to pick up what GSTR-1 needs: the buyer's registration type, the Stat Adjustment nature for advances, each item's taxability, and the GST lines' assessable value.
+
 ## 3.30.1 (18 November 2026)
 
 - **Bahi Sync on Windows: windows fit the screen.**

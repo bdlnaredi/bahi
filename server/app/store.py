@@ -135,7 +135,7 @@ def company_id(c, name):
     return c.execute("INSERT INTO company(name) VALUES(?)", (name,)).lastrowid
 
 
-ONCE = ("items_once", "bills_once", "rcm_once", "cheq_once", "vchx_once", "gross_once")      # see plan(): one full re-read of the vouchers after each such fix
+ONCE = ("items_once", "bills_once", "rcm_once", "cheq_once", "vchx_once", "gross_once", "gst1_once")      # see plan(): one full re-read of the vouchers after each such fix
 
 
 # A sync in progress on the Tally PC (kept in memory: only for showing "syncing now" in the app)

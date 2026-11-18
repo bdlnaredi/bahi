@@ -750,6 +750,77 @@ async function vReorder() {
   view.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied."); } catch (e) { toast("Couldn't copy here."); } });
 }
 
+/* ---------------------------------------------------------------- GSTR-1 */
+async function vGstr1(month) {
+  setTitle(true);
+  if (!month) { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); month = d.toISOString().slice(0, 7); }
+  const d = await api(cpath("gstr_one", { month }));
+  const S1 = d.sections, H = ["IGST", "CGST", "SGST", "Cess"];
+  const amt = (v) => (v || v === 0) ? rupees(v) : "";
+  const figs = (x, withValue) => `${line("Taxable value", amt(x.taxable))}${H.filter((h) => Math.abs(x[h] || 0) > 0.004 || h !== "Cess").map((h) => line(h === "SGST" ? "SGST / UTGST" : h, amt(x[h]))).join("")}${withValue && x.value ? line("Invoice value", amt(x.value)) : ""}`;
+  const line = (k, v, cls = "") => `<div class="g3r ${cls}"><span>${k}</span><span>${v}</span></div>`;
+  const badge = (x) => !x.vs_tally ? "" : x.vs_tally.ok ? '<span class="g1ok">✓ matches Tally</span>'
+    : `<span class="g1bad">✗ differs from Tally: ${x.vs_tally.diffs.map((f) => f === "vouchers" ? `vouchers ${x.vs_tally.count}` : `${f} ${rupees(x.vs_tally[f] || 0)}`).join(", ")}</span>`;
+  const vrow = (r) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.party || r.vtype)}</div>
+    <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}${r.gstin ? " · " + h(r.gstin) : ""}${r.pos ? " · " + h(r.pos) : ""}${r.type ? (r.type === "C" ? " · credit note" : " · debit note") : ""}${r.rcm ? " · reverse charge" : ""}</div>
+    <div class="meta">${r.rates.map((x) => `${x.rate}%: ${rupees(x.taxable)}`).join(", ")}</div></div>
+    <div class="end"><b>${rupees(r.value)}</b><div class="meta">${H.filter((x) => Math.abs(r[x]) > 0.004).map((x) => `${x} ${rupees(r[x])}`).join("<br>")}</div></div></a>`;
+  const sec = (key, title, x, body, opts = {}) => {
+    const empty = !x.count && !Math.abs(x.taxable || 0) && !body;
+    return `<section class="page gsec g1 ${empty ? "g1empty" : ""}"><button class="row" data-open="${key}" aria-expanded="false" ${empty ? "disabled" : ""}>
+      <div class="main"><div class="name">${title}${x.count ? ` <span class="cnt2">${x.count}</span>` : ""}</div>
+      <div class="meta">${empty ? "Nothing this month" : opts.meta || `Taxable ${rupees(x.taxable || 0)}${x.tax ? ` · tax ${rupees(x.tax)}` : ""}`}</div>${badge(x)}</div>${empty ? "" : '<span class="chev"></span>'}</button>
+      <div id="g_${key}" hidden><div class="g3" style="padding:0 16px 8px">${opts.noFigs ? "" : figs(x, opts.value)}</div>${body || ""}</div></section>`;
+  };
+  const list = (x) => (x.list || []).map(vrow).join("");
+  const table = (rows, cols) => rows.length ? `<div class="tscroll"><table class="gt g1t"><tr>${cols.map(([, lab]) => `<th>${lab}</th>`).join("")}</tr>
+    ${rows.map((r) => `<tr>${cols.map(([k, , f]) => `<td>${f ? f(r[k], r) : h(String(r[k] ?? ""))}</td>`).join("")}</tr>`).join("")}</table></div>` : "";
+  const money = (v) => rupees(v || 0);
+  const amend = (key, title) => sec(key, title, S1[key], "", { noFigs: true });
+  const T = d.tally;
+  view.innerHTML = `<div class="crumbs"><a href="#/reports">Reports</a></div><h1 class="title">GSTR-1</h1>
+    <div class="monthnav"><button class="btn ic" id="mprev" aria-label="Previous month">‹</button><b>${monthName(month)}</b><button class="btn ic" id="mnext" aria-label="Next month">›</button></div>
+    <section class="herocards">
+      <div class="bold nil"><div class="label">Taxable outward supplies</div><div class="big">${short(d.tax_total.taxable)}</div><div class="go">B2B, B2C, exports, less credit notes</div></div>
+      <div class="bold out"><div class="label">Tax on them</div><div class="big">${short(H.reduce((a, x) => a + d.tax_total[x], 0))}</div><div class="go">${H.filter((x) => d.tax_total[x]).map((x) => `${x} ${short(d.tax_total[x])}`).join(" · ") || "no tax"}</div></div></section>
+    ${T ? `<p class="hint" style="margin:0 4px 10px">Compared with Tally's GSTR-1 uploaded ${new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}. Each table shows ✓ when its vouchers, taxable value and tax agree with Tally's.</p>` : ""}
+    ${sec("b2b", "B2B invoices: 4A, 4B, 4C, 6B, 6C", S1.b2b, `<div class="g3" style="padding:0 16px">${line("Taxable sales", money(S1.b2b_taxable.taxable))}${line("Reverse charge supplies", money(S1.b2b_rcm.taxable))}</div>${list(S1.b2b)}`, { value: true })}
+    ${sec("b2cl", "B2C (Large) invoices: 5A, 5B", S1.b2cl, list(S1.b2cl), { value: true })}
+    ${sec("exp", "Exports invoices: 6A", S1.exp, list(S1.exp), { value: true })}
+    ${sec("cdnr", "Credit / debit notes (registered): 9B", S1.cdnr, list(S1.cdnr), { value: true })}
+    ${sec("cdnur", "Credit / debit notes (unregistered): 9B", S1.cdnur, list(S1.cdnur), { value: true })}
+    ${amend("b2ba", "Amended B2B invoices: 9A")}${amend("b2cla", "Amended B2C (Large) invoices: 9A")}${amend("expa", "Amended exports invoices: 9A")}
+    ${amend("cdnra", "Amended credit / debit notes (registered): 9C")}${amend("cdnura", "Amended credit / debit notes (unregistered): 9C")}
+    ${sec("b2cs", "B2C (Small) invoices: 7", S1.b2cs, table(S1.b2cs.rows, [["pos", "Place of supply"], ["rate", "Rate", (v) => v + "%"], ["taxable", "Taxable", money], ["IGST", "IGST", money], ["CGST", "CGST", money], ["SGST", "SGST", money]]))}
+    ${sec("nil", "Nil rated, exempt and non-GST: 8A, 8B, 8C, 8D", S1.nil, table(S1.nil.rows, [["box", ""], ["label", "Supplies"], ["nil", "Nil rated", money], ["exempt", "Exempted", money], ["nongst", "Non-GST", money]]), { noFigs: true })}
+    ${amend("b2csa", "Amendment B2C (Small): 10")}
+    ${sec("at", "Tax liability (advances received): 11A(1), 11A(2)", S1.at, table(S1.at.rows, [["pos", "Place of supply"], ["rate", "Rate", (v) => v + "%"], ["taxable", "Advance", money], ["IGST", "IGST", money], ["CGST", "CGST", money], ["SGST", "SGST", money]]))}
+    ${sec("atadj", "Adjustment of advances: 11B(1), 11B(2)", S1.atadj, table(S1.atadj.rows, [["pos", "Place of supply"], ["rate", "Rate", (v) => v + "%"], ["taxable", "Advance adjusted", money], ["IGST", "IGST", money], ["CGST", "CGST", money], ["SGST", "SGST", money]]))}
+    ${amend("ata", "Amended tax liability (advances received): 11A")}${amend("atadja", "Amendment of adjusted advances: 11B")}
+    ${["b2b", "b2c"].map((k) => sec("hsn_" + k, `HSN summary: 12 (${k === "b2b" ? "B2B" : "B2C"} supplies)`, { count: S1.hsn[k].length, taxable: S1.hsn[k].reduce((a, r) => a + r.taxable, 0), tax: S1.hsn[k].reduce((a, r) => a + H.reduce((b, x) => b + r[x], 0), 0) },
+        table(S1.hsn[k], [["hsn", "HSN"], ["uqc", "UQC"], ["qty", "Qty", (v) => nfq.format(v)], ["rate", "Rate", (v) => v + "%"], ["taxable", "Taxable", money], ["IGST", "IGST", money], ["CGST", "CGST", money], ["SGST", "SGST", money]]), { noFigs: true })).join("")}
+    ${sec("doc", "Document summary: 13", { count: S1.doc.reduce((a, r) => a + r.total, 0), taxable: 0 }, table(S1.doc, [["kind", "Nature"], ["from", "From"], ["to", "To"], ["total", "Total"], ["cancelled", "Cancelled"], ["net", "Net issued"]]),
+      { noFigs: true, meta: `${S1.doc.reduce((a, r) => a + r.total, 0)} documents, ${S1.doc.reduce((a, r) => a + r.cancelled, 0)} cancelled, in ${S1.doc.length} series` })}
+    <details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Compare with Tally again" : "Compare with Tally's GSTR-1"}</b></summary>
+      <form class="form" id="g1f" style="padding:0 0 12px"><p class="hint" style="margin:0">In Tally open GSTR-1 for ${monthName(month)}, press Alt+E, choose XML (Data Interchange), and upload the file here. Each table then shows whether it matches Tally.</p>
+      <input type="file" id="g1file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload and compare</button>${T ? ' <button class="btn" type="button" id="g1del">Remove Tally\'s file</button>' : ""}<p class="hint" id="g1msg"></p></form></details>
+    <p class="hint" style="margin:0 4px 14px">Built from your sales vouchers in Tally: tax as posted on the GST ledgers; taxable value per rate as Tally's assessable value on the GST lines, or the stock lines at their GST rate. B2C (Large) is an inter-state invoice to an unregistered buyer over ₹1 lakh. Amendments come from fresh vouchers and notes entered in Tally, so these tables stay empty. Check, then file from Tally or the GST portal.</p>`;
+  view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); if (!x) return; x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
+  $("#mprev").onclick = () => { location.hash = `#/gstr1/${monthShift(month, -1)}`; };
+  $("#mnext").onclick = () => { location.hash = `#/gstr1/${monthShift(month, 1)}`; };
+  $("#g1f").onsubmit = async (e) => {
+    e.preventDefault();
+    const file = $("#g1file").files[0]; if (!file) return;
+    $("#g1msg").textContent = "Reading the file…";
+    try {
+      const r = await fetch(cpath(`gstr_one_tally/${month}`), { method: "POST", body: file });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || "Couldn't read the file.");
+      route();
+    } catch (err) { $("#g1msg").textContent = err.message; }
+  };
+  if ($("#g1del")) $("#g1del").onclick = async () => { await api(cpath(`gstr_one_tally/${month}/delete`), { method: "POST", body: "{}" }); route(); };
+}
+
 /* ---------------------------------------------------------------- GSTR-2B matching */
 async function vTwoB(period) {
   setTitle(true);
@@ -1948,6 +2019,7 @@ function vReports() {
     ["#/lost", "Customers who stopped buying", "Regular buyers who haven't bought for a while, to call back", can("dues")],
     ["#/statements", "Month-end statements", "Send every customer their statement on WhatsApp, one tap each", can("dues")],
     ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
+    ["#/gstr1", "GSTR-1", "Sales return, table by table as in Tally and on the GST portal: B2B, B2C, notes, nil-rated, advances, HSN and documents", can("accounts")],
     ["#/twob", "GSTR-2B matching", "Upload the GSTR-2B from the GST portal and match it with your purchase bills", can("accounts")],
     ["#/einvoice", "E-invoice and e-way bills", "Sales that seem to need an e-invoice or e-way bill but have none", can("accounts")],
     ["#/tds", "TDS and TCS", "Deducted each month by section and party, paid, and due dates", can("accounts")],
@@ -3416,6 +3488,7 @@ async function route() {
       case "reorder": await vReorder(); break;
       case "cashflow": await vCashflow(); break;
       case "twob": await vTwoB(parts[1]); break;
+      case "gstr1": await vGstr1(parts[1]); break;
       case "einvoice": await vEinvoice(parts[1]); break;
       case "yearend": await vYearEnd(); break;
       case "tds": await vTds(); break;

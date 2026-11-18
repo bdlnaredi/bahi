@@ -524,6 +524,24 @@ On Home, the owner taps **Set a monthly sales target**. The card then shows this
 
 In **Settings, Android app**, turn on **Payment notifications**. When a receipt comes in from Tally, your phone shows "₹… received from …". Tap it to open the receipt, which has a **Say thank you** WhatsApp button. The phone checks about every 15 minutes; Android may check less often to save battery.
 
+## GSTR-1
+
+**Reports, GSTR-1** shows a month's GSTR-1, built from your sales vouchers, table by table as Tally and the GST portal have it:
+- **Sales tables:** B2B (4A, 4B, 4C, 6B, 6C), B2C (Large) (5), exports (6A), and B2C (Small) by place of supply and rate (7).
+- **Notes and nil-rated:** credit and debit notes (9B), and nil rated, exempt and non-GST supplies (8A to 8D).
+- **Advances:** tax on advances received (11A) and advances adjusted (11B).
+- **Summaries:** the HSN summary (12) and the document summary (13).
+
+Tap a table to see its invoices or rows.
+
+**How it is worked out:**
+- **Tax** is the amount on Tally's GST ledgers in each voucher.
+- **Taxable value** is Tally's own assessable value on the GST lines where it is there, otherwise the stock lines at their GST rate.
+- **B2C (Large)** is an inter-state invoice to an unregistered buyer over ₹1 lakh.
+- **Amendment tables** stay empty: changes are made with fresh vouchers and credit or debit notes in Tally, not by altering the original invoice.
+
+**Compare with Tally:** in Tally open GSTR-1 for the month, press Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the GSTR-1 screen. Each table then shows ✓ when its vouchers, taxable value and tax agree with Tally's, or ✗ with the figure Tally has.
+
 ## GSTR-2B matching
 
 1. On the GST portal, open **Returns, GSTR-2B**, choose the month and tap **Download JSON**.

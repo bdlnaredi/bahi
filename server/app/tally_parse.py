@@ -489,6 +489,7 @@ def voucher_extra(v):
     x.update(einvoice_fields(v))
     if is_rcm(v):
         x["rcm"] = True
+    x.update(gst_fields(v))
     if yes(v, "ISPOSTDATED"):
         x["postdated"] = True
     ch = cheques_of(v)
@@ -511,6 +512,42 @@ def cheques_of(v):
                         "type": txt(b, "TRANSACTIONTYPE")[:30], "bank": txt(b, "BANKNAME")[:60],
                         "cleared": tdate(txt(b, "BANKERSDATE")), "amount": round(abs(amt), 2), "in": amt < 0})
     return out[:20]
+
+
+def gst_fields(v):
+    """What GSTR-1 needs that Tally keeps on the voucher: the buyer's registration type, the Stat Adjustment nature
+    and its details (advances), each stock line's taxability when it isn't Taxable (nil rated, exempt, non-GST),
+    and the assessable value and rate Tally put on each GST ledger line."""
+    x = {}
+    for tag, key in (("GSTREGISTRATIONTYPE", "gst_reg_type"), ("TAXADJUSTMENT", "tax_adj"), ("GSTADDITIONALDETAILS", "gst_addl"),
+                     ("GSTNATUREOFSUPPLY", "gst_nature"), ("PARTYGSTREGISTRATIONTYPE", "gst_reg_type")):
+        t = txt(v, tag)
+        if t and key not in x:
+            x[key] = t[:80]
+    tax = {}
+    for e in v.findall("ALLINVENTORYENTRIES.LIST") or v.findall("INVENTORYENTRIES.LIST"):
+        item = txt(e, "STOCKITEMNAME")
+        if not item:
+            continue
+        for el in e.iter():
+            t = el.tag if isinstance(el.tag, str) else ""
+            val = (el.text or "").strip()
+            if "TAXABILITY" in t and val and val.lower() != "taxable" and not val.startswith("\x04"):
+                tax[item] = val[:20]
+                break
+    if tax:
+        x["taxability"] = tax
+    lines = []
+    for e in v.findall("ALLLEDGERENTRIES.LIST") or v.findall("LEDGERENTRIES.LIST"):
+        rate, base = txt(e, "GSTTAXRATE"), txt(e, "GSTASSESSABLEVALUE")
+        if rate and base:
+            try:
+                lines.append([txt(e, "LEDGERNAME"), round(-num(base), 2), float(rate)])
+            except ValueError:
+                pass
+    if lines:
+        x["gst_lines"] = lines[:40]
+    return x
 
 
 _RCM_TEXT = re.compile(r"reverse\s*charge|\bRCM\b", re.I)

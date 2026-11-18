@@ -758,3 +758,10 @@ details.addq > summary { list-style: none; cursor: pointer; padding: 14px 0; } d
 .ephoto { max-width: 100%; max-height: 240px; border-radius: 12px; border: 1px solid var(--rule); object-fit: contain; }
 .ethumb { display: block; margin-top: 8px; width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid var(--rule); }
 .notally { border: 1.5px solid #f59e0b; }
+/* GSTR-1 */
+.g1 .row .main { min-width: 0; }
+.g1ok { display: inline-block; margin-top: 4px; font-size: .8rem; font-weight: 600; color: var(--good); }
+.g1bad { display: inline-block; margin-top: 4px; font-size: .8rem; font-weight: 600; color: #b91c1c; }
+.g1empty .name { color: var(--ink-3); }
+.g1empty button[disabled] { opacity: 1; cursor: default; color: inherit; }
+.g1t td, .g1t th { white-space: nowrap; font-variant-numeric: tabular-nums; }

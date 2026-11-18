@@ -38,6 +38,7 @@ import tallybk  # noqa: E402
 import activity
 import cheques
 import stockcount
+import gstr1
 import gstr2b
 import insights  # noqa: E402
 import gstr  # noqa: E402
@@ -54,7 +55,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.30.1"
+APP_VERSION = "3.31.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -296,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
                 "duedates": "dues", "reminders": "dues", "compare": "accounts",
                 "reorder": "stock", "profit": "accounts", "cashflow": "accounts", "lostcust": "dues", "statements": "dues",
                 "target": "sales", "pricelist": "stock", "pricelist_pdf": "stock", "yearend": "accounts", "gstr_twob": "accounts",
-                "einvoice": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
+                "einvoice": "accounts", "gstr_one": "accounts", "tds": "accounts", "cheques": "accounts", "stockcounts": "stock", "stockcount": "stock"}
         if what == "export":
             w = q.get("what", "")
             what = {"outstanding": "outstanding", "stock": "stock", "daily": "daily", "vouchers": "vouchers",
@@ -630,6 +631,7 @@ document.getElementById("a").addEventListener("change", function () {{
                         f_ = {}
                         if tp.is_rcm(v):
                             f_["rcm"] = True
+                        f_.update(tp.gst_fields(v))
                         if tp.yes(v, "ISPOSTDATED"):
                             f_["postdated"] = True
                         ch = tp.cheques_of(v)
@@ -1180,6 +1182,18 @@ document.getElementById("a").addEventListener("change", function () {{
                 return self.send_json({"error": "Enter a quantity."}, 400)
             return self.send_json({"ok": ok})
 
+        mp = re.match(r"^/api/c/(\d+)/gstr_one_tally/(\d{4}-\d{2})(/delete)?$", path)
+        if mp and method == "POST":             # Tally's GSTR-1 export, to compare with
+            cid = int(mp.group(1))
+            if not self.allowed(cid, "gstr_one", q, None):
+                return self.send_json({"error": "You don't have access to this."}, 403)
+            try:
+                if mp.group(3):
+                    return self.send_json(gstr1.tally_remove(cid, mp.group(2)))
+                return self.send_json(gstr1.tally_save(cid, mp.group(2), self.body(8 * 1024 * 1024)))
+            except ValueError as e:
+                return self.send_json({"error": str(e)}, 400)
+
         mp = re.match(r"^/api/c/(\d+)/cheques(?:/(\d+)/(status))?$", path)
         if mp and method == "POST":             # post-dated cheques written down in Bahi (not in Tally)
             cid = int(mp.group(1))
@@ -1387,6 +1401,11 @@ document.getElementById("a").addEventListener("change", function () {{
                 ps = gstr2b.periods(cid)
                 p = ps[0]["period"] if ps else time.strftime("%Y-%m")
             return gstr2b.match(cid, p)
+        if what == "gstr_one":
+            m = q.get("month", "") or time.strftime("%Y-%m")
+            if not re.match(r"^\d{4}-\d{2}$", m):
+                return ({"error": "Choose a month."}, 400)
+            return gstr1.with_tally(cid, m)
         if what == "einvoice":
             m = q.get("month", "") or time.strftime("%Y-%m")
             if not re.match(r"^\d{4}-\d{2}$", m):

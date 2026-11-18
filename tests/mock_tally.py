@@ -36,7 +36,7 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
     "Cartage & Loading": ("Indirect Incomes", 0), "Packing Charges": ("Indirect Expenses", 0), "Labour Charges": ("Direct Expenses", 0),
     "TDS on Contract 194C": ("Duties & Taxes", 0), "Labour Charges": ("Direct Expenses", 0),
-    "Tax Paid on RCM": ("Current Assets", 0),
+    "Tax Paid on RCM": ("Current Assets", 0), "Sales Exempt": ("Sales Accounts", 0), "Advance GST Adjustment": ("Current Assets", 0),
     "CGST INPUT 2.5%": ("Duties & Taxes", 0), "SGST INPUT 2.5%": ("Duties & Taxes", 0), "CGST OUTPUT 2.5%": ("Duties & Taxes", 0),
     "SGST OUTPUT 2.5%": ("Duties & Taxes", 0), "IGST 5%": ("Duties & Taxes", 0), "Sharma Transport": ("Sundry Creditors", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
@@ -170,6 +170,22 @@ def make_vouchers():
                "items": [("TMT Bar 12mm", 100, "Kg", 77.5, 7750.0)], "tracked": "DN1",
                "ledgers": [("Sharma & Sons", 7750.0 + 2 * 697.5), ("Output CGST", -697.5), ("Output SGST", -697.5)],
                "sales_ledger": "Sales GST 18%", "taxable": 7750.0})
+    # GSTR-1 cases (September): a nil-rated cash sale, a large inter-state sale to an unregistered buyer (B2C Large),
+    # a credit note to a registered buyer, and GST on an advance (Stat Adjustment) and its adjustment
+    vs.append({"kind": "acct", "date": date(2026, 9, 8), "type": "Sales", "no": "S/9002", "party": "Cash",
+               "ledgers": [("Cash", 5000.0), ("Sales Exempt", -5000.0)], "narration": "Exempt goods"})
+    vs.append({"kind": "acct", "date": date(2026, 9, 9), "type": "Sales", "no": "S/9003", "party": "Shree Ganesh Traders",
+               "ledgers": [("Shree Ganesh Traders", 177000.0), ("Sales GST 18%", -150000.0), ("Output IGST", -27000.0)],
+               "gstl": {"Output IGST": (-150000.0, 18)}, "pos": "Gujarat"})
+    vs.append({"kind": "acct", "date": date(2026, 9, 12), "type": "Credit Note", "no": "CN/1", "party": "Patel Enterprises",
+               "ledgers": [("Sales GST 18%", 1000.0), ("Output CGST", 90.0), ("Output SGST", 90.0), ("Patel Enterprises", -1180.0)],
+               "reg": "Regular"})
+    vs.append({"kind": "acct", "date": date(2026, 9, 14), "type": "Journal", "no": "AJ1", "party": "Advance GST Adjustment",
+               "ledgers": [("Advance GST Adjustment", 900.0), ("Output CGST", -450.0), ("Output SGST", -450.0)],
+               "stat": ("Increase of Tax Liability", "Advance Receipt"), "gstl": {"Output CGST": (-10000.0, 2.5), "Output SGST": (-10000.0, 2.5)}})
+    vs.append({"kind": "acct", "date": date(2026, 9, 28), "type": "Journal", "no": "AJ2", "party": "Advance GST Adjustment",
+               "ledgers": [("Output CGST", 450.0), ("Output SGST", 450.0), ("Advance GST Adjustment", -900.0)],
+               "stat": ("Decrease of Tax Liability", "Sales against Advance Receipt"), "gstl": {"Output CGST": (10000.0, 2.5), "Output SGST": (10000.0, 2.5)}})
     vs.append({"kind": "order", "date": date(2026, 8, 9), "type": "Sales Order", "no": "SO1", "party": "Gupta Hardware",
                "items": [("Primer 4L", 30, "Nos", 800.0, 24000.0)], "ledgers": [], "nonposting": True})
     vs.append({"kind": "acct", "date": date(2026, 8, 10), "type": "Memorandum", "no": "M1", "party": "Rent",
@@ -319,7 +335,9 @@ def xml_voucher(v):
             f'<VOUCHERTYPENAME>{escape(v["type"])}</VOUCHERTYPENAME><VOUCHERNUMBER>{v["no"]}</VOUCHERNUMBER>'
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
             + ("<ISREVERSECHARGEAPPLICABLE>Yes</ISREVERSECHARGEAPPLICABLE>" if v.get("rcm") else "<ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>")
-            + (f"<TAXADJUSTMENT>{v['stat'][0]}</TAXADJUSTMENT><GSTADDLNATURE>{v['stat'][1]}</GSTADDLNATURE>" if v.get("stat") else "")
+            + (f"<TAXADJUSTMENT>{v['stat'][0]}</TAXADJUSTMENT><GSTADDITIONALDETAILS>{v['stat'][1]}</GSTADDITIONALDETAILS>" if v.get("stat") else "")
+            + (f"<PLACEOFSUPPLY>{v['pos']}</PLACEOFSUPPLY>" if v.get("pos") else "")
+            + (f"<GSTREGISTRATIONTYPE>{v['reg']}</GSTREGISTRATIONTYPE>" if v.get("reg") else "")
             + f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ("INV/26-27/" + v["no"].split("/")[-1].zfill(4)) if v["kind"] == "purchase" else ""}</REFERENCE>'
             f'<PARTYGSTIN>{SUP_GSTIN.get(v["party"], "27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else "")}</PARTYGSTIN>'
             + (f'<BASICBUYERNAME>{escape(COMPANY if v["kind"] == "purchase" else v["party"])}</BASICBUYERNAME><STATENAME>Maharashtra</STATENAME><PLACEOFSUPPLY>Maharashtra</PLACEOFSUPPLY>'
@@ -353,9 +371,11 @@ def xml_voucher(v):
                      f"<RATE>{rate:.2f}/{unit}</RATE><AMOUNT>{a:.2f}</AMOUNT><ACTUALQTY> {q} {unit}</ACTUALQTY></ALLINVENTORYENTRIES.LIST>")
     elif v["kind"] == "acct":
         for ln, a in v["ledgers"]:
+            gl = (v.get("gstl") or {}).get(ln)
             body += (f"<ALLLEDGERENTRIES.LIST><LEDGERNAME>{escape(ln)}</LEDGERNAME>"
                      f"<ISDEEMEDPOSITIVE>{'Yes' if a > 0 else 'No'}</ISDEEMEDPOSITIVE>"
-                     f"<AMOUNT>{amt(a)}</AMOUNT>{ba(ln)}</ALLLEDGERENTRIES.LIST>")
+                     + (f"<GSTTAXRATE> {gl[1]:g}</GSTTAXRATE><GSTASSESSABLEVALUE>{amt(gl[0])}</GSTASSESSABLEVALUE>" if gl else "")
+                     + f"<AMOUNT>{amt(a)}</AMOUNT>{ba(ln)}</ALLLEDGERENTRIES.LIST>")
     else:
         inward = v["kind"] == "purchase"
         for name, q, unit, rate, a in v["items"]:
