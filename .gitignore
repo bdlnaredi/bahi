@@ -20,3 +20,4 @@ agent/TallySync.skipped
 agent/.update-*/
 agent/TallySync.companies.json
 agent/TallySync.tbk*
+agent/TallySync.gstr3b
