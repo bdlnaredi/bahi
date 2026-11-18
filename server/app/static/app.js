@@ -784,6 +784,7 @@ async function vGstr1(month) {
       <div class="bold nil"><div class="label">Taxable outward supplies</div><div class="big">${short(d.tax_total.taxable)}</div><div class="go">B2B, B2C, exports, less credit notes</div></div>
       <div class="bold out"><div class="label">Tax on them</div><div class="big">${short(H.reduce((a, x) => a + d.tax_total[x], 0))}</div><div class="go">${H.filter((x) => d.tax_total[x]).map((x) => `${x} ${short(d.tax_total[x])}`).join(" · ") || "no tax"}</div></div></section>
     ${T ? `<p class="hint" style="margin:0 4px 10px">Compared with Tally's GSTR-1 uploaded ${new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}. Each table shows ✓ when its vouchers, taxable value and tax agree with Tally's.</p>` : ""}
+    ${movedCard(d.moved, month)}
     ${sec("b2b", "B2B invoices: 4A, 4B, 4C, 6B, 6C", S1.b2b, `<div class="g3" style="padding:0 16px">${line("Taxable sales", money(S1.b2b_taxable.taxable))}${line("Reverse charge supplies", money(S1.b2b_rcm.taxable))}</div>${list(S1.b2b)}`, { value: true })}
     ${sec("b2cl", "B2C (Large) invoices: 5A, 5B", S1.b2cl, list(S1.b2cl), { value: true })}
     ${sec("exp", "Exports invoices: 6A", S1.exp, list(S1.exp), { value: true })}
@@ -822,6 +823,17 @@ async function vGstr1(month) {
   if ($("#g1del")) $("#g1del").onclick = async () => { await api(cpath(`gstr_one_tally/${month}/delete`), { method: "POST", body: "{}" }); route(); };
 }
 
+/* vouchers Tally has in another month's GST return (or excluded), and those moved into this one */
+function movedCard(m, month) {
+  if (!m || (!m.out.length && !m.in.length)) return "";
+  const row = (r, note) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.party || r.vtype)}</div>
+    <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}</div><div class="meta">${note}</div></div><div class="end"><b>${rupees(r.value)}</b></div></a>`;
+  const where = (r) => r.excluded ? "Excluded from GST returns in Tally" : r.ret_date ? `In the return for ${monthName(r.ret_date.slice(0, 7))}` : "Moved to another month's return in Tally";
+  return `<section class="page gsec"><button class="row" data-open="moved" aria-expanded="false"><div class="main"><div class="name">Moved between returns <span class="cnt2">${m.out.length + m.in.length}</span></div>
+    <div class="meta">${m.out.length ? `${m.out.length} dated ${monthName(month)} but in another return` : ""}${m.out.length && m.in.length ? " · " : ""}${m.in.length ? `${m.in.length} from other months included here` : ""}</div></div><span class="chev"></span></button>
+    <div id="g_moved" hidden>${m.out.map((r) => row(r, where(r))).join("")}${m.in.map((r) => row(r, "Moved into this month's return in Tally")).join("")}</div></section>`;
+}
+
 /* ---------------------------------------------------------------- GSTR-3B (table 3.1 and 3.2 for now) */
 async function vGstr3b(month) {
   setTitle(true);
@@ -856,6 +868,7 @@ async function vGstr3b(month) {
       <div class="bold nil"><div class="label">3.1 Supplies</div><div class="big">${short(d.total31.taxable)}</div><div class="go">taxable value, (a) to (e)</div></div>
       <div class="bold out"><div class="label">Tax payable in 3.1</div><div class="big">${short(liab)}</div><div class="go">${H.filter((x) => d.total31[x]).map((x) => `${x} ${short(d.total31[x])}`).join(" · ") || "no tax"}</div></div></section>
     ${T ? `<p class="hint" style="margin:0 4px 10px">Compared with Tally's GSTR-3B uploaded ${new Date(T.at * 1000).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}. Each row shows ✓ when its taxable value and tax agree with Tally's.${T.detailed ? "" : " That file has only the 3.1 total: in Tally open 3.1 in detail (Alt+F5) before exporting, to compare each row."}</p>` : ""}
+    ${movedCard(d.moved, month)}
     <div class="setgroup">3.1 Tax on outward and reverse charge inward supplies</div>
     <p class="hint" style="margin:0 4px 8px">${d.vs_gstr1.ok ? '<span class="g1ok">✓ tax agrees with GSTR-1</span>' : `<span class="g1bad">✗ tax differs from GSTR-1: ${H.filter((x) => d.vs_gstr1[x]).map((x) => `${x} ${money(d.vs_gstr1[x])}`).join(", ")}</span>`} (3.1(a) and (b), less advances, against the sales tables of <a href="#/gstr1/${month}">GSTR-1</a>)${d.total31.vs_tally ? ` · 3.1 in total: ${badge(d.total31)}` : ""}</p>
     ${sec("a", "(a) " + R.a.label, R.a, partsOf(R.a))}

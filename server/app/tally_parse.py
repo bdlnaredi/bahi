@@ -547,6 +547,49 @@ def gst_fields(v):
                 pass
     if lines:
         x["gst_lines"] = lines[:40]
+    x.update(return_period(v))
+    return x
+
+
+_SKIP_DATES = {"DATE", "EFFECTIVEDATE", "REFERENCEDATE", "BASICSHIPPINGDATE", "BASICORDERDATE", "IRNACKDATE", "EWAYBILLDATE",
+               "BILLDATE", "INSTRUMENTDATE", "BANKERSDATE", "PAYMENTFAVOURINGDATE", "VALIDUPTO", "IRNCANCELLEDDATE"}
+
+
+def return_period(v):
+    """A voucher moved to another month's GST return in Tally keeps its own date; Tally marks it
+    (VCHGSTSTATUSISRETEFFDATEOVERRDN / ...ISRETINDIFFDATE) and keeps the return's date beside it. Also a voucher
+    excluded from the returns. The date's field name isn't documented: any date field whose name says RET (return)
+    is taken, else the effective date when it differs from the voucher date."""
+    x = {}
+    moved = yes(v, "VCHGSTSTATUSISRETEFFDATEOVERRDN") or yes(v, "VCHGSTSTATUSISRETINDIFFDATE")
+    if yes(v, "VCHGSTSTATUSISEXCLUDED"):
+        x["gst_excluded"] = True
+    if not moved:
+        return x
+    x["ret_moved"] = True
+    own = tdate(txt(v, "DATE"))
+    found = {}
+    for el in v.iter():
+        t = el.tag if isinstance(el.tag, str) else ""
+        val = (el.text or "").strip()
+        if t and "DATE" in t and t not in _SKIP_DATES and re.fullmatch(r"\d{8}", val) and ("RET" in t or "GST" in t or "PERIOD" in t):
+            found[t] = tdate(val)
+    if found:
+        x["ret_tags"] = dict(list(found.items())[:6])
+    pick = next((d for t, d in found.items() if "RET" in t and d and d != own), None) or \
+        next((d for d in found.values() if d and d != own), None)
+    eff = tdate(txt(v, "EFFECTIVEDATE"))
+    if not pick and eff and eff != own:
+        pick = eff
+    if not pick:                                 # any other date on the voucher itself (not its lines)
+        other = {el.tag: tdate((el.text or "").strip()) for el in v if isinstance(el.tag, str) and "DATE" in el.tag
+                 and el.tag not in _SKIP_DATES and re.fullmatch(r"\d{8}", (el.text or "").strip())}
+        other = {t: d for t, d in other.items() if d and d != own}
+        if other:
+            x["ret_tags"] = dict(list(other.items())[:6])
+            pick = next(iter(other.values()))
+    if pick:
+        x["ret_date"] = pick
     return x
 
 

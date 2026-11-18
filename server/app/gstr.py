@@ -16,6 +16,39 @@ def _month_range(month):
 OTHER_DUES = re.compile(r"interest|late\s*fee|penalty|other charges", re.I)   # GST ledgers that aren't tax (table 6.1)
 
 
+RET_SQL = "(date BETWEEN ? AND ? OR extra LIKE '%\"ret_moved\"%' OR extra LIKE '%\"gst_excluded\"%')"
+
+
+def in_return(x, vdate, f, t):
+    """Is this voucher in the GST return for f..t? Its own date, unless Tally has it moved to another month's return
+    (then that month's), or excluded from the returns. Moved with the new month unknown: in no month's return."""
+    if x.get("gst_excluded"):
+        return False
+    if x.get("ret_moved"):
+        d = x.get("ret_date")
+        return bool(d) and f <= d <= t
+    return f <= vdate <= t
+
+
+def moved(cid, f, t, bases=None):
+    """The vouchers moved into or out of this period's return in Tally (of these voucher kinds, or all)."""
+    out, inn = [], []
+    with store.conn() as c:
+        for v in c.execute("""SELECT id, date, vtype, base, number, party, amount, extra FROM voucher WHERE company_id=? AND posting=1 AND status=''
+                AND (extra LIKE '%"ret_moved"%' OR extra LIKE '%"gst_excluded"%') ORDER BY date, id""", (cid,)):
+            if bases and v["base"] not in bases:
+                continue
+            x = json.loads(v["extra"] or "{}")
+            r = {"id": v["id"], "date": v["date"], "vtype": v["vtype"], "number": v["number"], "party": v["party"] or "",
+                 "value": round(abs(v["amount"] or 0), 2), "ret_date": x.get("ret_date") or "", "excluded": bool(x.get("gst_excluded"))}
+            here = in_return(x, v["date"], f, t)
+            if f <= v["date"] <= t and not here:
+                out.append(r)
+            elif here and not f <= v["date"] <= t:
+                inn.append(r)
+    return {"out": out, "in": inn}
+
+
 def _tax_side(c, cid):
     """{ledger: (head, side)} for every GST ledger (the same rules as the GST summary)."""
     led = {r["name"]: r for r in c.execute("SELECT name, chain, taxtype, gst_head, closing, gstin FROM ledger WHERE company_id=?", (cid,))}

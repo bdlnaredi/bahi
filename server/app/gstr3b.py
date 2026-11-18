@@ -78,10 +78,12 @@ def _rcm(cid, month):
     rows = []
     with store.conn() as c:
         tax, _ = gstr._tax_side(c, cid)
-        vs = store._rows(c, """SELECT id, date, vtype, number, party, extra FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        vs = store._rows(c, """SELECT id, date, vtype, number, party, extra FROM voucher WHERE company_id=? AND """ + gstr.RET_SQL + """
             AND posting=1 AND status='' AND base='Journal' AND extra LIKE '%tax_adj%' ORDER BY date, id""", (cid, f, t))
         for v in vs:
             x = json.loads(v["extra"] or "{}")
+            if not gstr.in_return(x, v["date"], f, t):
+                continue
             adj, addl = (x.get("tax_adj") or "").lower(), (x.get("gst_addl") or "").lower()
             if not ("increase" in adj and "liability" in adj) or "advance" in addl or "advance" in adj:
                 continue
@@ -170,7 +172,7 @@ def build(cid, month):
     vs_rcm = {"ok": all(abs(t4a["3"][h] - out["d"][h]) <= 1 for h in HEADS)}
     t5 = _inward_exempt(cid, month, g.get("state") or "")
     t61 = _other_dues(cid, month)
-    return {"month": month, "from": g["from"], "to": g["to"], "company": g["company"], "t5": t5, "t61": t61, "t31": out, "total31": _fin(total), "t32": t32, "vs_gstr1": vs_g1,
+    return {"month": month, "from": g["from"], "to": g["to"], "company": g["company"], "moved": gstr.moved(cid, g["from"], g["to"]), "t5": t5, "t61": t61, "t31": out, "total31": _fin(total), "t32": t32, "vs_gstr1": vs_g1,
             "t4a": t4a, "total4a": total4a, "vs_rcm": vs_rcm, "t4": t4,
             "no_tax_ledgers": g.get("no_tax_ledgers")}
 
@@ -205,10 +207,12 @@ def _itc_more(cid, month):
     rows = {"b1": [], "b2": [], "d1": [], "d2": []}
     with store.conn() as c:
         tax, _ = gstr._tax_side(c, cid)
-        vs = store._rows(c, """SELECT id, date, vtype, number, party, extra FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+        vs = store._rows(c, """SELECT id, date, vtype, number, party, extra FROM voucher WHERE company_id=? AND """ + gstr.RET_SQL + """
             AND posting=1 AND status='' AND extra LIKE '%tax_adj%' ORDER BY date, id""", (cid, f, t))
         for v in vs:
             x = json.loads(v["extra"] or "{}")
+            if not gstr.in_return(x, v["date"], f, t):
+                continue
             adj, addl = (x.get("tax_adj") or "").lower(), (x.get("gst_addl") or "").lower()
             text = adj + " " + addl
             lines = [(r["ledger"], r["amount"]) for r in c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],))]
@@ -270,10 +274,12 @@ def _itc(cid, month):
     with store.conn() as c:
         tax, led = gstr._tax_side(c, cid)
         vs = store._rows(c, """SELECT id, date, vtype, base, number, party, party_gstin, amount, extra FROM voucher
-            WHERE company_id=? AND date BETWEEN ? AND ? AND posting=1 AND status=''
+            WHERE company_id=? AND """ + gstr.RET_SQL + """ AND posting=1 AND status=''
             AND base IN ('Purchase','Debit Note','Credit Note','Journal','Payment') ORDER BY date, id""", (cid, f, t))
         for v in vs:
             x = json.loads(v["extra"] or "{}")
+            if not gstr.in_return(x, v["date"], f, t):
+                continue
             lines = [(r["ledger"], r["amount"]) for r in c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],))]
             if x.get("gross"):
                 g = {ln for ln, _ in x["gross"]}
@@ -336,9 +342,11 @@ def _inward_exempt(cid, month, company_state):
     with store.conn() as c:
         tax, led = gstr._tax_side(c, cid)
         vs = store._rows(c, """SELECT id, date, vtype, base, number, party, party_gstin, amount, extra FROM voucher
-            WHERE company_id=? AND date BETWEEN ? AND ? AND posting=1 AND status='' AND base IN ('Purchase','Debit Note')
+            WHERE company_id=? AND """ + gstr.RET_SQL + """ AND posting=1 AND status='' AND base IN ('Purchase','Debit Note')
             ORDER BY date, id""", (cid, f, t))
         for v in vs:
+            if not gstr.in_return(json.loads(v["extra"] or "{}"), v["date"], f, t):
+                continue
             pl = led.get(v["party"])
             if v["base"] == "Debit Note" and "|Sundry Creditors|" not in ((pl["chain"] if pl else "") or ""):
                 continue

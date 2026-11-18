@@ -218,6 +218,12 @@ def make_vouchers():
         v["guid"] = f"guid-{i:05d}"
         v["alterid"] = i + 1
     assign_bills(vs)
+    # two September purchases claimed in October's return in Tally (one with the return's date kept, one without)
+    late = [v for v in vs if v["kind"] == "purchase" and v["date"].month == 9 and v["date"].day >= 20][:2]
+    for i, v in enumerate(late):
+        v["retmoved"] = True
+        if i == 0:
+            v["retdate"] = date(2026, 10, 1)
     return vs
 
 
@@ -356,6 +362,9 @@ def xml_voucher(v):
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
             + ("<ISREVERSECHARGEAPPLICABLE>Yes</ISREVERSECHARGEAPPLICABLE>" if v.get("rcm") else "<ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>")
             + (f"<TAXADJUSTMENT>{v['stat'][0]}</TAXADJUSTMENT><GSTADDITIONALDETAILS>{v['stat'][1]}</GSTADDITIONALDETAILS>" if v.get("stat") else "")
+            + ("<VCHGSTSTATUSISRETEFFDATEOVERRDN>Yes</VCHGSTSTATUSISRETEFFDATEOVERRDN>"
+               + (f"<GSTRETURNEFFECTIVEDATE>{v['retdate'].strftime('%Y%m%d')}</GSTRETURNEFFECTIVEDATE>" if v.get("retdate") else "")
+               if v.get("retmoved") else "<VCHGSTSTATUSISRETEFFDATEOVERRDN>No</VCHGSTSTATUSISRETEFFDATEOVERRDN>")
             + (f"<PLACEOFSUPPLY>{v['pos']}</PLACEOFSUPPLY>" if v.get("pos") else "")
             + (f"<GSTREGISTRATIONTYPE>{v['reg']}</GSTREGISTRATIONTYPE>" if v.get("reg") else "")
             + f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ("INV/26-27/" + v["no"].split("/")[-1].zfill(4)) if v["kind"] == "purchase" else ""}</REFERENCE>'

@@ -561,6 +561,8 @@ Tap a table to see its invoices or rows.
 - **5 Exempt, nil rated and non-GST inward supplies,** from the purchase bills without GST: (1) from composition dealers, and exempt or nil rated items (or purchase ledgers named exempt or nil rated), and (2) non-GST; each split inter-state (the supplier's state isn't yours) and intra-state.
 - **6.1 Interest, late fee, penalty and others:** what was paid on the GST ledgers for each, by tax head (from the ledger's GST head or its name, such as "Late Fee CGST"). These ledgers are kept out of the tax and ITC tables.
 
+**Vouchers moved to another month's return:** when you move a voucher to another return period in Tally (or exclude it from the returns), GSTR-1 and GSTR-3B count it in that month, not the month of its date. The card **Moved between returns** lists the month's vouchers that are in another return, and those from other months included in this one.
+
 **Checks:** a line at the top shows ✓ when the tax in 3.1(a) and (b) agrees with GSTR-1's sales tables, and another when 4(A)(3) agrees with 3.1(d). To compare with Tally, open GSTR-3B for the month in Tally, press Alt+F5 for the detailed view, then Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the screen. Each row then shows ✓ or ✗ with Tally's figure.
 
 ## E-invoice and e-way bills

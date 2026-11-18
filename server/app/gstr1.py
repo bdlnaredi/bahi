@@ -165,7 +165,7 @@ def build(cid, month):
         company_state = info.get("state") or ""
         stock = {r["name"]: dict(r) for r in c.execute("SELECT name, unit, hsn FROM stock WHERE company_id=?", (cid,))}
         vs = store._rows(c, """SELECT id, date, vtype, base, number, party, party_gstin, amount, extra, status, posting FROM voucher
-            WHERE company_id=? AND date BETWEEN ? AND ? AND base IN ('Sales','Credit Note','Debit Note','Receipt','Journal')
+            WHERE company_id=? AND """ + gstr.RET_SQL + """ AND base IN ('Sales','Credit Note','Debit Note','Receipt','Journal')
             AND status IN ('', 'cancelled') ORDER BY date, id""", (cid, f, t))
         docs = defaultdict(lambda: {"nums": [], "cancelled": 0})
         sec = {k: {"vouchers": set(), "taxable": 0.0, "value": 0.0, **_z(), "list": []} for k in
@@ -189,8 +189,9 @@ def build(cid, month):
 
         for v in vs:
             base = v["base"]
-            # 13 - documents issued: every sales invoice and note, cancelled ones too
-            if base in ("Sales", "Credit Note", "Debit Note"):
+            own = f <= v["date"] <= t
+            # 13 - documents issued: every sales invoice and note, cancelled ones too (by their own date)
+            if base in ("Sales", "Credit Note", "Debit Note") and own:
                 pchain = (led.get(v["party"]) or {}).get("chain") or ""
                 if base == "Sales" or "|Sundry Creditors|" not in pchain:
                     kind = {"Sales": "Invoices for outward supply", "Credit Note": "Credit Note", "Debit Note": "Debit Note"}[base]
@@ -201,6 +202,8 @@ def build(cid, month):
                         docs[key]["cancelled"] += 1
             if v["status"] == "cancelled" or not v["posting"]:
                 continue
+            if not gstr.in_return(json.loads(v["extra"] or "{}"), v["date"], f, t):
+                continue                          # moved to another month's return in Tally (or excluded)
             if base in ("Receipt", "Journal"):
                 x = json.loads(v["extra"] or "{}")
                 adj, addl = (x.get("tax_adj") or "").lower(), (x.get("gst_addl") or "").lower()
@@ -335,7 +338,7 @@ def build(cid, month):
     # tax on outward supplies, all tables together (credit notes count less)
     tot = {h: round(sum(out[k][h] for k in ("b2b", "b2cl", "exp", "b2cs", "cdnr", "cdnur")), 2) for h in HEADS}
     tot["taxable"] = round(sum(out[k]["taxable"] for k in ("b2b", "b2cl", "exp", "b2cs", "cdnr", "cdnur")), 2)
-    return {"month": month, "from": f, "to": t, "company": co["name"] if co else "", "state": company_state,
+    return {"month": month, "from": f, "to": t, "company": co["name"] if co else "", "state": company_state, "moved": gstr.moved(cid, f, t, ("Sales", "Credit Note", "Debit Note")),
             "sections": out, "tax_total": tot, "no_tax_ledgers": not tax}
 
 
