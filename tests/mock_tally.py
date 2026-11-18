@@ -137,7 +137,7 @@ def make_vouchers():
                        "gstl": {"Output CGST": (-5000.0, 2.5), "Output SGST": (-5000.0, 2.5)}})
             vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RI{d.month}", "party": "Input CGST",
                        "ledgers": [("Input CGST", 125.0), ("Input SGST", 125.0), ("Tax Paid on RCM", -250.0)],
-                       "narration": "Input credit on freight", "stat": ("Increase of Input Tax Credit", "")})
+                       "narration": "Input credit on freight", "stat": ("Increase of Input Tax Credit", "Purchase Under Reverse Charge")})
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"RP{d.month}", "party": "Output CGST",
                        "ledgers": [("Output CGST", 125.0), ("Output SGST", 125.0), ("HDFC Bank", -250.0)], "narration": "Stat payment, RCM"})
         if d.day == 20 and d.month > 4:

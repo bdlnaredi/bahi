@@ -11,6 +11,10 @@
 3.2 Of the supplies in 3.1(a), the inter-state ones to unregistered persons (B2C Large, B2C Small to another
     state, notes to them), to composition dealers and to UIN holders (from the buyer's registration type in Tally),
     by place of supply: taxable value and IGST.
+4(A) ITC available (in part or in full), from the debits to the GST ledgers in the month:
+  (1) import of goods, (2) import of services, (3) inward supplies liable to reverse charge (the input side of the
+  Stat Adjustment journals: Increase in Tax Liability & Input Tax Credit, Increase of Input Tax Credit), (4) inward
+  supplies from ISD, (5) all other ITC (purchases, expenses with GST, less purchase returns).
 Read-only: nothing here touches Tally."""
 import json
 import os
@@ -146,8 +150,102 @@ def build(cid, month):
     total = _z()
     for k in LABELS:
         _add(total, rows[k])
+    t4a, total4a = _itc(cid, month)
+    # the check: the credit taken on reverse charge is the tax paid on it in 3.1(d)
+    vs_rcm = {"ok": all(abs(t4a["3"][h] - out["d"][h]) <= 1 for h in HEADS)}
     return {"month": month, "from": g["from"], "to": g["to"], "company": g["company"], "t31": out, "total31": _fin(total), "t32": t32, "vs_gstr1": vs_g1,
+            "t4a": t4a, "total4a": total4a, "vs_rcm": vs_rcm,
             "no_tax_ledgers": g.get("no_tax_ledgers")}
+
+
+ITC_LABELS = {"1": "Import of goods", "2": "Import of services", "3": "Inward supplies liable to reverse charge (other than 1 and 2)",
+              "4": "Inward supplies from ISD", "5": "All other ITC"}
+
+
+def _itc_kind(text, default):
+    t = (text or "").lower()
+    if "import" in t and "service" in t:
+        return "2"
+    if "import" in t or "overseas" in t or "sez" in t and "import" in t:
+        return "1"
+    if "isd" in t or "input service distributor" in t:
+        return "4"
+    if "reverse charge" in t or "unregistered" in t or "rcm" in t:
+        return "3"
+    return default
+
+
+def _itc(cid, month):
+    """4(A): the input tax credit taken in the month, row by row, with the vouchers behind it.
+    - Purchase vouchers: the GST on them (import of goods / services and ISD by the supplier's registration type
+      or the nature of the purchase; everything else is 'all other ITC'). A purchase under reverse charge carries
+      no GST: its credit comes from the journal below.
+    - Debit notes to suppliers (purchase returns): their GST, less.
+    - Stat Adjustment journals that raise the input credit (Increase in Tax Liability & Input Tax Credit, Increase
+      of Input Tax Credit): the GST ledgers debited, under the row their 'additional details' name.
+    - Other journals and payments with GST on an input GST ledger (expenses with GST): all other ITC.
+    Journals that reverse credit, set it off or pay tax are not credit taken, and are left out."""
+    f, t = gstr._month_range(month)
+    rows = {k: [] for k in ITC_LABELS}
+    with store.conn() as c:
+        tax, led = gstr._tax_side(c, cid)
+        vs = store._rows(c, """SELECT id, date, vtype, base, number, party, party_gstin, amount, extra FROM voucher
+            WHERE company_id=? AND date BETWEEN ? AND ? AND posting=1 AND status=''
+            AND base IN ('Purchase','Debit Note','Credit Note','Journal','Payment') ORDER BY date, id""", (cid, f, t))
+        for v in vs:
+            x = json.loads(v["extra"] or "{}")
+            lines = [(r["ledger"], r["amount"]) for r in c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],))]
+            if x.get("gross"):
+                g = {ln for ln, _ in x["gross"]}
+                lines = [l for l in lines if l[0] not in g] + [(ln, a) for ln, a in x["gross"]]
+            tl = [(ln, a) for ln, a in lines if ln in tax]
+            if not tl:
+                continue
+            adj, addl = (x.get("tax_adj") or "").lower(), (x.get("gst_addl") or "").lower()
+            base = v["base"]
+            pchain = ((led.get(v["party"]) or {})["chain"] if led.get(v["party"]) else "") or ""
+            what = " ".join([x.get("gst_reg_type") or "", x.get("gst_nature") or "", addl])
+            heads, kind = {h: 0.0 for h in HEADS}, None
+            if base == "Purchase":
+                kind = _itc_kind(what, "5")
+                if kind == "3":                  # reverse charge: the credit is in the journal, not on the bill
+                    continue
+                for ln, a in tl:
+                    heads[tax[ln][0]] += a
+            elif base in ("Debit Note", "Credit Note"):
+                if "|Sundry Creditors|" not in pchain:
+                    continue                     # a note to a customer: sales
+                kind = _itc_kind(what, "5")
+                for ln, a in tl:
+                    heads[tax[ln][0]] += a       # a return credits the GST ledgers: less credit
+            elif adj:
+                if "increase" not in adj or "input tax credit" not in adj or "advance" in addl:
+                    continue                     # reversal, set-off, payment or liability only
+                kind = _itc_kind(addl, "5")
+                for ln, a in tl:
+                    if a > 0:                    # the debit side is the credit taken
+                        heads[tax[ln][0]] += a
+            else:
+                if any(a < 0 for _, a in tl):
+                    continue                     # GST ledgers credited too: a transfer or set-off
+                if not all(tax[ln][1] == "input" for ln, _ in tl):
+                    continue                     # paying output tax
+                kind = "5"
+                for ln, a in tl:
+                    heads[tax[ln][0]] += a
+            if not any(abs(a) > 0.004 for a in heads.values()):
+                continue
+            r = {"id": v["id"], "date": v["date"], "vtype": v["vtype"], "number": v["number"],
+                 "party": v["party"] or "", "gstin": v["party_gstin"] or "", "nature": x.get("gst_addl") or x.get("tax_adj") or "",
+                 **{h: round(a, 2) for h, a in heads.items()}}
+            r["tax"] = round(sum(heads.values()), 2)
+            rows[kind].append(r)
+    out = {}
+    for k, label in ITC_LABELS.items():
+        tot = {h: round(sum(r[h] for r in rows[k]), 2) for h in HEADS}
+        out[k] = {"label": label, **tot, "tax": round(sum(tot.values()), 2), "count": len(rows[k]), "list": rows[k]}
+    tot = {h: round(sum(out[k][h] for k in ITC_LABELS), 2) for h in HEADS}
+    return out, {**tot, "tax": round(sum(tot.values()), 2)}
 
 
 KINDS32 = {"unreg": "Supplies made to unregistered persons", "comp": "Supplies made to composition taxable persons",
@@ -216,7 +314,7 @@ def parse_tally(raw):
     tags = {"GSTRTAXABLEAMOUNT": "taxable", "GSTRIGSTAMOUNT": "IGST", "GSTRCGSTAMOUNT": "CGST", "GSTRSGSTAMOUNT": "SGST",
             "GSTRCESSAMOUNT": "Cess", "GSTRTAXAMOUNT": "tax"}
     ent = {"&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'"}
-    rows, cur = {}, None
+    rows, cur, part = {}, None, ""
     for m in re.finditer(r"<(GSTR[A-Z]*)(?:\s[^>]*)?>([^<]*)</\1\s*>", text, re.I):
         tag, val = m.group(1).upper(), re.sub(r"&\w+;", lambda e: ent.get(e.group(0), " "), m.group(2)).strip()
         if tag == "GSTRRETVIEWPARTICULARS":
@@ -226,6 +324,18 @@ def parse_tally(raw):
             m32 = re.match(r"^Supplies (?:made )?to (Unregistered|Composition|UIN)", lab, re.I)
             if m32:
                 key = {"unregistered": "unreg", "composition": "comp", "uin": "uin"}[m32.group(1).lower()]
+            mp = re.match(r"^([A-E])\.\s", lab)
+            if re.match(r"^\d+(\.\d+)?\s+[A-Z]", lab):
+                part = ""                       # a new table (4, 5, 6.1 ...)
+            if re.match(r"^4\s", lab):
+                part = "4"
+            elif mp and part[:1] == "4":
+                part = "4" + mp.group(1).lower()
+                if part == "4a":
+                    key = "4a"
+            mn = re.match(r"^(\d)\.\s", lab)
+            if mn and part == "4a":
+                key = "4a" + mn.group(1)
             cur = None
             if key and key not in rows:
                 cur = rows[key] = {"label": lab}
@@ -284,6 +394,7 @@ def with_tally(cid, month):
     r["tally"] = {"at": t["at"], "detailed": any(k in t["rows"] for k in LABELS)}
     targets = [(k, r["t31"][k]) for k in LABELS] + [("total", r["total31"])]
     targets += [(k, r["t32"][k]) for k in KINDS32]
+    targets += [("4a" + k, r["t4a"][k]) for k in ITC_LABELS] + [("4a", r["total4a"])]
     for k, mine in targets:
         tr = t["rows"].get(k)
         if not tr:

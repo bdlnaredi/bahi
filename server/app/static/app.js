@@ -830,7 +830,7 @@ async function vGstr3b(month) {
   const H = ["IGST", "CGST", "SGST", "Cess"], R = d.t31, T = d.tally;
   const money = (v) => rupees(v || 0);
   const line = (k, v, cls = "") => `<div class="g3r ${cls}"><span>${k}</span><span>${v}</span></div>`;
-  const figs = (x, heads = H) => `${line("Taxable value", money(x.taxable))}${heads.filter((h) => h !== "Cess" || Math.abs(x[h] || 0) > 0.004).map((h) => line(h === "SGST" ? "SGST / UTGST" : h, money(x[h]))).join("")}`;
+  const figs = (x, heads = H) => `${x.taxable === undefined ? "" : line("Taxable value", money(x.taxable))}${heads.filter((h) => h !== "Cess" || Math.abs(x[h] || 0) > 0.004).map((h) => line(h === "SGST" ? "SGST / UTGST" : h, money(x[h]))).join("")}`;
   const badge = (x) => !x.vs_tally ? "" : x.vs_tally.ok ? '<span class="g1ok">✓ matches Tally</span>'
     : `<span class="g1bad">✗ differs from Tally: ${x.vs_tally.diffs.map((f) => `${f} ${rupees(x.vs_tally[f] || 0)}`).join(", ")}</span>`;
   const table = (rows, cols) => rows.length ? `<div class="tscroll"><table class="gt g1t"><tr>${cols.map(([, lab]) => `<th>${lab}</th>`).join("")}</tr>
@@ -845,7 +845,7 @@ async function vGstr3b(month) {
   const partsOf = (x) => x.parts.length ? `<div class="setgroup" style="margin:4px 16px">Made up of</div>${table(x.parts, [["label", "From GSTR-1"], ["taxable", "Taxable", money], ["IGST", "IGST", money], ["CGST", "CGST", money], ["SGST", "SGST", money]])}
     <p class="hint" style="margin:4px 16px 10px"><a href="#/gstr1/${month}">Open GSTR-1 for ${monthName(month)}</a> to see the invoices.</p>` : "";
   const jrow = (r) => `<a class="row" href="#/voucher/${r.id}"><div class="main"><div class="name">${h(r.nature || r.vtype)}</div>
-    <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}${r.party ? " · " + h(r.party) : ""}</div><div class="meta">Taxable ${money(r.taxable)}</div></div>
+    <div class="meta">${h(r.vtype)} ${h(r.number)}, ${fdate(r.date)}${r.party ? " · " + h(r.party) : ""}</div>${r.taxable ? `<div class="meta">Taxable ${money(r.taxable)}</div>` : ""}</div>
     <div class="end"><b>${money(r.tax)}</b><div class="meta">${H.filter((x) => Math.abs(r[x]) > 0.004).map((x) => `${x} ${money(r[x])}`).join("<br>")}</div></div></a>`;
   const t32 = (k) => { const x = d.t32[k]; return sec("32" + k, x.label, { ...x, heads: ["IGST"] },
     table(x.rows, [["pos", "Place of supply"], ["taxable", "Taxable", money], ["IGST", "IGST", money]]), x.rows.length ? `Taxable ${money(x.taxable)} · IGST ${money(x.IGST)} · ${x.rows.length} state${x.rows.length === 1 ? "" : "s"}` : ""); };
@@ -865,10 +865,15 @@ async function vGstr3b(month) {
     ${sec("e", "(e) " + R.e.label, R.e, partsOf(R.e), R.e.taxable ? `Value ${money(R.e.taxable)}` : "")}
     <div class="setgroup">3.2 Of the supplies in 3.1(a), inter-state supplies</div>
     ${t32("unreg")}${t32("comp")}${t32("uin")}
+    <div class="setgroup">4 Eligible ITC</div>
+    <p class="hint" style="margin:0 4px 8px">${d.vs_rcm.ok ? '<span class="g1ok">✓ 4A(3) agrees with 3.1(d)</span>' : '<span class="g1bad">✗ 4A(3) differs from 3.1(d)</span>'} (the credit taken on reverse charge purchases is the tax paid on them)</p>
+    ${sec("4a", "A. ITC available (whether in full or part)", { ...d.total4a, heads: H }, "", `Credit ${money(d.total4a.tax)}`)}
+    ${["1", "2", "3", "4", "5"].map((k) => { const x = d.t4a[k]; return sec("4a" + k, `(${k}) ${x.label}`, { ...x, heads: H },
+      x.list.length ? x.list.map(jrow).join("") : "", x.count ? `Credit ${money(x.tax)} · ${x.count} voucher${x.count === 1 ? "" : "s"}` : ""); }).join("")}
     <details class="page addq" style="padding:0 16px"><summary class="row"><b>${T ? "Compare with Tally again" : "Compare with Tally's GSTR-3B"}</b></summary>
       <form class="form" id="g3f" style="padding:0 0 12px"><p class="hint" style="margin:0">In Tally open GSTR-3B for ${monthName(month)}, press Alt+F5 for the detailed view, then Alt+E, choose XML (Data Interchange), and upload the file here. Each row then shows whether it matches Tally.</p>
       <input type="file" id="g3file" accept=".xml,text/xml,application/xml" required><button class="btn primary" type="submit">Upload and compare</button>${T ? ' <button class="btn" type="button" id="g3del">Remove Tally\'s file</button>' : ""}<p class="hint" id="g3msg"></p></form></details>
-    <p class="hint" style="margin:0 4px 14px">3.1(a), (b), (c), (e) and 3.2 come from the GSTR-1 tables of the month. 3.1(d) is the liability side of the Stat Adjustment journals in Tally (Increase of Tax Liability, for purchases under reverse charge or from unregistered dealers). 3.2 counts buyers by their registration type in Tally (Unregistered, Composition, UIN Holders). The ITC tables come next. Check, then file from Tally or the GST portal.</p>`;
+    <p class="hint" style="margin:0 4px 14px">3.1(a), (b), (c), (e) and 3.2 come from the GSTR-1 tables of the month. 3.1(d) is the liability side of the Stat Adjustment journals in Tally (Increase of Tax Liability, for purchases under reverse charge or from unregistered dealers). 3.2 counts buyers by their registration type in Tally (Unregistered, Composition, UIN Holders). 4(A) is the credit taken in the month: GST on purchase bills (less purchase returns), on expenses with GST, and the input side of the Stat Adjustment journals (Increase of Input Tax Credit), under the row their Additional Details name (import of goods or services, reverse charge, ISD). Check, then file from Tally or the GST portal.</p>`;
   view.querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { const x = $("#g_" + b.dataset.open); if (!x) return; x.hidden = !x.hidden; b.setAttribute("aria-expanded", String(!x.hidden)); });
   $("#mprev").onclick = () => { location.hash = `#/gstr3b/${monthShift(month, -1)}`; };
   $("#mnext").onclick = () => { location.hash = `#/gstr3b/${monthShift(month, 1)}`; };
@@ -2034,7 +2039,7 @@ function vReports() {
     ["#/statements", "Month-end statements", "Send every customer their statement on WhatsApp, one tap each", can("dues")],
     ["#/pricelist", "Price list", "Your items and rates as a PDF to share", can("stock")],
     ["#/gstr1", "GSTR-1", "Sales return, table by table as in Tally and on the GST portal: B2B, B2C, notes, nil-rated, advances, HSN and documents", can("accounts")],
-    ["#/gstr3b", "GSTR-3B", "Monthly return, table by table as in Tally: 3.1 outward and reverse charge supplies, 3.2 inter-state supplies (ITC to follow)", can("accounts")],
+    ["#/gstr3b", "GSTR-3B", "Monthly return, table by table as in Tally: 3.1 outward and reverse charge supplies, 3.2 inter-state supplies 4(A) ITC", can("accounts")],
     ["#/einvoice", "E-invoice and e-way bills", "Sales that seem to need an e-invoice or e-way bill but have none", can("accounts")],
     ["#/tds", "TDS and TCS", "Deducted each month by section and party, paid, and due dates", can("accounts")],
     ["#/cheques", "Cheque register", "Post-dated and uncleared cheques, received and issued, with reminders", can("accounts")],
