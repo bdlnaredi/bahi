@@ -36,6 +36,7 @@ LEDGERS = {  # name: (parent, opening dr-positive)
     "Output IGST": ("Duties & Taxes", 0), "Input IGST": ("Duties & Taxes", 0), "Round Off": ("Indirect Expenses", 0),
     "Cartage & Loading": ("Indirect Incomes", 0), "Packing Charges": ("Indirect Expenses", 0), "Labour Charges": ("Direct Expenses", 0),
     "TDS on Contract 194C": ("Duties & Taxes", 0), "Labour Charges": ("Direct Expenses", 0),
+    "Tax Paid on RCM": ("Current Assets", 0), "Sharma Transport": ("Sundry Creditors", 0),
     "Rent": ("Indirect Expenses", 0), "Salary": ("Indirect Expenses", 0), "Freight Inward": ("Direct Expenses", 0),
     "Discount Received": ("Indirect Incomes", 0), "Capital": ("Capital Account", 0),
     "Commission Received": ("Commission Earned", 0),
@@ -123,12 +124,19 @@ def make_vouchers():
                        "ledgers": [("HDFC Bank", 25000.0), ("Krishna Agencies", -25000.0)], "narration": "Cheque received",
                        "cheque": {"ledger": "HDFC Bank", "no": f"{400100 + d.month}", "date": ins, "bank": "ICICI Bank",
                                   "cleared": ins + timedelta(days=2) if ins + timedelta(days=2) < date.today() else None}})
-        if d.day == 15:      # freight from an unregistered transporter, with the reverse-charge journal
-            vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"R{d.month}", "party": "Freight Inward",
-                       "ledgers": [("Freight Inward", 5000.0), ("Cash", -5000.0)], "narration": "Freight, unregistered transporter", "rcm": True})
-            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RJ{d.month}", "party": "Input CGST",
-                       "ledgers": [("Input CGST", 125.0), ("Input SGST", 125.0), ("Output CGST", -125.0), ("Output SGST", -125.0)],
-                       "narration": "GST on freight under reverse charge", "rcm_journal": True})
+        if d.day == 15:      # reverse charge, as TallyPrime has it done: the purchase (no GST on it), a Stat Adjustment
+            # journal raising the liability (Purchase Under Reverse Charge), one taking the input credit (nothing on
+            # it says reverse charge), and the tax paid by Stat Payment
+            vs.append({"kind": "acct", "date": d, "type": "Purchase", "no": f"R{d.month}", "party": "Sharma Transport",
+                       "ledgers": [("Freight Inward", 5000.0), ("Sharma Transport", -5000.0)], "narration": "Freight, GTA under RCM"})
+            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RJ{d.month}", "party": "Tax Paid on RCM",
+                       "ledgers": [("Tax Paid on RCM", 250.0), ("Output CGST", -125.0), ("Output SGST", -125.0)],
+                       "narration": "GST on freight", "stat": ("Increase of Tax Liability", "Purchase Under Reverse Charge")})
+            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": f"RI{d.month}", "party": "Input CGST",
+                       "ledgers": [("Input CGST", 125.0), ("Input SGST", 125.0), ("Tax Paid on RCM", -250.0)],
+                       "narration": "Input credit on freight", "stat": ("Increase of Input Tax Credit", "")})
+            vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"RP{d.month}", "party": "Output CGST",
+                       "ledgers": [("Output CGST", 125.0), ("Output SGST", 125.0), ("HDFC Bank", -250.0)], "narration": "Stat payment, RCM"})
         if d.day == 20 and d.month > 4:
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"T{d.month}", "party": "Output CGST",
                        "ledgers": [("Output CGST", 5000.0), ("HDFC Bank", -5000.0)], "narration": "GST challan"})
@@ -298,7 +306,7 @@ def xml_voucher(v):
             f'<VOUCHERTYPENAME>{escape(v["type"])}</VOUCHERTYPENAME><VOUCHERNUMBER>{v["no"]}</VOUCHERNUMBER>'
             f'<PARTYLEDGERNAME>{escape(v["party"])}</PARTYLEDGERNAME>{flags}'
             + ("<ISREVERSECHARGEAPPLICABLE>Yes</ISREVERSECHARGEAPPLICABLE>" if v.get("rcm") else "<ISREVERSECHARGEAPPLICABLE>No</ISREVERSECHARGEAPPLICABLE>")
-            + ("<STATADJUSTMENTTYPE>Increase of Tax Liability &amp; Input Tax Credit</STATADJUSTMENTTYPE><ADDITIONALNATURE>Purchase from Unregistered Dealer</ADDITIONALNATURE>" if v.get("rcm_journal") else "")
+            + (f"<TAXADJUSTMENT>{v['stat'][0]}</TAXADJUSTMENT><GSTADDLNATURE>{v['stat'][1]}</GSTADDLNATURE>" if v.get("stat") else "")
             + f'<REFERENCE>{"PO-" + v["no"] if v["kind"] == "sales" else ("INV/26-27/" + v["no"].split("/")[-1].zfill(4)) if v["kind"] == "purchase" else ""}</REFERENCE>'
             f'<PARTYGSTIN>{SUP_GSTIN.get(v["party"], "27ABCDE1234F1Z5" if v["party"] == "Patel Enterprises" else "")}</PARTYGSTIN>'
             + (f'<BASICBUYERNAME>{escape(COMPANY if v["kind"] == "purchase" else v["party"])}</BASICBUYERNAME><STATENAME>Maharashtra</STATENAME><PLACEOFSUPPLY>Maharashtra</PLACEOFSUPPLY>'
@@ -617,7 +625,9 @@ class H(BaseHTTPRequestHandler):
             out = "<ENVELOPE><HEADER><VERSION>1</VERSION><STATUS>1</STATUS></HEADER><BODY><DESC><CMPINFO><COMPANY>0</COMPANY><GROUP>0</GROUP><LEDGER>0</LEDGER><VOUCHER>51</VOUCHER></CMPINFO></DESC><DATA><COLLECTION>"
             WANT_RATES[0] = "RateDetails" in req
             if ctype == "Voucher":
-                light = "AllLedgerEntries" not in req and "AllInventoryEntries" not in req
+                light = "AllLedgerEntries" not in req and "AllInventoryEntries" not in req and "NATIVEMETHOD" not in req
+                # like Tally: a fixed list of fields sends only those (no reverse-charge marks, Stat Adjustment or cheques)
+                limited = "<FETCH>" in req and "NATIVEMETHOD" not in req
                 picked = set() if os.environ.get("NO_GUID_FILTER") == "1" else set(re.findall(r'\$GUID = "([^"]+)"', req))
                 # EXTRA_OUT=1: the date-filtered list also carries a voucher from just before the period
                 extra_out = os.environ.get("EXTRA_OUT") == "1" and not light and not picked and f
@@ -642,6 +652,10 @@ class H(BaseHTTPRequestHandler):
                                     f'<ISOPTIONAL>{"Yes" if v.get("optional") else "No"}</ISOPTIONAL></VOUCHER>')
                         else:
                             x = xml_voucher(v).replace('<TALLYMESSAGE xmlns:UDF="TallyUDF">', "").replace("</TALLYMESSAGE>", "")
+                            if limited:
+                                x = re.sub(r"<(ISREVERSECHARGEAPPLICABLE|TAXADJUSTMENT|GSTADDLNATURE|ISPOSTDATED)>.*?</\1>", "", x)
+                                if "BankAllocations" not in req:
+                                    x = re.sub(r"<BANKALLOCATIONS\.LIST>.*?</BANKALLOCATIONS\.LIST>", "", x)
                             # user-defined fields from a Tally add-on, without the namespace declaration
                             x = x.replace("</NARRATION>", '</NARRATION><UDF:TRANSPORTER.LIST DESC="`Transporter`" ISLIST="YES" TYPE="String" INDEX="30">'
                                           '<UDF:TRANSPORTER DESC="`Transporter`">VRL</UDF:TRANSPORTER></UDF:TRANSPORTER.LIST>', 1)

@@ -2,6 +2,19 @@
 
 Everything that changed in Bahi, newest first. The version is the server version shown in the app under Settings. "Tally PC" is the sync on the PC that runs TallyPrime (Bahi Sync), which updates itself from the server.
 
+## 3.27.0 (18 November 2026)
+
+- **Reverse charge entries now picked up** (GSTR-3B), the way TallyPrime records them:
+  - **The purchase:** expense ledger with reverse charge, no GST on the invoice.
+  - **The liability journal:** F7 Journal, Alt+J Stat Adjustment, Increase of Tax Liability, Purchase Under Reverse Charge, with GST ledgers credited. It goes in 3.1(d).
+  - **The credit journal:** Increase of Input Tax Credit, with GST ledgers debited. It goes in 4(A)(3), even when it doesn't say reverse charge itself, because it uses the same "Tax Paid on RCM" ledger as the liability journal.
+  - **Stat Payment:** the tax paid is counted as paid, not as a supply.
+- **Why it was missed:** changed vouchers (and every voucher, on a Tally whose Day Book ignores dates) were read with a fixed list of fields that left out Tally's reverse-charge, Stat Adjustment and cheque details.
+  - The Tally PC (version 3.21) now also asks Tally for everything it keeps on those vouchers, and the cheque details on bank lines.
+  - Ledgers with RCM or Reverse Charge in their name are recognised too.
+- If a month has reverse-charge purchases but no liability journal yet, GSTR-3B tells you which Tally entry to make.
+- **Re-read once:** after updating, the Tally PC reads all vouchers again once, so entries already synced get their reverse-charge marks.
+
 ## 3.26.0 (17 November 2026)
 
 - **Bill photo on entries:** when you or your staff make a payment, receipt or other entry on the phone, you can take a photo of the bill. The photo shows on the entry under Entries, so the owner sees it before approving.

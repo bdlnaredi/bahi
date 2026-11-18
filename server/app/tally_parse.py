@@ -513,17 +513,29 @@ def cheques_of(v):
     return out[:20]
 
 
-_RCM_TEXT = re.compile(r"reverse\s*charge|unregistered|\bRCM\b", re.I)
+_RCM_TEXT = re.compile(r"reverse\s*charge|\bRCM\b", re.I)
+_RCM_URD = re.compile(r"unregistered", re.I)
 
 
 def is_rcm(v):
-    """Tally marks reverse-charge vouchers: the purchase itself (reverse charge applicable, or an unregistered
-    dealer under RCM), or a GST adjustment journal whose nature names reverse charge or an unregistered dealer."""
+    """Tally marks reverse-charge vouchers in several ways, and the field names differ between releases:
+    - the purchase itself: reverse charge applicable, or an unregistered dealer under RCM (any Yes field whose
+      name says REVERSECHARGE or RCM);
+    - a GST Stat Adjustment journal (Alt+J): Increase of Tax Liability / Increase of Input Tax Credit, with the
+      additional details Purchase Under Reverse Charge (or from an unregistered dealer) - any field naming reverse
+      charge, or a nature/adjustment/details field naming an unregistered dealer."""
     if yes(v, "ISREVERSECHARGEAPPLICABLE") or yes(v, "VCHSTATUSISUNREGISTEREDRCM"):
         return True
     for el in v.iter():
         t = el.tag if isinstance(el.tag, str) else ""
-        if el.text and ("NATURE" in t or "ADJUSTMENT" in t) and _RCM_TEXT.search(el.text):
+        x = (el.text or "").strip()
+        if not x or t in ("NARRATION", "PARTYLEDGERNAME", "LEDGERNAME", "BASICBUYERNAME", "PARTYNAME"):
+            continue
+        if ("REVERSECHARGE" in t or "RCM" in t) and x.lower() == "yes":
+            return True
+        if _RCM_TEXT.search(x) and len(x) < 120:
+            return True
+        if _RCM_URD.search(x) and any(k in t for k in ("NATURE", "ADJUSTMENT", "ADDL", "ADDITIONAL", "DETAILS", "CLASSIFICATION")):
             return True
     return False
 

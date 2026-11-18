@@ -779,7 +779,7 @@ async function vGstr(which, month) {
       ${card("3.1(a) Outward taxable supplies", "Sales with tax, less credit notes", [["Taxable value", d.out.taxable], ...heads(d.out)], d.out_total, "Total tax")}
       ${card("3.1(c) Nil-rated and exempt", "Sales with no GST", [["Value", d.nil]])}
       ${card("3.1(d) Reverse charge (incl. URD purchases)", "Tax you pay yourself on purchases under reverse charge, paid in cash", heads(d.rcm), d.rcm_total, "Total")}
-      ${d.rcm_untaxed.count ? `<p class="hint" style="margin:-4px 4px 12px">${d.rcm_untaxed.count} reverse-charge purchase${d.rcm_untaxed.count > 1 ? "s" : ""} worth ${rupees(d.rcm_untaxed.value)} have no GST posted in Tally yet, so their tax isn't counted. Tally adds it when you record the reverse-charge journal (Journal, Stat Adjustment).</p>` : ""}
+      ${d.rcm_untaxed.count && d.rcm_total < 0.005 ? `<p class="hint" style="margin:-4px 4px 12px">${d.rcm_untaxed.count} reverse-charge purchase${d.rcm_untaxed.count > 1 ? "s" : ""} worth ${rupees(d.rcm_untaxed.value)} this month, but no reverse-charge tax journal yet. Record it in Tally: Journal (F7), Alt+J Stat Adjustment, GST, Increase of Tax Liability, Purchase Under Reverse Charge.</p>` : ""}
       <section class="page g3"><div class="g3h"><b>4. Input tax credit (ITC)</b><span>GST on purchases and expenses this month</span></div>
         <div class="g3head">4(A)(3) Reverse charge</div>${heads(d.itc_rcm).map(([k, v]) => line(k, rupees(v))).join("")}
         <div class="g3head">4(A)(5) All other ITC</div>${heads(d.itc).map(([k, v]) => line(k, rupees(v))).join("")}

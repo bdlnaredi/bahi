@@ -6,7 +6,7 @@
 #         TallySync.ps1 -Target 2  the same sync, to the second server (Settings, "Also sync to"); a run to the
 #                                  first server starts it by itself when one is set
 param([switch]$Force, [switch]$Verbose, [switch]$Now, [int]$Target = 1)
-$AgentVersion = "3.20"
+$AgentVersion = "3.21"
 
 $ErrorActionPreference = "Stop"
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -327,6 +327,30 @@ function Gst-Xml([string]$company, [datetime]$from, [datetime]$to, [string[]]$gu
 function Send-Gst($run, [string]$company, [datetime]$from, [datetime]$to, [string[]]$guids) {
     try { Send-Part $run "gstrate" (Tally-Raw (Gst-Xml $company $from $to $guids)) }
     catch { if ($Verbose) { Log ("GST rates not read: " + $_.Exception.Message) "Gray" } }
+}
+
+# Everything Tally keeps on each voucher itself (reverse charge, Stat Adjustment nature and details, post-dated),
+# whatever Tally names those fields, plus the cheque details on the bank lines. Needed when vouchers come from the
+# voucher collection or one by one (the Day Book already has it all). Separate and optional, like the two above.
+$VchxBank = "GUID, AllLedgerEntries.LedgerName, AllLedgerEntries.Amount, AllLedgerEntries.BankAllocations.InstrumentNumber, " +
+            "AllLedgerEntries.BankAllocations.InstrumentDate, AllLedgerEntries.BankAllocations.TransactionType, " +
+            "AllLedgerEntries.BankAllocations.BankName, AllLedgerEntries.BankAllocations.BankersDate, AllLedgerEntries.BankAllocations.Amount"
+function Vchx-Xml([string]$company, [datetime]$from, [datetime]$to, [string[]]$guids, [bool]$bank) {
+    $sv = Static-Vars $company $from $to
+    $cond = "`$Date &gt;= ##SVFromDate AND `$Date &lt;= ##SVToDate"
+    if ($guids) { $cond = ($guids | ForEach-Object { "`$GUID = `"" + ($_ -replace '[^A-Za-z0-9\-]', '') + "`"" }) -join " OR " }
+    $what = if ($bank) { "<FETCH>$VchxBank</FETCH>" } else { "<NATIVEMETHOD>*</NATIVEMETHOD>" }
+    return "<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>TMVchx</ID></HEADER>" +
+           "<BODY><DESC><STATICVARIABLES>$sv</STATICVARIABLES><TDL><TDLMESSAGE>" +
+           "<COLLECTION NAME=`"TMVchx`" ISMODIFY=`"No`"><TYPE>Voucher</TYPE>$what<FILTER>TMVchxF</FILTER></COLLECTION>" +
+           "<SYSTEM TYPE=`"Formulae`" NAME=`"TMVchxF`">$cond</SYSTEM>" +
+           "</TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>"
+}
+function Send-Vchx($run, [string]$company, [datetime]$from, [datetime]$to, [string[]]$guids) {
+    try { Send-Part $run "vchx" (Tally-Raw (Vchx-Xml $company $from $to $guids $false)) }
+    catch { if ($Verbose) { Log ("Voucher GST details not read: " + $_.Exception.Message) "Gray" } }
+    try { Send-Part $run "vchx" (Tally-Raw (Vchx-Xml $company $from $to $guids $true)) }
+    catch { if ($Verbose) { Log ("Cheque details not read: " + $_.Exception.Message) "Gray" } }
 }
 
 # Every stock item's (or ledger's) balance as Tally has it at the end of one day. The period starts at the
@@ -853,6 +877,7 @@ foreach ($co in $companies) {
                 for ($i = 0; $i -lt $changed.Count; $i += 25) {
                     Send-Einv $run $co.Name $FromDate $ToDate @($changed[$i..([math]::Min($i + 24, $changed.Count - 1))])
                     Send-Gst $run $co.Name $FromDate $ToDate @($changed[$i..([math]::Min($i + 24, $changed.Count - 1))])
+                    Send-Vchx $run $co.Name $FromDate $ToDate @($changed[$i..([math]::Min($i + 24, $changed.Count - 1))])
                 }
                 Log ("Vouchers checked: all " + $changed.Count + " changed voucher(s) received")
                 $sentByVch = $true
@@ -911,7 +936,10 @@ foreach ($co in $companies) {
                 }
             }
             # only a complete month is sent: a short or failed month keeps what the server already has
-            if ($best -and $bestGood) { Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn); Send-Einv $run $co.Name $a $b $null; Send-Gst $run $co.Name $a $b $null; $sentMonths += $key }
+            if ($best -and $bestGood) {
+                Send-Part $run "daybook" $best; $sentTotal += [math]::Max(0, $bestIn); Send-Einv $run $co.Name $a $b $null; Send-Gst $run $co.Name $a $b $null; $sentMonths += $key
+                if ($method -eq "collection") { Send-Vchx $run $co.Name $a $b $null }    # the Day Book has these already
+            }
             else { $short += ("{0}: {1} of {2}{3}" -f $key, [math]::Max(0, $bestIn), $want, $(if ($why) { " (" + $why + ")" } else { "" })) }
         }
         if ($method -ne $script:VchMethod) { try { Set-Content $MethodFile $method } catch {} }

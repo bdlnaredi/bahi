@@ -135,6 +135,7 @@ def gstr1(cid, month):
 
 HEADS = ("IGST", "CGST", "SGST", "Cess")
 CASHBANK = ("|Bank Accounts|", "|Cash-in-Hand|", "|Bank OD A/c|")
+RCM_NAME = re.compile(r"\bRCM\b|reverse\s*charge", re.I)
 
 
 def _z():
@@ -152,6 +153,18 @@ def _tax_3b(c, cid, f, t, led, tax):
     rcm_untaxed = {"count": 0, "value": 0.0}
     vs = store._rows(c, """SELECT id, base, party, extra, amount FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
         AND posting=1 AND status=''""", (cid, f, t))
+    is_cb = lambda n: any(g in ((led.get(n) or {"chain": ""})["chain"] or "") for g in CASHBANK)
+    # the ledgers your reverse-charge journals post against ("Tax paid on RCM", "RCM Payable" ...): a journal that
+    # uses one of them with GST ledgers is reverse charge too (the Increase of Input Tax Credit journal often
+    # carries no reverse-charge mark of its own)
+    rcm_led = set()
+    for r in c.execute("""SELECT vl.ledger FROM vline vl JOIN voucher v ON v.id=vl.voucher_id WHERE v.company_id=?
+            AND v.extra LIKE '%"rcm": true%' AND v.base NOT IN ('Sales','Purchase','Credit Note','Debit Note')""", (cid,)):
+        if r["ledger"] not in tax and not is_cb(r["ledger"]):
+            rcm_led.add(r["ledger"])
+    for n in led:
+        if n not in tax and RCM_NAME.search(n):
+            rcm_led.add(n)
     for v in vs:
         lines = c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],)).fetchall()
         tl = [(tax[x["ledger"]][0], x["amount"]) for x in lines if x["ledger"] in tax]
@@ -160,6 +173,9 @@ def _tax_3b(c, cid, f, t, led, tax):
         except ValueError:
             rcm = False
         base = v["base"]
+        if tl and not rcm and base not in ("Sales", "Purchase", "Credit Note", "Debit Note") and \
+                any(x["ledger"] in rcm_led for x in lines):
+            rcm = True
         if not tl:
             if rcm and base == "Purchase":       # Tally adds this tax with its reverse-charge journal
                 rcm_untaxed["count"] += 1

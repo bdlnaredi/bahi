@@ -54,7 +54,7 @@ APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8780"))
 SESSION_DAYS = 30
-APP_VERSION = "3.26.0"
+APP_VERSION = "3.27.0"
 MAX_PART = 200 * 1024 * 1024
 RUN_RE = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
 
@@ -564,7 +564,7 @@ document.getElementById("a").addEventListener("change", function () {{
         if path == "/agent/part" and method == "POST":
             run, kind = q.get("run", ""), q.get("kind", "")
             if not RUN_RE.match(run) or kind not in ("groups", "vtypes", "ledgers", "stock", "daybook", "bills_rec", "bills_pay",
-                                                             "company", "company_x", "company_tax", "ledger_x", "stock_x", "stockat", "einv", "gstrate", "stock_godown", "ledgerat"):
+                                                             "company", "company_x", "company_tax", "ledger_x", "stock_x", "stockat", "einv", "vchx", "gstrate", "stock_godown", "ledgerat"):
                 return self.send_json({"error": "bad part"}, 400)
             if kind in ("stockat", "ledgerat"):
                 day = q.get("date", "")
@@ -618,6 +618,27 @@ document.getElementById("a").addEventListener("change", function () {{
                     parts["gstrate"].update(tp.parse_gst_rates(tp.parse_xml(raw)))
                 except Exception as e:   # optional: the invoice summary falls back to the voucher's own figures
                     print("GST rates not usable:", e, file=sys.stderr)
+                continue
+            if kind == "vchx":
+                # what Tally keeps on each voucher (reverse charge, Stat Adjustment, post-dated, cheques), sent
+                # apart when vouchers came from the voucher collection or one by one
+                try:
+                    for v in tp.parse_xml(raw).iter("VOUCHER"):
+                        g = (v.findtext("GUID") or "").strip()
+                        if not g:
+                            continue
+                        f_ = {}
+                        if tp.is_rcm(v):
+                            f_["rcm"] = True
+                        if tp.yes(v, "ISPOSTDATED"):
+                            f_["postdated"] = True
+                        ch = tp.cheques_of(v)
+                        if ch:
+                            f_["cheques"] = ch
+                        if f_:
+                            parts["einv"].setdefault(g, {}).update(f_)
+                except Exception as e:   # optional details; the sync goes on without them
+                    print("voucher GST/cheque details not usable:", e, file=sys.stderr)
                 continue
             if kind == "einv":
                 try:
