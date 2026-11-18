@@ -45,8 +45,8 @@ namespace BahiSync
             }
             general = d;
 
-            var t = new FlowLayoutPanel();
-            t.Dock = DockStyle.Fill; t.Padding = new Padding(Ui.S(k, 18)); t.FlowDirection = FlowDirection.TopDown; t.WrapContents = false; t.AutoScroll = true;
+            var t = new StackPage(k);
+            t.Dock = DockStyle.Fill;
             page = t;
 
             var head = new Label(); head.Text = "Companies to sync"; head.AutoSize = true; head.Font = new Font(Font, FontStyle.Bold);
@@ -68,7 +68,7 @@ namespace BahiSync
             // the message line and the buttons stay at the bottom, in view however many companies there are
             status.ForeColor = Color.DimGray;
             save.Text = "Save"; cancel.Text = "Cancel"; refresh.Text = "Look in Tally again";
-            bar = Ui.Bar(k, status, new Control[] { save, cancel, refresh }, out buttons);
+            bar = Ui.Bar(k, status, new Control[] { save, cancel, refresh });
             Controls.Add(t); Controls.Add(bar);
             t.BringToFront();
             AcceptButton = save; CancelButton = cancel;
@@ -91,19 +91,19 @@ namespace BahiSync
         }
 
         float k = 1f;
-        FlowLayoutPanel page, bar, buttons;
+        StackPage page;
+        BottomBar bar;
         Label hint;
 
         /// <summary>Long text wrapped to the window's width; the buttons across the bottom.</summary>
         void Relayout()
         {
             if (page == null || bar == null) return;
-            int w = page.ClientSize.Width - page.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - Ui.S(k, 4);
+            int w = page.LineWidth;
             if (w < Ui.S(k, 240)) w = Ui.S(k, 240);
             if (hint != null) hint.MaximumSize = new Size(w, 0);
-            int bw = Math.Max(Ui.S(k, 240), bar.ClientSize.Width - bar.Padding.Horizontal);
-            status.MaximumSize = new Size(bw, 0);
-            buttons.MinimumSize = new Size(bw, 0);
+            page.PerformLayout();
+            bar.PerformLayout();
         }
 
         protected override void OnShown(EventArgs e)

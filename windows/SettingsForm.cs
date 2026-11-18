@@ -19,7 +19,8 @@ namespace BahiSync
         // laid out to the window's width (see Relayout), so nothing is cut off at any size or Windows scaling
         readonly System.Collections.Generic.List<TextBox> wide = new System.Collections.Generic.List<TextBox>();
         readonly System.Collections.Generic.List<Label> wraps = new System.Collections.Generic.List<Label>();
-        FlowLayoutPanel page, bar, buttons;
+        StackPage page;
+        BottomBar bar;
         float k = 1f;
 
         public SettingsForm(Dictionary<string, object> cfg)
@@ -35,8 +36,8 @@ namespace BahiSync
             Ui.Fit(this, 600, 760, 460, 380);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
-            var t = new FlowLayoutPanel();
-            t.Dock = DockStyle.Fill; t.Padding = new Padding(Ui.S(k, 18)); t.FlowDirection = FlowDirection.TopDown; t.WrapContents = false; t.AutoScroll = true;
+            var t = new StackPage(k);
+            t.Dock = DockStyle.Fill;
             page = t;
 
             AddField(t, "Bahi server address", "The address you open the app with, for example https://books.yourdomain.com", server);
@@ -95,7 +96,7 @@ namespace BahiSync
 
             // the message line and the buttons stay at the bottom, in view however far the page is scrolled
             save.Text = "Save"; cancel.Text = "Cancel"; test.Text = "Test connection";
-            bar = Ui.Bar(k, result, new Control[] { save, cancel, test }, out buttons);
+            bar = Ui.Bar(k, result, new Control[] { save, cancel, test });
             Controls.Add(t); Controls.Add(bar);
             t.BringToFront();                       // the page fills what the bar leaves
             AcceptButton = save; CancelButton = cancel;
@@ -108,7 +109,7 @@ namespace BahiSync
             save.Click += delegate { Save(); };
         }
 
-        void AddField(FlowLayoutPanel t, string label, string hint, TextBox box)
+        void AddField(Control t, string label, string hint, TextBox box)
         {
             var l = new Label(); l.Text = label; l.AutoSize = true; l.Font = new Font(Font, FontStyle.Bold); l.Margin = new Padding(0, Ui.S(k, 10), 0, Ui.S(k, 2));
             var h = new Label(); h.Text = hint; h.AutoSize = true; h.ForeColor = Color.DimGray; h.Margin = new Padding(0, 0, 0, Ui.S(k, 3));
@@ -120,16 +121,14 @@ namespace BahiSync
         void Relayout()
         {
             if (page == null || bar == null) return;
-            int w = page.ClientSize.Width - page.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - Ui.S(k, 4);
+            int w = page.LineWidth;
             if (w < Ui.S(k, 240)) w = Ui.S(k, 240);
             page.SuspendLayout();
             foreach (var b in wide) b.Width = w;
             foreach (var l in wraps) l.MaximumSize = new Size(w, 0);
             tbk.Width = Math.Max(Ui.S(k, 120), w - browse.Width - browse.Margin.Horizontal - tbk.Margin.Horizontal);
-            page.ResumeLayout();
-            int bw = Math.Max(Ui.S(k, 240), bar.ClientSize.Width - bar.Padding.Horizontal);
-            result.MaximumSize = new Size(bw, 0);
-            buttons.MinimumSize = new Size(bw, 0);
+            page.ResumeLayout(true);
+            bar.PerformLayout();
         }
 
         string Server() { return server.Text.Trim().TrimEnd('/'); }
