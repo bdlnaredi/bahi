@@ -15,6 +15,11 @@
   (1) import of goods, (2) import of services, (3) inward supplies liable to reverse charge (the input side of the
   Stat Adjustment journals: Increase in Tax Liability & Input Tax Credit, Increase of Input Tax Credit), (4) inward
   supplies from ISD, (5) all other ITC (purchases, expenses with GST, less purchase returns).
+4(B) ITC reversed: the Stat Adjustment journals that reverse credit (Decrease / Reversal of Input Tax Credit),
+  (1) as per rules 38, 42 and 43 of the CGST Rules and section 17(5), (2) others. 4(C) net ITC = (A) - (B).
+4(D) for information: (1) ITC reclaimed that was reversed under 4(B)(2) earlier (its journal, Increase of Input
+  Tax Credit marked as a reclaim, is in 4(A)(5) too), (2) ineligible ITC under section 16(4) and ITC restricted due
+  to place of supply rules.
 Read-only: nothing here touches Tally."""
 import json
 import os
@@ -151,10 +156,15 @@ def build(cid, month):
     for k in LABELS:
         _add(total, rows[k])
     t4a, total4a = _itc(cid, month)
+    more = _itc_more(cid, month)
+    tb = {h: round(more["b1"][h] + more["b2"][h], 2) for h in HEADS}
+    tc = {h: round(total4a[h] - tb[h], 2) for h in HEADS}
+    t4 = {"b1": more["b1"], "b2": more["b2"], "b": {**tb, "tax": round(sum(tb.values()), 2)},
+          "c": {**tc, "tax": round(sum(tc.values()), 2)}, "d1": more["d1"], "d2": more["d2"]}
     # the check: the credit taken on reverse charge is the tax paid on it in 3.1(d)
     vs_rcm = {"ok": all(abs(t4a["3"][h] - out["d"][h]) <= 1 for h in HEADS)}
     return {"month": month, "from": g["from"], "to": g["to"], "company": g["company"], "t31": out, "total31": _fin(total), "t32": t32, "vs_gstr1": vs_g1,
-            "t4a": t4a, "total4a": total4a, "vs_rcm": vs_rcm,
+            "t4a": t4a, "total4a": total4a, "vs_rcm": vs_rcm, "t4": t4,
             "no_tax_ledgers": g.get("no_tax_ledgers")}
 
 
@@ -170,9 +180,72 @@ def _itc_kind(text, default):
         return "1"
     if "isd" in t or "input service distributor" in t:
         return "4"
+    if "reclaim" in t:
+        return default
     if "reverse charge" in t or "unregistered" in t or "rcm" in t:
         return "3"
     return default
+
+
+def _ineligible(t):
+    t = (t or "").lower()
+    return "16(4)" in t or "16 (4)" in t or "place of supply" in t or re.search(r"\bpos\b", t) is not None or "ineligible" in t
+
+
+def _itc_more(cid, month):
+    """4(B) reversed and 4(D) for information, from the Stat Adjustment journals of the month."""
+    f, t = gstr._month_range(month)
+    rows = {"b1": [], "b2": [], "d1": [], "d2": []}
+    with store.conn() as c:
+        tax, _ = gstr._tax_side(c, cid)
+        vs = store._rows(c, """SELECT id, date, vtype, number, party, extra FROM voucher WHERE company_id=? AND date BETWEEN ? AND ?
+            AND posting=1 AND status='' AND extra LIKE '%tax_adj%' ORDER BY date, id""", (cid, f, t))
+        for v in vs:
+            x = json.loads(v["extra"] or "{}")
+            adj, addl = (x.get("tax_adj") or "").lower(), (x.get("gst_addl") or "").lower()
+            text = adj + " " + addl
+            lines = [(r["ledger"], r["amount"]) for r in c.execute("SELECT ledger, amount FROM vline WHERE voucher_id=?", (v["id"],))]
+            if x.get("gross"):
+                g = {ln for ln, _ in x["gross"]}
+                lines = [l for l in lines if l[0] not in g] + [(ln, a) for ln, a in x["gross"]]
+            tl = [(ln, a) for ln, a in lines if ln in tax]
+            if not tl:
+                continue
+            if "input tax credit" not in adj and not _ineligible(text) and "reclaim" not in text:
+                continue
+            reverse = any(w in adj for w in ("decrease", "reversal", "reverse"))
+            if _ineligible(text):
+                key = "d2"
+            elif "reclaim" in text and not reverse:
+                key = "d1"
+            elif reverse:
+                key = "b1" if re.search(r"\b(38|42|43)\b|17\s*\(5\)", text) else "b2"
+            else:
+                continue
+            heads = {h: 0.0 for h in HEADS}
+            side = [a for _, a in tl if (a < 0 if key in ("b1", "b2") else a > 0)]
+            for ln, a in tl:
+                if key in ("b1", "b2") and a < 0:
+                    heads[tax[ln][0]] += -a       # the input GST ledgers credited: credit reversed
+                elif key == "d1" and a > 0:
+                    heads[tax[ln][0]] += a        # credit taken back
+                elif key == "d2":
+                    if (a < 0) == any(b < 0 for _, b in tl):
+                        heads[tax[ln][0]] += abs(a)
+            if not side and key != "d2" or not any(abs(a) > 0.004 for a in heads.values()):
+                continue
+            r = {"id": v["id"], "date": v["date"], "vtype": v["vtype"], "number": v["number"], "party": v["party"] or "",
+                 "nature": x.get("gst_addl") or x.get("tax_adj") or "", **{h: round(a, 2) for h, a in heads.items()}}
+            r["tax"] = round(sum(heads.values()), 2)
+            rows[key].append(r)
+    labels = {"b1": "As per rules 38, 42 and 43 of CGST Rules and section 17(5)", "b2": "Others",
+              "d1": "ITC reclaimed which was reversed under table 4(B)(2) in an earlier tax period",
+              "d2": "Ineligible ITC under section 16(4) and ITC restricted due to PoS rules"}
+    out = {}
+    for k, lab in labels.items():
+        tot = {h: round(sum(r[h] for r in rows[k]), 2) for h in HEADS}
+        out[k] = {"label": lab, **tot, "tax": round(sum(tot.values()), 2), "count": len(rows[k]), "list": rows[k]}
+    return out
 
 
 def _itc(cid, month):
@@ -333,9 +406,15 @@ def parse_tally(raw):
                 part = "4" + mp.group(1).lower()
                 if part == "4a":
                     key = "4a"
+                elif part in ("4b", "4c"):
+                    key = part
             mn = re.match(r"^(\d)\.\s", lab)
-            if mn and part == "4a":
-                key = "4a" + mn.group(1)
+            if mn and part in ("4a", "4b"):
+                key = part + mn.group(1)
+            if mn and re.search(r"reclaimed", lab, re.I):
+                key = "4d1"
+            elif mn and re.search(r"ineligible", lab, re.I):
+                key = "4d2"
             cur = None
             if key and key not in rows:
                 cur = rows[key] = {"label": lab}
@@ -395,6 +474,8 @@ def with_tally(cid, month):
     targets = [(k, r["t31"][k]) for k in LABELS] + [("total", r["total31"])]
     targets += [(k, r["t32"][k]) for k in KINDS32]
     targets += [("4a" + k, r["t4a"][k]) for k in ITC_LABELS] + [("4a", r["total4a"])]
+    targets += [("4b1", r["t4"]["b1"]), ("4b2", r["t4"]["b2"]), ("4b", r["t4"]["b"]), ("4c", r["t4"]["c"]),
+                ("4d1", r["t4"]["d1"]), ("4d2", r["t4"]["d2"])]
     for k, mine in targets:
         tr = t["rows"].get(k)
         if not tr:

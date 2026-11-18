@@ -140,6 +140,17 @@ def make_vouchers():
                        "narration": "Input credit on freight", "stat": ("Increase of Input Tax Credit", "Purchase Under Reverse Charge")})
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"RP{d.month}", "party": "Output CGST",
                        "ledgers": [("Output CGST", 125.0), ("Output SGST", 125.0), ("HDFC Bank", -250.0)], "narration": "Stat payment, RCM"})
+        if d.day == 22 and d.month == 9:     # input credit reversed: rule 42, and "others" (reclaimed next month)
+            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": "RV1", "party": "Purchase GST 18%",
+                       "ledgers": [("Purchase GST 18%", 120.0), ("Input CGST", -60.0), ("Input SGST", -60.0)],
+                       "narration": "Common credit, exempt share", "stat": ("Reversal of Input Tax Credit", "As per Rule 42 of CGST Rules")})
+            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": "RV2", "party": "Purchase GST 18%",
+                       "ledgers": [("Purchase GST 18%", 80.0), ("Input CGST", -40.0), ("Input SGST", -40.0)],
+                       "narration": "Supplier not paid in 180 days", "stat": ("Reversal of Input Tax Credit", "Others")})
+        if d.day == 10 and d.month == 10:
+            vs.append({"kind": "acct", "date": d, "type": "Journal", "no": "RC1", "party": "Input CGST",
+                       "ledgers": [("Input CGST", 40.0), ("Input SGST", 40.0), ("Purchase GST 18%", -80.0)],
+                       "narration": "Supplier paid", "stat": ("Increase of Input Tax Credit", "Reclaim of ITC reversed earlier")})
         if d.day == 20 and d.month > 4:
             vs.append({"kind": "acct", "date": d, "type": "Payment", "no": f"T{d.month}", "party": "Output CGST",
                        "ledgers": [("Output CGST", 5000.0), ("HDFC Bank", -5000.0)], "narration": "GST challan"})

@@ -544,7 +544,7 @@ Tap a table to see its invoices or rows.
 
 ## GSTR-3B
 
-**Reports, GSTR-3B** shows a month's GSTR-3B, table by table as Tally has it. Tables 3.1, 3.2 and 4(A) are ready; the rest of table 4 comes next.
+**Reports, GSTR-3B** shows a month's GSTR-3B, table by table as Tally has it. Tables 3.1, 3.2 and 4 are ready.
 
 - **3.1(a) Outward taxable supplies:** from the GSTR-1 tables: B2B (taxable sales, not SEZ), B2C (Large), B2C (Small), credit and debit notes, and tax on advances (11A less 11B).
 - **3.1(b) Zero rated:** exports and supplies to SEZ.
@@ -553,6 +553,10 @@ Tap a table to see its invoices or rows.
 - **3.2 Inter-state supplies** to unregistered persons, composition dealers and UIN holders, by place of supply, from the buyer's registration type in Tally.
 
 - **4(A) ITC available**, in its five rows: (1) import of goods, (2) import of services, (3) inward supplies liable to reverse charge, (4) inward supplies from ISD, (5) all other ITC. It is the credit taken in the month: the GST on purchase bills (less purchase returns), on expenses with GST, and the input side of the Stat Adjustment journals (Increase of Input Tax Credit, or Increase in Tax Liability & Input Tax Credit), under the row their Additional Details name. Tap a row to see the vouchers.
+
+- **4(B) ITC reversed:** the Stat Adjustment journals that reverse credit (Reversal or Decrease of Input Tax Credit): (1) as per rules 38, 42 and 43 of the CGST Rules and section 17(5), when their Additional Details say so, and (2) others.
+- **4(C) Net ITC available:** (A) less (B).
+- **4(D) for information:** (1) ITC reclaimed that was reversed under 4(B)(2) earlier (an Increase of Input Tax Credit journal whose Additional Details say reclaim; it's in 4(A)(5) too), and (2) ineligible ITC under section 16(4) and ITC restricted due to place of supply rules (journals whose Additional Details say so).
 
 **Checks:** a line at the top shows ✓ when the tax in 3.1(a) and (b) agrees with GSTR-1's sales tables, and another when 4(A)(3) agrees with 3.1(d). To compare with Tally, open GSTR-3B for the month in Tally, press Alt+F5 for the detailed view, then Alt+E, choose XML (Data Interchange), and upload the file at the bottom of the screen. Each row then shows ✓ or ✗ with Tally's figure.
 
